@@ -1,0 +1,27 @@
+name: Firmware validation
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install platformio==6.2.0
+      - run: sudo apt-get update && sudo apt-get install -y clang libssl-dev
+      - run: pio run
+      - run: python3 tools/run_tests.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: esp32-rev20-firmware
+          path: |
+            .pio/build/esp32-devkitc-32e/firmware.bin
+            .pio/build/esp32-devkitc-32e/bootloader.bin
+            .pio/build/esp32-devkitc-32e/partitions.bin
