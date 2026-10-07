@@ -1,0 +1,8 @@
+{
+  "version": "1.0.0",
+  "board": "esp32-devkitc-32e-rev20",
+  "size": 1099760,
+  "sha256": "4b62043eff2658caf1cc60dd4aa754fafaf9525ea266027616d731cd00e8d6d3",
+  "url": "https://github.com/jeebot678/bitcoin-nixie-clock/releases/download/v1.0.0/firmware.bin",
+  "signature": "qAECNonH8Oz62l2mYD9wuQLUlE03y55Q7HjR7kIeXTk7d2kVIQ8gJqJbRqim+6GG9KpDI4BZf+0eyARA8oiBAH6vi1k33olrAlohqtItAsbhZK1x4ibPtF4xRn9pzpRuQhJr2tH0uG3NOibOMTLy/GlM4bgxxSmfNX2/gs7fXDqPDcpSiqhF+VVQKYGfBJzwaMhFhucJ4L+cjp9i9r9e7cr5m3FUwhG8M3T+r3E6lvxeIrAGbc/szKDWTMKqJ5zXaH4UiY0Kdsin4OfY+ZvQjeASLXDMhdnQB6C8d0DDed2inalNbEawqRVqBXEKzyw7hHOwndglM6m7pKYAIYp7pQ=="
+}
