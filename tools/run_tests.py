@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -45,10 +46,22 @@ def main():
     (build/"key_fixture.h").write_text('const uint8_t otaCaBundle[] asm("_binary_data_cert_x509_crt_bundle_bin_start") = {0};\nconst uint8_t otaPublicKey[] asm("_binary_data_cert_ota_public_pem_start") = {'+','.join(str(v) for v in pub)+'};\n')
     folder=build/"ota";folder.mkdir(exist_ok=True)
     binary=b"\xe9"+bytes(range(256))*20
-    manifest={"version":"1.0.1","board":"esp32-devkitc-32e-rev20","size":len(binary),"sha256":hashlib.sha256(binary).hexdigest(),"url":"https://github.com/jeebot678/bitcoin-nixie-clock/releases/download/v1.0.1/firmware.bin"}
-    canonical=("\n".join(str(manifest[k]) for k in ("version","board","size","sha256","url"))+"\n").encode()
-    manifest["signature"]=base64.b64encode(subprocess.run(["openssl","dgst","-sha256","-sign",str(key)],input=canonical,check=True,capture_output=True).stdout).decode()
-    (folder/"manifest.json").write_text(json.dumps(manifest));(folder/"firmware.bin").write_bytes(binary)
+    current=re.search(r'#define BTC_FIRMWARE_VERSION "([^"]+)"',(ROOT/"include/OtaConfig.h").read_text()).group(1)
+    parts=list(map(int,current.split('.')))
+    for i in (2,1,0):
+        if parts[i]<65535:
+            parts[i]+=1
+            parts[i+1:]=[0]*(2-i)
+            break
+    else:
+        raise ValueError("Firmware version has exhausted its range")
+    candidate='.'.join(map(str,parts))
+    for version,name in ((candidate,"manifest.json"),(current,"current-manifest.json")):
+        manifest={"version":version,"board":"esp32-devkitc-32e-rev20","size":len(binary),"sha256":hashlib.sha256(binary).hexdigest(),"url":f"https://github.com/jeebot678/bitcoin-nixie-clock/releases/download/v{version}/firmware.bin"}
+        canonical=("\n".join(str(manifest[k]) for k in ("version","board","size","sha256","url"))+"\n").encode()
+        manifest["signature"]=base64.b64encode(subprocess.run(["openssl","dgst","-sha256","-sign",str(key)],input=canonical,check=True,capture_output=True).stdout).decode()
+        (folder/name).write_text(json.dumps(manifest))
+    (folder/"firmware.bin").write_bytes(binary)
     openssl_flags=[]
     if sys.platform=="darwin":
         prefix=pathlib.Path(subprocess.check_output(["brew","--prefix","openssl@3"],text=True).strip())

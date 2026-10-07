@@ -16,7 +16,7 @@ std::string readFile(const std::string&path){std::ifstream f(path,std::ios::bina
 #include "key_fixture.h"
 int main(int argc,char**argv){assert(argc==2);std::string folder=argv[1];std::string json=readFile(folder+"/manifest.json"),binary=readFile(folder+"/firmware.bin");
   DynamicJsonDocument doc(4096);assert(!deserializeJson(doc,json));ota::Manifest m;assert(ota::parseManifest(doc.as<JsonVariantConst>(),ota_config::kRepository,0x1E0000,m));assert(verify(m));
-  ota::Manifest bad=m;bad.version="1.0.2";assert(!verify(bad));bad=m;bad.sha256[0]=bad.sha256[0]=='a'?'b':'a';assert(!verify(bad));bad=m;bad.signature[50]=bad.signature[50]=='a'?'b':'a';assert(!verify(bad));
+  ota::Manifest bad=m;bad.version="0.0.0";assert(!verify(bad));bad=m;bad.sha256[0]=bad.sha256[0]=='a'?'b':'a';assert(!verify(bad));bad=m;bad.signature[50]=bad.signature[50]=='a'?'b':'a';assert(!verify(bad));
   WiFi.connection=WL_CONNECTED;
   HttpResponse firmware;firmware.body.assign(binary.begin(),binary.end());httpResponses()[m.url]=firmware;
   assert(install(m)&&Update.activated&&Update.staging==firmware.body);
@@ -31,7 +31,25 @@ int main(int argc,char**argv){assert(argc==2);std::string folder=argv[1];std::st
   firmware.headers["Transfer-Encoding"]="chunked";httpResponses()[m.url]=firmware;Update={};assert(!install(m)&&!Update.activated);
   HttpResponse manifestResponse;manifestResponse.body.assign(json.begin(),json.end());std::string manifestUrl=std::string("https://raw.githubusercontent.com/")+ota_config::kRepository+"/main/ota/manifest.json";httpResponses()[manifestUrl]=manifestResponse;
   ota::Manifest parsed;assert(readManifest(parsed,0x1E0000));manifestResponse.body[0]='[';httpResponses()[manifestUrl]=manifestResponse;assert(!readManifest(parsed,0x1E0000));
+  // Exercise the actual public-check/install path, including persisted retry
+  // suppression, downgrade protection and a correctly signed current version.
+  manifestResponse.body.assign(json.begin(),json.end());httpResponses()[manifestUrl]=manifestResponse;
+  firmware.headers.clear();httpResponses()[m.url]=firmware;prefMock()={};Update={};ESP.restarts=0;
+  assert(ota::newer(m.version.c_str(),ota_config::kVersion));
+  assert(ota::checkAndInstall()&&Update.activated&&ESP.restarts==1);
+  assert(prefMock().strings["btc-ota:attempt"]==m.version.c_str());
+  Update={};httpUrls().clear();assert(ota::checkAndInstall()&&!Update.activated&&ESP.restarts==1&&httpUrls().size()==1);
+  Preferences prefs;prefs.begin("btc-ota",false);prefs.putUInt("attempt-time",uint32_t(time(nullptr))-86401);
+  assert(ota::checkAndInstall()&&Update.activated&&ESP.restarts==2);
+  prefs.putString("highest",m.version.c_str());Update={};httpUrls().clear();
+  assert(ota::checkAndInstall()&&!Update.activated&&ESP.restarts==2&&httpUrls().size()==1);
+  std::string currentJson=readFile(folder+"/current-manifest.json");manifestResponse.body.assign(currentJson.begin(),currentJson.end());httpResponses()[manifestUrl]=manifestResponse;
+  prefMock()={};httpUrls().clear();assert(ota::checkAndInstall()&&!Update.activated&&httpUrls().size()==1);
+  ota::begin();assert(!ota::checkDue(59999,true)&&ota::checkDue(90000,true)&&!ota::checkDue(90000,false));
+  uint32_t nearWrap=UINT32_MAX-100000;ota::defer(nearWrap);
+  assert(!ota::checkDue(nearWrap+ota_config::kCheckIntervalMs-1,true));assert(ota::checkDue(nearWrap+ota_config::kCheckIntervalMs+900000,true));
   bootState=ESP_OTA_IMG_PENDING_VERIFY;ota::begin();ota::healthCheck(29999,true);assert(!bootConfirms);ota::healthCheck(30000,true);assert(bootConfirms==1);ota::healthCheck(90000,false);assert(!bootRollbacks);
+  assert(prefMock().strings["btc-ota:highest"]==ota_config::kVersion);
   bootState=ESP_OTA_IMG_PENDING_VERIFY;ota::begin();ota::healthCheck(90000,false);assert(bootRollbacks==1);
-  std::cout<<"PASS: real OTA code; valid/tampered signatures, checksum, truncated downloads, size, flash failure, disconnection, redirect restrictions, manifest parsing, boot confirmation and rollback\n";
+  std::cout<<"PASS: real OTA code; signatures, checksums, interruption, flash failure, redirects, public check/install, daily retry, downgrade/current version, timer rollover, boot confirmation and rollback\n";
 }
