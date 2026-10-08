@@ -27,8 +27,7 @@ void Provisioning::begin() {
   if (prefs_.getBytesLength("credentials")==sizeof(record) && prefs_.getBytes("credentials",&record,sizeof(record))==sizeof(record) && btc::validStoredCredentials(record)) {
     savedSsid_=record.ssid; savedPassword_=record.password;
   }
-  apPassword_=prefs_.getString("setup-key","");
-  if (apPassword_.length()<12) { apPassword_="btc-"+randomToken().substring(0,12); prefs_.putString("setup-key",apPassword_); }
+  prefs_.remove("setup-key"); // Discard the legacy setup AP password on upgrade.
   WiFi.persistent(false); WiFi.setAutoReconnect(false); WiFi.mode(WIFI_STA); WiFi.setHostname("bitcoin-clock");
   if (btc::validCredentials(savedSsid_.c_str(),savedPassword_.c_str())) connect(savedSsid_,savedPassword_,false);
   else { savedSsid_=""; startPortal(); }
@@ -42,7 +41,7 @@ void Provisioning::startPortal() {
   if (portal_) return;
   WiFi.mode(WIFI_AP_STA); WiFi.softAPConfig(IPAddress(192,168,4,1),IPAddress(192,168,4,1),IPAddress(255,255,255,0));
   char name[40]; snprintf(name,sizeof(name),"BitcoinClock-%06lx",(unsigned long)(ESP.getEfuseMac()&0xFFFFFF));
-  if (!WiFi.softAP(name,apPassword_.c_str(),1,0,2)) { Serial.println("Could not start setup AP"); return; }
+  if (!WiFi.softAP(name,nullptr,1,0,2)) { Serial.println("Could not start setup AP"); return; }
   token_=randomToken();
   const char* headers[]={"Origin"}; web_.collectHeaders(headers,1);
   web_.on("/",HTTP_GET,[this]{root();});
@@ -52,7 +51,7 @@ void Provisioning::startPortal() {
   web_.onNotFound([this]{web_.sendHeader("Location","http://192.168.4.1/",true);web_.send(302,"text/plain","");});
   dns_.start(53,"*",WiFi.softAPIP()); web_.begin(); portal_=true;
   message_="Choose your Wi-Fi network.";
-  Serial.printf("Wi-Fi setup AP: %s\nSetup password: %s\nOpen http://192.168.4.1\n",name,apPassword_.c_str());
+  Serial.printf("Wi-Fi setup AP: %s (no password)\nOpen http://192.168.4.1\n",name);
 }
 void Provisioning::stopPortal() {
   web_.stop(); dns_.stop(); WiFi.scanDelete(); WiFi.softAPdisconnect(true); WiFi.mode(WIFI_STA);

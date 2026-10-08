@@ -33,7 +33,7 @@ The first USB upload installs the bootloader, dual-slot partition table and firm
 
 ## Connect Wi-Fi
 
-At first boot, connect your phone/computer to `BitcoinClock-xxxxxx`. Its unique setup password and `http://192.168.4.1` are printed on the serial monitor; print the password on your finished device's setup label. The page scans networks and also accepts hidden SSIDs. Use a 2.4 GHz open or WPA/WPA2 Personal network.
+At first boot, connect your phone/computer to `BitcoinClock-xxxxxx` **without a password**, then open `http://192.168.4.1` if the setup page does not appear automatically. Enter the password for your home Wi-Fi on that page. The page scans networks and also accepts hidden SSIDs. Use a 2.4 GHz open or WPA/WPA2 Personal network. Upgrading from an older release removes the old setup hotspot password while preserving saved home Wi-Fi credentials.
 
 Enter the Wi-Fi password. Credentials are saved as one atomic NVS record only after a successful connection. Eight seconds later the setup web server, captive DNS and access point stop. Subsequent boots reconnect automatically. A failed saved connection opens setup; an established connection that is lost is retried, with setup reopening after two minutes.
 

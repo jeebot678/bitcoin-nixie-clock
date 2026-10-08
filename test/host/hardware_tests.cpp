@@ -11,6 +11,8 @@ std::map<int,int>pins,modes,adc;std::vector<GpioEvent>gpioEvents;std::vector<Spi
 std::string pageToken(WebServer&web){web.request("/",HTTP_GET);assert(web.statusCode==200);std::string marker="name=\"token\" value=\"";size_t start=web.body.value.find(marker);assert(start!=std::string::npos);return web.body.value.substr(start+marker.size(),32);}
 void provisioningTests(){
   Provisioning p;p.begin();WebServer&web=*servers().back();assert(p.portalActive()&&web.running&&WiFi.ap);
+  assert(WiFi.apSsid.startsWith("BitcoinClock-")&&WiFi.apPassword.isEmpty());
+  assert(!prefMock().strings.count("btc-wifi:setup-key")&&Serial.log.find("(no password)")!=std::string::npos);
   std::string token=pageToken(web);assert(token.size()==32);
   web.request("/connect",HTTP_POST,{{"ssid","home"},{"password","password123"},{"token","bad"}});assert(web.statusCode==403&&!WiFi.beginCalls);
   web.request("/connect",HTTP_POST,{{"ssid","home"},{"password","short"},{"token",token}});assert(web.statusCode==400);
@@ -23,15 +25,16 @@ void provisioningTests(){
   testMillis+=8001;p.loop(testMillis);assert(!p.portalActive()&&!web.running&&!WiFi.ap&&WiFi.currentMode==WIFI_STA);
   WiFi.connection=0;int beginCalls=WiFi.beginCalls;p.loop(testMillis);assert(WiFi.beginCalls>beginCalls);
   testMillis+=30000;p.loop(testMillis);beginCalls=WiFi.beginCalls;testMillis+=30001;p.loop(testMillis);assert(WiFi.beginCalls>beginCalls);
-  testMillis+=60001;p.loop(testMillis);assert(p.portalActive());
+  testMillis+=60001;p.loop(testMillis);assert(p.portalActive()&&WiFi.apPassword.isEmpty());
   p.openSetup();token=pageToken(web);web.request("/connect",HTTP_POST,{{"ssid","new-home"},{"password","password456"},{"token",token}});prefMock().failWrite=true;WiFi.connection=WL_CONNECTED;p.loop(testMillis);assert(!p.online()&&p.portalActive());
   btc::WifiCredentials old;memcpy(&old,prefMock().blobs["btc-wifi:credentials"].data(),sizeof(old));assert(strcmp(old.ssid,"home")==0);prefMock().failWrite=false;
   WiFi.names={String("<script>alert(1)</script>"),String("home")};WiFi.scans=2;web.request("/networks",HTTP_GET);assert(web.statusCode==200);
   p.forget();assert(prefMock().blobs["btc-wifi:credentials"].empty()&&p.portalActive());
   // Reboot with a known-good atomic record skips AP startup entirely.
-  strcpy(old.ssid,"known");strcpy(old.password,"password123");Preferences prefs;prefs.begin("btc-wifi",false);prefs.putBytes("credentials",&old,sizeof(old));WiFi={};
+  strcpy(old.ssid,"known");strcpy(old.password,"password123");Preferences prefs;prefs.begin("btc-wifi",false);prefs.putBytes("credentials",&old,sizeof(old));prefs.putString("setup-key","btc-legacy-key");WiFi={};
   Provisioning rebooted;rebooted.begin();assert(!rebooted.portalActive()&&WiFi.lastSsid=="known");
-  testMillis+=25001;rebooted.loop(testMillis);assert(rebooted.portalActive());
+  assert(!prefMock().strings.count("btc-wifi:setup-key"));
+  testMillis+=25001;rebooted.loop(testMillis);assert(rebooted.portalActive()&&WiFi.apPassword.isEmpty());
 }
 void displayTests(){
   for(int cs:{16,17,21,22,25,26})pins[cs]=LOW;
