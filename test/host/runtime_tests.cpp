@@ -25,11 +25,28 @@ namespace ota {void begin(){}void healthCheck(uint32_t,bool){}bool checkDue(uint
 #undef time
 
 void settingsTests(){
-  pins[0]=HIGH;adc[34]=adc[35]=926;setup();WiFi.connection=WL_CONNECTED;
+  pins[0]=HIGH;adc[34]=adc[35]=926;setup();
+  packets.clear();draw(testMillis);unsigned matrices=0,zeros=0;
+  for(const auto&p:packets){if(p.bus==HSPI)++matrices;else {assert(p.selected==16&&p.bytes[10]==0xC0);++zeros;}}
+  assert(matrices==8&&zeros==1&&nextDrawAt==testMillis+25);
+  testMillis+=100;packets.clear();draw(testMillis);assert(packets.size()==2&&packets[0].selected==16&&packets[1].selected==17);
+  // A request finishing after Wi-Fi loss must not replace the setup animation.
+  guard.price=83300;guard.acceptedAt=testMillis;
+  market::outstanding={market::Kind::Quote,3,1,uint32_t(testEpoch)};market::sent=true;inflight=true;market::complete();
+  packets.clear();processResult(testMillis);assert(packets.empty());guard=btc::PriceGuard{};
+  WebServer&web=*servers().back();web.request("/",HTTP_GET);std::string marker="name=\"token\" value=\"";size_t pos=web.body.value.find(marker);assert(pos!=std::string::npos);
+  web.request("/connect",HTTP_POST,{{"ssid","home"},{"password","password123"},{"token",web.body.value.substr(pos+marker.size(),32)}});
+  assert(wifi.setupState()==btc::WifiSetupState::Connecting);testMillis+=25;packets.clear();draw(testMillis);
+  unsigned nixies=0;for(const auto&p:packets)if(p.bus==VSPI)++nixies;assert(nixies==0&&packets.size()==8);
+  WiFi.connection=WL_CONNECTED;
   wifi.loop(testMillis);schedule(testMillis);assert(market::sent&&market::outstanding.kind==market::Kind::Fx&&market::outstanding.source==1);
+  assert(wifi.setupState()==btc::WifiSetupState::Connected);testMillis+=25;packets.clear();draw(testMillis);
+  for(const auto&p:packets)if(p.bus==VSPI)for(int digit=1;digit<16;++digit)assert(p.bytes[digit]==0x80);
   market::complete();processResult(testMillis);assert(!guard.price);
   testMillis+=501;schedule(testMillis);assert(market::outstanding.kind==market::Kind::Quote&&market::outstanding.source!=1);
   market::complete();processResult(testMillis);assert(guard.price==83300);
+  packets.clear();draw(testMillis);unsigned liveDigits=0;for(const auto&p:packets)if(p.bus==VSPI)++liveDigits;assert(liveDigits==6);
+  testMillis+=8001;wifi.loop(testMillis);assert(!wifi.portalActive());packets.clear();draw(testMillis);assert(!showingSetup&&nextDrawAt==testMillis+1000);
   schedule(testMillis);assert(market::outstanding.kind==market::Kind::History);
   unsigned before=market::calls;
   adc[34]=1800;adc[35]=503;readDials(testMillis);testMillis+=151;readDials(testMillis);

@@ -16,6 +16,7 @@ btc::PriceGuard guard;
 btc::History histories[5];
 market::Result result;
 bool networkReady=false,inflight=false,timeStarted=false;
+bool showingSetup=false;
 uint32_t nextQuoteAt=0,nextDialsAt=0,nextDrawAt=0,lastPriceEpoch=0,lastQuoteReceived=0;
 uint32_t nextHistoryAt[5]={},historyErrors[5]={};
 uint8_t historySource[5]={1,1,1,1,1};
@@ -41,8 +42,8 @@ void readDials(uint32_t now) {
   }
 }
 void diagnostics(uint32_t now) {
-  Serial.printf("Wi-Fi=%s portal=%s clock=%s heap=%u largest=%u refresh=%lu window=%s price=%.2f stale=%s fx=%.6f fxFresh=%s\n",
-    wifi.online()?"connected":"offline",wifi.portalActive()?"on":"off",time(nullptr)>=config::kMinimumEpoch?"synced":"waiting",
+  Serial.printf("Wi-Fi=%s portal=%s setup=%s clock=%s heap=%u largest=%u refresh=%lu window=%s price=%.2f stale=%s fx=%.6f fxFresh=%s\n",
+    wifi.online()?"connected":"offline",wifi.portalActive()?"on":"off",btc::setupStateName(wifi.setupState()),time(nullptr)>=config::kMinimumEpoch?"synced":"waiting",
     ESP.getFreeHeap(),ESP.getMaxAllocHeap(),(unsigned long)config::kRefreshMs[refreshDial.stable],config::kWindowNames[timelineDial.stable],guard.price,
     !guard.price||uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(config::kRefreshMs[refreshDial.stable])?"yes":"no",fx.usd,fx.fresh(now)?"yes":"no");
   for (size_t i=0;i<btc::kSourceCount;++i)
@@ -99,7 +100,8 @@ void processResult(uint32_t now) {
     if (guard.accept(price,source,now)) {
       lastPriceEpoch=result.quote.timestamp?result.quote.timestamp:result.epoch;
       lastQuoteReceived=result.receivedAt;
-      display::price(price); nextDrawAt=now;
+      if (wifi.online()&&!wifi.portalActive()) display::price(price);
+      nextDrawAt=now;
       Serial.printf("%s: BTC/USD %.2f%s\n",btc::kSources[source].name,price,btc::kSources[source].usdt?" (converted from USDT)":"");
     } else { Serial.println("Price awaiting an independent confirmation"); nextQuoteAt=now+500; }
   }
@@ -132,15 +134,27 @@ void schedule(uint32_t now) {
   }
 }
 void draw(uint32_t now) {
+  bool setupDisplay=wifi.portalActive()||!wifi.online();
+  if (setupDisplay!=showingSetup) { showingSetup=setupDisplay; nextDrawAt=now; }
   if (!btc::due(now,nextDrawAt)) return;
-  nextDrawAt=now+1000;
+  nextDrawAt=now+(setupDisplay?config::kSetupFrameMs:1000);
   if (testEndsAt && !btc::due(now,testEndsAt)) { display::selfTest(uint8_t((4500-(testEndsAt-now))/750)); return; }
   testEndsAt=0;
   bool stale=!guard.price || uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(config::kRefreshMs[refreshDial.stable]);
+  if (setupDisplay) {
+    display::setupStatus(wifi.setupState(),now);
+    if (!wifi.online()) display::setupZero(now);
+    else if (stale) display::blankPrice();
+    else display::price(guard.price);
+    return;
+  }
   if (stale) display::blankPrice(); else display::price(guard.price);
   uint32_t epoch=uint32_t(time(nullptr));
   auto chart=btc::makePlot(histories[timelineDial.stable],epoch,config::kWindowSeconds[timelineDial.stable],guard.price,lastPriceEpoch);
-  if (chart.valid) display::plot(chart); else display::status(wifi.portalActive(),true);
+  if (chart.valid) display::plot(chart);
+  else if (epoch<config::kMinimumEpoch) display::message("SYNC","CLOCK",now);
+  else if (!guard.price) display::message("FETCH","PRICE",now);
+  else display::offline();
 }
 }
 void setup() {

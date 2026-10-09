@@ -37,7 +37,9 @@ At first boot, connect your phone/computer to `BitcoinClock-xxxxxx` **without a 
 
 Enter the Wi-Fi password. Credentials are saved as one atomic NVS record only after a successful connection. Eight seconds later the setup web server, captive DNS and access point stop. Subsequent boots reconnect automatically. A failed saved connection opens setup; an established connection that is lost is retried, with setup reopening after two minutes.
 
-Hold the ESP32 BOOT button for five seconds while running to reopen setup. Serial commands at 115200 baud are `status`, `dials`, `setup`, `wifi-reset`, `selftest` and `reboot`. `wifi-reset` removes saved Wi-Fi credentials. `selftest` lights the six LED grids in order. A plus sign on an otherwise empty matrix indicates setup; an X indicates that no usable chart/price has arrived.
+The matrix shows `CONNECT` above `WIFI` while waiting for setup. A single zero runs across the six Nixies at 100 ms per tube; the previous tube turns off first. During setup the matrix reports `CONNECTING`, `CONNECTED`, or a Wi-Fi/save/AP error. Long words scroll to fit the 21-column display. The animation stops when Wi-Fi connects, and current prices replace it as they arrive. The chart returns when setup closes. Clock synchronization and initial price fetching also have text status messages.
+
+Hold the ESP32 BOOT button for five seconds while running to reopen setup. Serial commands at 115200 baud are `status`, `dials`, `setup`, `wifi-reset`, `selftest` and `reboot`. `wifi-reset` removes saved Wi-Fi credentials. `selftest` lights the six LED grids in order. An X indicates that no usable chart has arrived after a price is available. The standalone all-LED demo is preserved in `demo/matrix_all_on/`; its separate PlatformIO configuration cannot replace the live build artifacts.
 
 Prices require an SNTP-synchronized clock and certificate-verified HTTPS. Nixies blank after an extended quote outage, instead of presenting an old value as current. Values that would round beyond 999999 also blank, because six tubes cannot represent seven digits. A chart can retain dated historical points during an outage.
 
@@ -52,7 +54,7 @@ Keep and back up `secrets/ota-signing-key.pem` privately. Only `data/cert/ota-pu
 To publish a future update from a clean `main` checkout after committing your code changes:
 
 ```sh
-python3 tools/publish_release.py --version 1.0.1
+python3 tools/publish_release.py --version 1.0.3
 ```
 
 That command builds, runs the host tests, signs locally, pushes the versioned source, publishes the firmware release, then pushes the signed rollout manifest to `main`. The signing key is never sent to GitHub. Price polling pauses during the shared worker's update download; the loop and rotary inputs continue running.
@@ -64,8 +66,8 @@ pio run
 python3 tools/run_tests.py
 ```
 
-The host tests compile the actual provisioning, display, application-loop and OTA code with modeled hardware/network/flash and address/undefined-behavior sanitizers. They cover all eleven live quote fixtures, both history providers at five scales, dial noise/debounce, rollover, currency conversion, stale data, Nixie packet bytes, LED chain ordering, Wi-Fi errors/reconnection/persistence, OTA signatures/corruption/interruption/flash failure, and boot rollback decisions. A two-hour simulated runtime crosses the `millis()` wrap and injects rate-limit failures. OpenSSL independently supplies the host crypto adapter; ESP32 builds use mbedTLS. CI repeats the build and host suites on `main` and pull requests.
+The host tests compile the actual provisioning, display, application-loop and OTA code with modeled hardware/network/flash and address/undefined-behavior sanitizers. They cover all eleven live quote fixtures, both history providers at five scales, dial noise/debounce, rollover, currency conversion, stale data, Nixie packet bytes, setup text/scrolling and single-zero chase timing, LED chain ordering, Wi-Fi errors/reconnection/persistence, OTA signatures/corruption/interruption/flash failure, and boot rollback decisions. A two-hour simulated runtime crosses the `millis()` wrap and injects rate-limit failures. OpenSSL independently supplies the host crypto adapter; ESP32 builds use mbedTLS. CI repeats the build and host suites on `main` and pull requests.
 
-Endpoint probes are low-volume public requests, not load tests. `test/live_probe_report.json` records verification time, status and response headers. `docs/SOURCES.md` records official quota and freshness documentation. No ESP32 clock was attached during development, so ADC calibration, real Wi-Fi/TLS memory use, tube/LED appearance and actual power-loss/bootloader rollback remain device acceptance checks in `docs/DEVICE_ACCEPTANCE.md`.
+Endpoint probes are low-volume public requests, not load tests. `test/live_probe_report.json` records verification time, status and response headers. `docs/SOURCES.md` records official quota and freshness documentation. Firmware has been USB-flashed to the attached ESP32 with esptool hash verification. ADC calibration, real Wi-Fi/TLS memory use, visible tube/LED appearance and actual power-loss/bootloader rollback still require the device acceptance checks in `docs/DEVICE_ACCEPTANCE.md`.
 
 After publishing, `python3 tools/verify_deployment.py` independently verifies the public `main` manifest signature and downloaded release image, using the firmware's HTTP mode, redirect hosts and Mozilla certificate roots. `python3 tools/probe_sources.py --history` refreshes the public market fixtures with five-second spacing between requests to the same provider; the excluded Bybit endpoint remains a geographic-access diagnostic.

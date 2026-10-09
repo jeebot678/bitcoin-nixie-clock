@@ -35,13 +35,14 @@ void Provisioning::begin() {
 void Provisioning::connect(const String& ssid,const String& password,bool pending) {
   WiFi.disconnect(false,false); WiFi.begin(ssid.c_str(),password.c_str());
   trying_=true; pending_=pending; attemptAt_=millis(); closeAt_=0;
+  setupState_=btc::WifiSetupState::Connecting;
   message_="Connecting to your Wi-Fi…";
 }
 void Provisioning::startPortal() {
   if (portal_) return;
   WiFi.mode(WIFI_AP_STA); WiFi.softAPConfig(IPAddress(192,168,4,1),IPAddress(192,168,4,1),IPAddress(255,255,255,0));
   char name[40]; snprintf(name,sizeof(name),"BitcoinClock-%06lx",(unsigned long)(ESP.getEfuseMac()&0xFFFFFF));
-  if (!WiFi.softAP(name,nullptr,1,0,2)) { Serial.println("Could not start setup AP"); return; }
+  if (!WiFi.softAP(name,nullptr,1,0,2)) { setupState_=btc::WifiSetupState::ApFailed; Serial.println("Could not start setup AP"); return; }
   token_=randomToken();
   const char* headers[]={"Origin"}; web_.collectHeaders(headers,1);
   web_.on("/",HTTP_GET,[this]{root();});
@@ -50,7 +51,8 @@ void Provisioning::startPortal() {
   web_.on("/networks",HTTP_GET,[this]{networks();});
   web_.onNotFound([this]{web_.sendHeader("Location","http://192.168.4.1/",true);web_.send(302,"text/plain","");});
   dns_.start(53,"*",WiFi.softAPIP()); web_.begin(); portal_=true;
-  message_="Choose your Wi-Fi network.";
+  setupState_=trying_?btc::WifiSetupState::Connecting:btc::WifiSetupState::Waiting;
+  message_=trying_?"Connecting to your Wi-Fi…":"Choose your Wi-Fi network.";
   Serial.printf("Wi-Fi setup AP: %s (no password)\nOpen http://192.168.4.1\n",name);
 }
 void Provisioning::stopPortal() {
@@ -88,6 +90,8 @@ void Provisioning::networks() {
 void Provisioning::openSetup() {
   WiFi.disconnect(false,false); trying_=pending_=wasOnline_=false; manual_=true;
   pendingSsid_=""; pendingPassword_=""; closeAt_=0; startPortal();
+  setupState_=portal_?btc::WifiSetupState::Waiting:btc::WifiSetupState::ApFailed;
+  message_="Choose your Wi-Fi network.";
 }
 void Provisioning::forget() {
   prefs_.remove("credentials"); savedSsid_=""; savedPassword_=""; openSetup();
@@ -103,6 +107,7 @@ void Provisioning::loop(uint32_t now) {
       if (prefs_.putBytes("credentials",&record,sizeof(record))!=sizeof(record)) {
         WiFi.disconnect(false,false); trying_=pending_=false;
         pendingSsid_=""; pendingPassword_="";
+        setupState_=btc::WifiSetupState::SaveFailed;
         message_="Could not save Wi-Fi. Please try connecting again.";
         return;
       }
@@ -110,6 +115,7 @@ void Provisioning::loop(uint32_t now) {
     }
     if (!wasOnline_) { Serial.printf("Wi-Fi connected, IP %s\n",WiFi.localIP().toString().c_str()); wasOnline_=true; }
     trying_=false; manual_=false; disconnectedAt_=0; message_="Connected! Setup will close automatically.";
+    setupState_=btc::WifiSetupState::Connected;
     if (portal_ && !closeAt_) closeAt_=now+8000;
     if (portal_ && btc::due(now,closeAt_)) stopPortal();
     return;
@@ -118,8 +124,10 @@ void Provisioning::loop(uint32_t now) {
   if (wasOnline_) { wasOnline_=false; disconnectedAt_=now; retryAt_=now; }
   if (trying_ && uint32_t(now-attemptAt_)>=config::kConnectTimeoutMs) {
     trying_=false; WiFi.disconnect(false,false); retryAt_=now+30000;
-    if (pending_) { pending_=false; pendingSsid_=""; pendingPassword_=""; message_="Could not connect. Check the password and choose a 2.4 GHz network."; }
+    if (pending_) { pending_=false; pendingSsid_=""; pendingPassword_=""; }
     if (!portal_ && !disconnectedAt_) startPortal();
+    if (setupState_!=btc::WifiSetupState::ApFailed) setupState_=btc::WifiSetupState::ConnectionFailed;
+    message_="Could not connect. Check the password and choose a 2.4 GHz network.";
   }
   if (!manual_ && !trying_ && !savedSsid_.isEmpty() && btc::due(now,retryAt_)) connect(savedSsid_,savedPassword_,false);
   if (!manual_ && disconnectedAt_ && uint32_t(now-disconnectedAt_)>=config::kRecoveryApMs) startPortal();
