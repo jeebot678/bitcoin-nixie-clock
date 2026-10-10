@@ -1,8 +1,8 @@
 {
-  "version": "1.0.3",
+  "version": "1.0.5",
   "board": "esp32-devkitc-32e-rev20",
-  "size": 1107440,
-  "sha256": "03a9c7992d770f33007c6ddeaa63bed27207f22768dba343110d380e186f9469",
-  "url": "https://github.com/jeebot678/bitcoin-nixie-clock/releases/download/v1.0.3/firmware.bin",
-  "signature": "FB2cUK8n2pGH5oxpXLdxvq/NqrQN/AcMPOxzqx9QGm1aH/qCny1HaxCgnOghvxBTwfUzoIsNCXB8+ltjJfyJWx0XSSM2cYlSpKpmrS4W66Sw6CgpYLN2jiHJ1fmWXCBSfrDl9fA0zLJWvdnXlTyGBPJHOn4O8yWdzldW8t+rWftJ78Xhn2JDefLSCoB2YsfEdOfqw4kGfGAN+FH7bE4KjiAQ/7WsZhhwKdzGt1hX8VpmSxpAOpLOyqilpP0AKP1L51VxuNHzFjMA/eNxb1y29+PFFAVawSljsB1E9o80y5715gNtTfJO903geLuwLxMOKY8hOFkZKakGasoXP1cIPg=="
+  "size": 1148992,
+  "sha256": "2201ca3a2307f1365a94bee8b721d0fbaefd9ec0677df97752ae739f574d83e5",
+  "url": "https://github.com/jeebot678/bitcoin-nixie-clock/releases/download/v1.0.5/firmware.bin",
+  "signature": "LCfQZTJ5QVhLYObUQX6VV22wiPv0nEK7awyQOgO16j0i1PVRIYwD7CrExC9vVrzyDhY6gapcirevoOypIagAeFVX+SQ8bq1fuwmGoU6dhVMk5L3JJQLMp99MDf046CTas5HE0+IgNUhNDwMu2HEZLs+EljzTF442qObGhGTFer6l5p9TjkMhfLLqTstqulCPwwEpnB5Ucy16YKszq9LjIpIS+4bblRbqBnliNnZbLk3/ranlnKLPwZ8jsqTps3TEtVvp7f13w6r7L2S1/Oy20EJakQRxZNKLls/f70OLT9xHGFOXDcUjJXW/9i1fdzpI55U0U6ZTpYaC8KjxVCunMw=="
 }
