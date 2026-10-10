@@ -8,6 +8,7 @@
 #include "WifiCredentials.h"
 #include "LedMatrixMap.h"
 #include "MatrixText.h"
+#include <ArduinoJson.h>
 
 SerialMock Serial;EspMock ESP;WifiMock WiFi;uint32_t testMillis=100;
 std::map<int,int>pins,modes,adc;std::vector<GpioEvent>gpioEvents;std::vector<SpiPacket>packets;
@@ -18,10 +19,27 @@ void provisioningTests(){
   assert(WiFi.apSsid.startsWith("BitcoinClock-")&&WiFi.apPassword.isEmpty());
   assert(!prefMock().strings.count("btc-wifi:setup-key")&&Serial.log.find("(no password)")!=std::string::npos);
   std::string token=pageToken(web);assert(token.size()==32);
+  assert(web.body.value.find("<select id=\"network\"")!=std::string::npos&&web.body.value.find("<datalist")==std::string::npos);
+  assert(WiFi.scanMethod==WIFI_ALL_CHANNEL_SCAN&&WiFi.sortMethod==WIFI_CONNECT_AP_BY_SIGNAL);
+  web.request("/networks",HTTP_GET);assert(web.statusCode==200&&WiFi.scanCalls==1&&web.body.value.find("scanning")!=std::string::npos);
+  web.request("/networks",HTTP_GET);assert(WiFi.scanCalls==1); // polling doesn't restart the scan
+  WiFi.names={String("home"),String("home"),String("open cafe"),String(""),String("<script>alert(1)</script>")};
+  WiFi.strengths={-80,-41,-65,-30,-55};WiFi.securities={3,7,0,3,3};WiFi.channels={1,11,6,1,3};WiFi.scans=5;
+  web.request("/networks",HTTP_GET);StaticJsonDocument<2048> found;assert(!deserializeJson(found,web.body.c_str()));
+  JsonArray list=found["networks"].as<JsonArray>();assert(list.size()==3);
+  assert(strcmp(list[0]["ssid"],"home")==0&&list[0]["rssi"]==-41&&list[0]["channel"]==11&&list[0]["secured"]==true);
+  assert(strcmp(list[1]["ssid"],"<script>alert(1)</script>")==0&&strcmp(list[2]["ssid"],"open cafe")==0&&list[2]["secured"]==false);
+  // Dense environments aren't truncated at the previous twenty-network limit.
+  WiFi.names.clear();WiFi.strengths.clear();WiFi.securities.clear();WiFi.channels.clear();
+  for(int i=0;i<50;++i)WiFi.names.push_back(String("network-")+String(unsigned(i)));WiFi.scans=50;
+  web.request("/networks",HTTP_GET);DynamicJsonDocument dense(16384);assert(!deserializeJson(dense,web.body.c_str())&&dense["networks"].size()==50);
+  web.request("/networks",HTTP_GET,{{"refresh","1"}});assert(WiFi.scanCalls==2&&WiFi.scans==WIFI_SCAN_RUNNING);
   web.request("/connect",HTTP_POST,{{"ssid","home"},{"password","password123"},{"token","bad"}});assert(web.statusCode==403&&!WiFi.beginCalls);
   web.request("/connect",HTTP_POST,{{"ssid","home"},{"password","short"},{"token",token}});assert(web.statusCode==400);
   web.request("/connect",HTTP_POST,{{"ssid","home"},{"password","password123"},{"token",token}},{{"Origin","https://evil.com"}});assert(web.statusCode==403);
   web.request("/connect",HTTP_POST,{{"ssid","home"},{"password","wrongpass"},{"token",token}});assert(web.statusCode==202&&WiFi.lastSsid=="home");
+  assert(WiFi.scanStops==1&&WiFi.minSecurity==WIFI_AUTH_WPA2_PSK);
+  int scanCalls=WiFi.scanCalls;web.request("/networks",HTTP_GET,{{"refresh","1"}});assert(WiFi.scanCalls==scanCalls&&web.body.value.find("busy")!=std::string::npos);
   assert(p.setupState()==btc::WifiSetupState::Connecting);
   testMillis+=25001;p.loop(testMillis);assert(p.portalActive()&&prefMock().blobs["btc-wifi:credentials"].empty());web.request("/status",HTTP_GET);assert(web.body.value.find("Could not connect")!=std::string::npos);
   assert(p.setupState()==btc::WifiSetupState::ConnectionFailed);
@@ -38,8 +56,11 @@ void provisioningTests(){
   assert(p.setupState()==btc::WifiSetupState::SaveFailed);
   btc::WifiCredentials old;memcpy(&old,prefMock().blobs["btc-wifi:credentials"].data(),sizeof(old));assert(strcmp(old.ssid,"home")==0);prefMock().failWrite=false;
   WiFi.names={String("<script>alert(1)</script>"),String("home")};WiFi.scans=2;web.request("/networks",HTTP_GET);assert(web.statusCode==200);
+  WiFi.scans=WIFI_SCAN_FAILED;WiFi.failScan=true;web.request("/networks",HTTP_GET);assert(web.statusCode==503&&web.body.value.find("Could not scan")!=std::string::npos);WiFi.failScan=false;
   p.forget();assert(prefMock().blobs["btc-wifi:credentials"].empty()&&p.portalActive());
   assert(p.setupState()==btc::WifiSetupState::Waiting);
+  token=pageToken(web);web.request("/connect",HTTP_POST,{{"ssid","open cafe"},{"password",""},{"token",token}});assert(web.statusCode==202&&WiFi.minSecurity==WIFI_AUTH_OPEN);
+  p.openSetup();web.request("/connect",HTTP_POST,{{"ssid","home"},{"password","password123"},{"token",token}});assert(web.statusCode==202&&WiFi.minSecurity==WIFI_AUTH_WPA2_PSK);p.forget();
   // Reboot with a known-good atomic record skips AP startup entirely.
   strcpy(old.ssid,"known");strcpy(old.password,"password123");Preferences prefs;prefs.begin("btc-wifi",false);prefs.putBytes("credentials",&old,sizeof(old));prefs.putString("setup-key","btc-legacy-key");WiFi={};
   Provisioning rebooted;rebooted.begin();assert(!rebooted.portalActive()&&WiFi.lastSsid=="known");

@@ -33,6 +33,7 @@ def main():
         ("core_tests",["test/host/core_tests.cpp"],["test/live_fixtures",str(epoch)]),
         ("hardware_tests",["test/host/hardware_tests.cpp","src/Display.cpp","src/Provisioning.cpp"],[]),
         ("runtime_tests",["test/host/runtime_tests.cpp","src/Display.cpp","src/Provisioning.cpp"],[]),
+        ("market_tests",["test/host/market_tests.cpp"],["test/live_fixtures",str(epoch)]),
     ]:
         run(flags+sources+["-o",build/name]);run([build/name]+args)
     # CI uses an ephemeral key; local testing uses the real signing key when
@@ -68,10 +69,13 @@ def main():
         openssl_flags=["-I"+str(prefix/"include"),"-L"+str(prefix/"lib")]
     run(flags+["-Itest/.build"]+openssl_flags+["test/host/ota_tests.cpp","-lcrypto","-o",build/"ota_tests"])
     run([build/"ota_tests",folder])
+    run(flags+["-Itest/host/tls"]+openssl_flags+["test/host/tls_tests.cpp","-lcrypto","-o",build/"tls_tests"])
+    run([build/"tls_tests"])
     if shutil.which("node"):
         text=(ROOT/"src/Provisioning.cpp").read_text();script=text.split("<script>",1)[1].split("</script>",1)[0]
         (build/"portal.js").write_text(script);run(["node","--check",build/"portal.js"])
-    print("PASS: all sanitized host suites and portal JavaScript syntax")
+        run(["node","test/host/portal_tests.cjs",build/"portal.js"])
+    print("PASS: all sanitized host suites and portal JavaScript behavior")
 
 
 if __name__=="__main__":

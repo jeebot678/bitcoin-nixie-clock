@@ -47,6 +47,13 @@ void fetch(const market::Request& request) {
   if (request.kind==market::Kind::Ota) { response.ok=ota::checkAndInstall();return; }
   String url;
   bool history=request.kind==market::Kind::History;
+  // Reserve the contiguous JSON pool before TLS fragments the ESP32 heap.
+  // Short chart windows use a smaller pool than the one-year history.
+  DynamicJsonDocument document(history ? btc::historyCapacity(request.source==2,request.window) : 8192);
+  if (!document.capacity()) {
+    Serial.printf("Market JSON allocation failed: %u free; largest %u\n",ESP.getFreeHeap(),ESP.getMaxAllocHeap());
+    return;
+  }
   if (!history) url=btc::kSources[request.source].url;
   else {
     uint32_t interval=config::kCandleSeconds[request.window];
@@ -81,7 +88,6 @@ void fetch(const market::Request& request) {
     // when the ticker itself has no price timestamp.
     if (!cached && btc::freshTimestamp(serverDate,response.epoch,20)) {
       BoundedReader reader(*http.getStreamPtr(),history ? 160000 : 8192);
-      DynamicJsonDocument document(history ? 81920 : 8192);
       if (document.capacity()) {
         DeserializationError error;
         if (history) {
@@ -94,7 +100,7 @@ void fetch(const market::Request& request) {
           response.ok=history ? btc::parseHistory(document.as<JsonVariantConst>(),request.source==2,request.window,response.epoch,response.history)
                               : btc::parseQuote(btc::kSources[request.source].provider,document.as<JsonVariantConst>(),response.epoch,response.quote);
           if (!response.ok) { int code=apiError(document.as<JsonVariantConst>()); if (code) response.status=code; }
-        }
+        } else Serial.printf("%s JSON failed: %s\n",btc::kSources[request.source].name,error.c_str());
       }
     }
   }

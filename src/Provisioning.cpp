@@ -1,6 +1,8 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <esp_system.h>
+#include <esp_wifi.h>
+#include <vector>
 #include "Provisioning.h"
 #include "ClockCore.h"
 #include "WifiCredentials.h"
@@ -11,14 +13,22 @@ String randomToken() {
   return String(buffer);
 }
 const char kPage[] PROGMEM = R"HTML(<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bitcoin Clock · Wi-Fi setup</title>
-<style>body{font:17px system-ui;background:#131619;color:#f2f3f4;margin:0;padding:32px 20px}main{max-width:440px;margin:auto}h1{font-size:28px}label{display:block;margin-top:24px}input,button{box-sizing:border-box;width:100%;padding:14px;border-radius:8px;border:1px solid #667079;font:inherit}input{background:#20262c;color:white;margin-top:8px}button{background:#ffc16b;color:#15181b;font-weight:650;margin-top:26px;border:0}button:disabled{opacity:.6}p{line-height:1.5}#message{min-height:52px}.muted{color:#b6bdc4;font-size:15px}</style>
+<style>body{font:17px system-ui;background:#131619;color:#f2f3f4;margin:0;padding:32px 20px}main{max-width:440px;margin:auto}h1{font-size:28px}label{display:block;margin-top:24px}input,select,button{box-sizing:border-box;width:100%;padding:14px;border-radius:8px;border:1px solid #667079;font:inherit}input,select{background:#20262c;color:white;margin-top:8px}button{background:#ffc16b;color:#15181b;font-weight:650;margin-top:26px;border:0}button:disabled{opacity:.6}button.secondary{background:#20262c;color:#f2f3f4;border:1px solid #667079;margin-top:8px}p{line-height:1.5}#message{min-height:52px}.muted{color:#b6bdc4;font-size:15px}[hidden]{display:none!important}</style>
 <main><h1>Connect your Bitcoin Clock</h1><p>Choose a 2.4 GHz Wi-Fi network. Once connected, the clock will close this setup network and display live Bitcoin prices.</p>
-<form id="wifi" method="post" action="/connect"><input type="hidden" name="token" value="{{TOKEN}}"><label for="ssid">Wi-Fi network</label><input id="ssid" name="ssid" list="networks" maxlength="32" required autocomplete="off"><datalist id="networks"></datalist>
-<label for="password">Wi-Fi password</label><input id="password" name="password" type="password" maxlength="64" autocomplete="new-password"><p class="muted">Leave the password empty for an open network. Hidden networks can be typed manually.</p><button id="connect" type="submit">Connect</button></form><p id="message" role="status" aria-live="polite"></p></main>
-<script>const form=document.getElementById('wifi'),message=document.getElementById('message'),button=document.getElementById('connect');let waiting=false;
-form.addEventListener('submit',async e=>{e.preventDefault();button.disabled=true;message.textContent='Connecting…';try{const r=await fetch('/connect',{method:'POST',body:new URLSearchParams(new FormData(form))});const d=await r.json();message.textContent=d.message;waiting=r.ok;if(!r.ok)button.disabled=false;}catch(e){message.textContent='Reconnect to the clock setup network and try again.';button.disabled=false;}});
-setInterval(async()=>{if(!waiting)return;try{const d=await(await fetch('/status',{cache:'no-store'})).json();message.textContent=d.message;if(d.connected){waiting=false;message.textContent='Connected! Your clock is now fetching live Bitcoin prices. You can close this page.';}else if(!d.connecting){waiting=false;button.disabled=false;}}catch(e){}},1000);
-async function scan(){try{const d=await(await fetch('/networks')).json();if(d.scanning){setTimeout(scan,1500);return;}for(const network of d.networks){const o=document.createElement('option');o.value=network.ssid;document.getElementById('networks').append(o);}}catch(e){}}scan();</script></html>)HTML";
+<form id="wifi" method="post" action="/connect"><input id="token" type="hidden" name="token" value="{{TOKEN}}"><input id="ssid" type="hidden" name="ssid">
+<label for="network">Wi-Fi network</label><select id="network" required disabled><option value="">Searching for networks…</option></select><p id="scan-message" class="muted" role="status" aria-live="polite">Searching for nearby 2.4 GHz Wi-Fi networks…</p><button id="rescan" class="secondary" type="button" disabled>Scan again</button>
+<div id="manual" hidden><label for="manual-ssid">Network name</label><input id="manual-ssid" maxlength="32" autocomplete="off"><p class="muted">Enter the exact name of a hidden or unlisted network.</p></div>
+<div id="password-field" hidden><label for="password">Wi-Fi password</label><input id="password" name="password" type="password" minlength="8" maxlength="64" autocomplete="new-password" disabled><p class="muted">The clock remembers your Wi-Fi after it connects. No username is needed.</p></div>
+<button id="connect" type="submit" disabled>Connect</button></form><p id="message" role="status" aria-live="polite"></p></main>
+<script>const byId=id=>document.getElementById(id),form=byId('wifi'),message=byId('message'),button=byId('connect'),picker=byId('network'),ssid=byId('ssid'),password=byId('password'),manual=byId('manual'),manualSsid=byId('manual-ssid'),passwordField=byId('password-field'),rescan=byId('rescan'),scanMessage=byId('scan-message');let waiting=false,completed=false,scanning=true,scanTimer=null,networks=[],secured=false;
+function controls(){const locked=waiting||completed;picker.disabled=locked||scanning;rescan.disabled=locked||scanning;manualSsid.disabled=locked;password.disabled=locked||!secured;button.disabled=locked||scanning||!ssid.value;}
+function choose(clearPassword=true){const hidden=picker.value==='manual',network=networks[Number(picker.value.slice(1))];manual.hidden=!hidden;manualSsid.required=hidden;ssid.value=hidden?manualSsid.value:(picker.value&&network?network.ssid:'');secured=hidden||!!(ssid.value&&network&&network.secured);passwordField.hidden=!secured;password.required=secured;if(clearPassword||!secured)password.value='';controls();}
+picker.addEventListener('change',()=>choose());manualSsid.addEventListener('input',()=>choose(false));
+function option(label,value){const o=document.createElement('option');o.textContent=label;o.value=value;picker.append(o);}
+async function scan(refresh=false){if(waiting||completed)return;scanning=true;controls();scanMessage.textContent='Searching for nearby 2.4 GHz Wi-Fi networks…';try{const r=await fetch('/networks'+(refresh?'?refresh=1':''),{cache:'no-store'}),d=await r.json();if(!r.ok)throw new Error(d.message||'Scan failed. Try again.');if(waiting||completed)return;if(d.scanning||d.busy){scanTimer=setTimeout(()=>scan(),1200);return;}const previous=ssid.value,wasManual=picker.value==='manual';networks=d.networks;picker.replaceChildren();option('Choose a network','');for(let i=0;i<networks.length;i++){const n=networks[i],strength=n.rssi>=-55?'Strong':n.rssi>=-70?'Good':'Weak';option(n.ssid+' · '+strength+' signal'+(n.secured?'':' · open'),'n'+i);}option('Other network…','manual');const index=networks.findIndex(n=>n.ssid===previous);picker.value=wasManual?'manual':index>=0?'n'+index:'';scanning=false;choose(false);scanMessage.textContent=networks.length?'Choose your network above. Open networks need no password.':'No networks found. Move closer to your router or choose Other network.';}catch(e){if(waiting||completed)return;scanning=false;if(!picker.options.length||picker.options[0].textContent==='Searching for networks…'){picker.replaceChildren();option('Choose a network','');option('Other network…','manual');picker.value='';choose(false);}scanMessage.textContent=e.message||'Could not scan. Reconnect to the clock setup network and try again.';controls();}}
+rescan.addEventListener('click',()=>{clearTimeout(scanTimer);scan(true);});
+form.addEventListener('submit',async e=>{e.preventDefault();if(waiting||completed)return;choose(false);if(!form.reportValidity())return;const body=new URLSearchParams(new FormData(form));waiting=true;clearTimeout(scanTimer);controls();message.textContent='Connecting…';try{const r=await fetch('/connect',{method:'POST',body}),d=await r.json();message.textContent=d.message;waiting=r.ok;controls();}catch(e){waiting=false;message.textContent='Reconnect to the clock setup network and try again.';controls();}});
+setInterval(async()=>{if(!waiting)return;try{const d=await(await fetch('/status',{cache:'no-store'})).json();message.textContent=d.message;if(d.connected){waiting=false;completed=true;message.textContent='Connected! Your clock is now fetching live Bitcoin prices. You can close this page.';controls();}else if(!d.connecting){waiting=false;controls();}}catch(e){}},1000);scan();</script></html>)HTML";
 }
 bool Provisioning::online() const { return WiFi.status()==WL_CONNECTED; }
 void Provisioning::begin() {
@@ -29,10 +39,20 @@ void Provisioning::begin() {
   }
   prefs_.remove("setup-key"); // Discard the legacy setup AP password on upgrade.
   WiFi.persistent(false); WiFi.setAutoReconnect(false); WiFi.mode(WIFI_STA); WiFi.setHostname("bitcoin-clock");
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN); WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+  static bool diagnosticsRegistered=false;
+  if (!diagnosticsRegistered) {
+    WiFi.onEvent([](WiFiEvent_t,WiFiEventInfo_t info){Serial.printf("Wi-Fi disconnect reason=%u\n",unsigned(info.wifi_sta_disconnected.reason));},ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+    diagnosticsRegistered=true;
+  }
   if (btc::validCredentials(savedSsid_.c_str(),savedPassword_.c_str())) connect(savedSsid_,savedPassword_,false);
   else { savedSsid_=""; startPortal(); }
 }
 void Provisioning::connect(const String& ssid,const String& password,bool pending) {
+  // Finish the setup scan before requesting association on the same radio.
+  if (WiFi.scanComplete()==WIFI_SCAN_RUNNING) esp_wifi_scan_stop();
+  WiFi.scanDelete();
+  WiFi.setMinSecurity(password.isEmpty()?WIFI_AUTH_OPEN:WIFI_AUTH_WPA2_PSK);
   WiFi.disconnect(false,false); WiFi.begin(ssid.c_str(),password.c_str());
   trying_=true; pending_=pending; attemptAt_=millis(); closeAt_=0;
   setupState_=btc::WifiSetupState::Connecting;
@@ -80,11 +100,26 @@ void Provisioning::status() {
   String json; serializeJson(doc,json); web_.sendHeader("Cache-Control","no-store"); web_.send(200,"application/json",json);
 }
 void Provisioning::networks() {
+  web_.sendHeader("Cache-Control","no-store");
+  if (trying_ || online()) { web_.send(200,"application/json","{\"busy\":true,\"networks\":[]}"); return; }
   int count=WiFi.scanComplete();
-  if (count==WIFI_SCAN_FAILED) { WiFi.scanNetworks(true); web_.send(200,"application/json","{\"scanning\":true}"); return; }
+  if (web_.arg("refresh")=="1" && count!=WIFI_SCAN_RUNNING) { WiFi.scanDelete(); count=WIFI_SCAN_FAILED; }
+  if (count==WIFI_SCAN_FAILED) count=WiFi.scanNetworks(true,true);
   if (count==WIFI_SCAN_RUNNING) { web_.send(200,"application/json","{\"scanning\":true}"); return; }
-  DynamicJsonDocument doc(4096); JsonArray networks=doc.createNestedArray("networks");
-  for (int i=0;i<count&&i<20;++i) { JsonObject item=networks.createNestedObject(); item["ssid"]=WiFi.SSID(i); item["rssi"]=WiFi.RSSI(i); }
+  if (count<0) { web_.send(503,"application/json","{\"message\":\"Could not scan for Wi-Fi. Try scanning again.\"}"); return; }
+  std::vector<int> order; order.reserve(count);
+  for (int i=0;i<count;++i) if (!WiFi.SSID(i).isEmpty()) order.push_back(i);
+  std::sort(order.begin(),order.end(),[](int a,int b){return WiFi.RSSI(a)>WiFi.RSSI(b);});
+  DynamicJsonDocument doc(JSON_OBJECT_SIZE(1)+JSON_ARRAY_SIZE(count)+size_t(count)*(JSON_OBJECT_SIZE(4)+34));
+  JsonArray networks=doc.createNestedArray("networks");
+  for (int index:order) {
+    String name=WiFi.SSID(index); bool duplicate=false;
+    for (JsonObject item:networks) if (name==item["ssid"].as<const char*>()) {duplicate=true;break;}
+    if (duplicate) continue;
+    JsonObject item=networks.createNestedObject(); item["ssid"]=name; item["rssi"]=WiFi.RSSI(index);
+    item["secured"]=WiFi.encryptionType(index)!=WIFI_AUTH_OPEN; item["channel"]=WiFi.channel(index);
+  }
+  if (doc.overflowed()) {web_.send(503,"application/json","{\"message\":\"Too many networks to list. Try scanning again or enter a network name.\"}");return;}
   String json; serializeJson(doc,json); web_.send(200,"application/json",json);
 }
 void Provisioning::openSetup() {

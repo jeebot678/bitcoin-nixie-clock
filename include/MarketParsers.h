@@ -115,6 +115,14 @@ inline void historyFilter(JsonDocument& filter, bool bitstamp) {
     filter["result"]["XXBTZUSD"][0][4] = true;
   }
 }
+inline size_t historyCapacity(bool bitstamp, uint8_t window) {
+  if (window>=5) return 0;
+  size_t rows=config::kWindowSeconds[window]/config::kCandleSeconds[window]+4;
+  // ArduinoJson 6 array filters retain the entire numeric Kraken candle.
+  // Reserve per-row slots and copied strings, with room for metadata/errors.
+  return 2048+rows*(bitstamp ? JSON_ARRAY_SIZE(1)+JSON_OBJECT_SIZE(2)+48
+                                   : JSON_ARRAY_SIZE(9)+64);
+}
 inline bool parseHistory(JsonVariantConst root, bool bitstamp, uint8_t window, uint32_t now, History& history) {
   history.count = 0;
   if (window >= 5 || now < config::kWindowSeconds[window]) return false;

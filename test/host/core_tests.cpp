@@ -10,6 +10,12 @@
 #include "LedMatrixMap.h"
 
 std::string readFile(const std::string& path) { std::ifstream file(path); assert(file.good()); std::ostringstream out;out<<file.rdbuf();return out.str(); }
+size_t slotsIn(JsonVariantConst value) {
+  size_t slots=0;
+  if (value.is<JsonArrayConst>()) for (JsonVariantConst child:value.as<JsonArrayConst>()) slots+=1+slotsIn(child);
+  else if (value.is<JsonObjectConst>()) for (JsonPairConst child:value.as<JsonObjectConst>()) slots+=1+slotsIn(child.value());
+  return slots;
+}
 void coreTests() {
   uint8_t digits[6];assert(btc::priceDigits(123456.49,digits));assert(digits[0]==1&&digits[5]==6);
   assert(btc::priceDigits(999999.49,digits));assert(!btc::priceDigits(999999.5,digits));assert(!btc::priceDigits(1000000,digits));
@@ -57,15 +63,17 @@ void fixtures(const std::string& directory,uint32_t now) {
   }
   const char* windows[]={"hour","day","week","month","year"};
   for(int provider=0;provider<2;++provider)for(uint8_t window=0;window<5;++window){
-    DynamicJsonDocument doc(170000);StaticJsonDocument<1024> filter;btc::historyFilter(filter,provider==1);
+    DynamicJsonDocument doc(btc::historyCapacity(provider==1,window));StaticJsonDocument<1024> filter;btc::historyFilter(filter,provider==1);
     assert(!deserializeJson(doc,readFile(directory+"/"+(provider?"bitstamp_":"kraken_")+windows[window]+".json"),DeserializationOption::Filter(filter)));
     btc::History history;assert(btc::parseHistory(doc.as<JsonVariantConst>(),provider==1,window,now,history));
     assert(history.count>2&&history.count<=400);for(size_t i=0;i<history.count;++i)assert(history.samples[i].timestamp<=now);
     auto plot=btc::makePlot(history,now,config::kWindowSeconds[window],83277.36,now);assert(__builtin_popcount(plot.valid)>=18);
     // Estimated 32-bit ESP32 allocation: slots halve; strings remain unchanged.
-    size_t hostUsage=doc.memoryUsage();size_t slots=0;
-    (void)slots;assert(hostUsage<160000);
-    std::cout<<(provider?"Bitstamp ":"Kraken ")<<windows[window]<<": "<<history.count<<" closed candles; host parser "<<hostUsage<<" bytes\n";
+    size_t hostUsage=doc.memoryUsage();size_t slots=slotsIn(doc.as<JsonVariantConst>());
+    size_t espUsage=hostUsage-slots*(JSON_ARRAY_SIZE(1)-16);
+    size_t espBudget=2048+(config::kWindowSeconds[window]/config::kCandleSeconds[window]+4)*(provider?96:208);
+    assert(espUsage<espBudget);
+    std::cout<<(provider?"Bitstamp ":"Kraken ")<<windows[window]<<": "<<history.count<<" closed candles; ESP32 parser "<<espUsage<<" bytes\n";
   }
   DynamicJsonDocument bad(2048);btc::Quote quote;
   for(const char* payload:{"{\"symbol\":\"ETHUSDT\",\"price\":\"80000\"}","{\"symbol\":\"BTCUSDT\",\"price\":\"NaN\"}","{\"symbol\":\"BTCUSDT\",\"price\":\"123abc\"}","{\"symbol\":\"BTCUSDT\",\"price\":true}"}){assert(!deserializeJson(bad,payload));assert(!btc::parseQuote(btc::Provider::Binance,bad.as<JsonVariantConst>(),now,quote));}
