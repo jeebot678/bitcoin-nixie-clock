@@ -8,6 +8,7 @@
 #include "MarketClient.h"
 #include "Provisioning.h"
 #include "OtaUpdate.h"
+#include "SPIFFS.h"
 
 SerialMock Serial;EspMock ESP;WifiMock WiFi;uint32_t testMillis=100;
 std::map<int,int>pins,modes,adc;std::vector<GpioEvent>gpioEvents;std::vector<SpiPacket>packets;
@@ -17,7 +18,9 @@ namespace market {
 Request outstanding;Result queued;bool sent=false,ready=false;unsigned calls=0;
 bool begin(){return true;}bool send(const Request&r){assert(!sent);outstanding=r;sent=true;++calls;return true;}
 bool receive(Result&r){if(!ready)return false;r=queued;ready=sent=false;return true;}
-void complete(bool ok=true,int status=200){queued={};queued.request=outstanding;queued.ok=ok;queued.status=status;queued.receivedAt=testMillis;queued.epoch=uint32_t(testEpoch);queued.quote.price=83300.0;queued.quote.usdtUsd=1;queued.quote.timestamp=uint32_t(testEpoch);ready=true;}
+void complete(bool ok=true,int status=200){queued={};queued.request=outstanding;queued.ok=ok;queued.status=status;queued.receivedAt=testMillis;queued.epoch=uint32_t(testEpoch);queued.quote.price=83300.0;queued.quote.usdtUsd=1;queued.quote.timestamp=uint32_t(testEpoch);
+  if(outstanding.kind==Kind::History){uint32_t step=config::kCandleSeconds[outstanding.window];for(uint32_t close=outstanding.start+step;close<=outstanding.epoch;close+=step)assert(queued.history.add(close,83300));}
+  ready=true;}
 }
 namespace ota {void begin(){}void healthCheck(uint32_t,bool){}bool checkDue(uint32_t,bool){return false;}void defer(uint32_t){}bool checkAndInstall(){return true;}}
 #define time testTime
@@ -51,20 +54,44 @@ void settingsTests(){
   unsigned before=market::calls;
   adc[34]=1800;adc[35]=503;readDials(testMillis);testMillis+=151;readDials(testMillis);
   assert(refreshDial.stable==4&&timelineDial.stable==1);schedule(testMillis);assert(market::calls==before);
-  Serial.input="dials\n";serialCommands(testMillis);assert(Serial.log.find("timeline GPIO35=503 mV")!=std::string::npos);
+  Serial.input="dials\n";serialCommands(testMillis);assert(Serial.log.find("range JSEL2 GPIO35=503 mV")!=std::string::npos);
   market::complete();processResult(testMillis);
   for(int setting=0;setting<5;++setting){
     testMillis+=6000;refreshDial.stable=setting;fx.usd=1;fx.receivedAt=testMillis;nextQuoteAt=testMillis;
     for(uint32_t&deadline:nextHistoryAt)deadline=testMillis+1000000;
     schedule(testMillis);assert(market::outstanding.kind==market::Kind::Quote);assert(nextQuoteAt==testMillis+config::kRefreshMs[setting]);
-    market::complete();processResult(testMillis);unsigned calls=market::calls;testMillis+=500;schedule(testMillis);assert(market::calls==calls);
+    market::complete();processResult(testMillis);unsigned calls=market::calls;testMillis+=100;schedule(testMillis);assert(market::calls==calls);
   }
   refreshDial.stable=4;testMillis+=61000;nextQuoteAt=testMillis+200000;fx.receivedAt=testMillis-61000;
   schedule(testMillis);assert(market::outstanding.kind==market::Kind::Fx);double oldPrice=guard.price;uint32_t oldReceived=lastQuoteReceived;
   market::complete();market::queued.quote.price=90000;processResult(testMillis);assert(guard.price==oldPrice&&lastQuoteReceived==oldReceived);
-  packets.clear();lastQuoteReceived=testMillis-900001;draw(testMillis);assert(!packets.empty());
+  packets.clear();lastQuoteReceived=testMillis-btc::staleAfterMs(config::kRefreshMs[4])-1;draw(testMillis);assert(!packets.empty());
   // A large quote waits for another provider rather than lighting an outlier.
   market::outstanding={market::Kind::Quote,3,1,uint32_t(testEpoch)};market::sent=true;inflight=true;market::complete();market::queued.quote.price=150000;processResult(testMillis);assert(guard.price==oldPrice);
+}
+void cacheRuntimeTests(){
+  testEpoch=1800000000;testMillis+=6000;timelineDial.stable=4;refreshDial.stable=4;fx.usd=1;fx.receivedAt=testMillis;
+  guard.price=83300;guard.acceptedAt=testMillis;lastQuoteReceived=testMillis;lastPriceEpoch=uint32_t(testEpoch);
+  for(auto&state:rotation.states){state.availableAt=testMillis;state.failures=0;}
+  histories[4].count=0;for(uint32_t close=btc::firstHistoryClose(4,uint32_t(testEpoch));close<=testEpoch;close+=3600)assert(histories[4].add(close,83300));
+  historyDirty[4]=true;saveHistory(testMillis);assert(!historyDirty[4]&&historyStore.savedEpoch(4)==testEpoch);
+  unsigned writes=fsMock().writes;saveHistory(testMillis);assert(fsMock().writes==writes);
+  nextQuoteAt=testMillis+1800000;nextHistoryAt[4]=testMillis;unsigned calls=market::calls;schedule(testMillis);assert(market::calls==calls);
+  // Switching away and back changes draw timing, without refetching a complete cache.
+  adc[35]=1336;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(timelineDial.stable==3);
+  adc[35]=1800;testMillis+=25;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(timelineDial.stable==4);
+  nextQuoteAt=testMillis+1800000;fx.receivedAt=testMillis;schedule(testMillis);assert(market::calls==calls);
+  // The actual main scheduler requests only the missing two days.
+  testEpoch+=2*86400;testMillis+=6000;nextHistoryAt[4]=testMillis;schedule(testMillis);
+  assert(market::sent&&market::outstanding.kind==market::Kind::History&&market::outstanding.start==1800000000);
+  assert(histories[4].count==121);market::complete();processResult(testMillis);assert(histories[4].count==169);saveHistory(testMillis);
+  assert(historyStore.savedEpoch(4)==testEpoch&&!historyDirty[4]);
+  // Before SNTP, a restored chart renders while current Nixies remain blank.
+  testEpoch=0;guard=btc::PriceGuard{};lastPriceEpoch=0;nextDrawAt=testMillis;
+  display::price(83300);display::message("SYNC","CLOCK",testMillis);packets.clear();draw(testMillis);
+  assert(!packets.empty());for(const auto&p:packets)if(p.bus==VSPI)for(int digit=1;digit<16;++digit)assert(p.bytes[digit]==0x80);
+  guard.price=83300;guard.acceptedAt=testMillis;lastPriceEpoch=1800172800;testEpoch=1800172800;
+  std::cout<<"PASS: actual runtime cache persistence, instant range recall, no redundant writes/fetches, two-day suffix repair and saved chart before SNTP\n";
 }
 void soak(){
   // Two hours across the millis() rollover, including dial changes, transient
@@ -84,4 +111,4 @@ void soak(){
   assert(sources.size()==11&&failures>0&&guard.price>0&&refreshDial.initialized&&timelineDial.initialized);
   std::cout<<"PASS: five refresh settings, FX/display separation, responsive dials during requests, 2-hour runtime across millis rollover ("<<market::calls<<" requests; "<<failures<<" injected rate limits)\n";
 }
-int main(){settingsTests();soak();}
+int main(){settingsTests();cacheRuntimeTests();soak();}

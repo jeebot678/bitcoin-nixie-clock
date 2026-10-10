@@ -29,11 +29,13 @@ def main():
     flags=[compiler,"-std=c++11","-Wall","-Wextra","-Werror","-fsanitize=address,undefined","-fno-omit-frame-pointer","-Itest/host","-Iinclude","-Isrc","-I"+str(dependency)]
     report=json.loads((ROOT/"test/live_probe_report.json").read_text())
     epoch=int(datetime.datetime.fromisoformat(report["checked_at_utc"]).timestamp())
+    history_epoch=int(report.get("history_epoch",epoch))
     for name,sources,args in [
-        ("core_tests",["test/host/core_tests.cpp"],["test/live_fixtures",str(epoch)]),
+        ("core_tests",["test/host/core_tests.cpp"],["test/live_fixtures",str(epoch),str(history_epoch)]),
         ("hardware_tests",["test/host/hardware_tests.cpp","src/Display.cpp","src/Provisioning.cpp"],[]),
-        ("runtime_tests",["test/host/runtime_tests.cpp","src/Display.cpp","src/Provisioning.cpp"],[]),
-        ("market_tests",["test/host/market_tests.cpp"],["test/live_fixtures",str(epoch)]),
+        ("runtime_tests",["test/host/runtime_tests.cpp","src/Display.cpp","src/Provisioning.cpp","src/HistoryStore.cpp"],[]),
+        ("history_tests",["test/host/history_tests.cpp","src/HistoryStore.cpp"],[]),
+        ("market_tests",["test/host/market_tests.cpp"],["test/live_fixtures",str(epoch),str(history_epoch)]),
     ]:
         run(flags+sources+["-o",build/name]);run([build/name]+args)
     # CI uses an ephemeral key; local testing uses the real signing key when

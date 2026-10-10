@@ -94,7 +94,7 @@ class PriceGuard {
   size_t pendingSource_ = 0;
   uint32_t pendingAt_ = 0;
 };
-constexpr size_t kMaxCandles = 400;
+constexpr size_t kMaxCandles = 300; // Largest range: 24 h of five-minute candles.
 struct Sample { uint32_t timestamp; double price; };
 struct History {
   Sample samples[kMaxCandles] = {};

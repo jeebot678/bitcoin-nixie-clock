@@ -1,5 +1,5 @@
 {
-  "checked_at_utc": "2026-10-07T22:35:31.339328+00:00",
+  "checked_at_utc": "2026-10-10T21:41:07.040787+00:00",
   "transport": "HTTPS with embedded Mozilla roots; HTTP/1.0; identity encoding; no redirects",
   "results": [
     {
@@ -7,93 +7,121 @@
       "url": "https://api.exchange.coinbase.com/products/BTC-USD/ticker",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:04 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:29 GMT",
         "Content-Type": "application/json; charset=utf-8",
-        "cache-control": "public, max-age=1, must-revalidate",
+        "Cache-Control": "public, max-age=1, must-revalidate",
         "Age": "0"
       },
-      "bytes": 185,
+      "bytes": 186,
       "json_valid": true,
-      "elapsed_ms": 943
+      "elapsed_ms": 111
     },
     {
       "name": "kraken",
       "url": "https://api.kraken.com/0/public/Ticker?pair=XBTUSD,USDTUSD",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:04 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:29 GMT",
         "Content-Type": "application/json",
-        "Content-Length": "619",
+        "Content-Length": "612",
         "Cache-Control": "max-age=2, public"
       },
-      "bytes": 619,
+      "bytes": 612,
       "json_valid": true,
-      "elapsed_ms": 1039
+      "elapsed_ms": 204
+    },
+    {
+      "name": "kraken_5m",
+      "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1&since=1791668040",
+      "status": 200,
+      "headers": {
+        "Date": "Sat, 10 Oct 2026 21:40:35 GMT",
+        "Content-Type": "application/json",
+        "Content-Length": "606",
+        "Cache-Control": "public, max-age=2"
+      },
+      "bytes": 606,
+      "json_valid": true,
+      "elapsed_ms": 185
+    },
+    {
+      "name": "kraken_30m",
+      "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1&since=1791666540",
+      "status": 200,
+      "headers": {
+        "Date": "Sat, 10 Oct 2026 21:40:40 GMT",
+        "Content-Type": "application/json",
+        "Cache-Control": "public, max-age=2"
+      },
+      "bytes": 2582,
+      "json_valid": true,
+      "elapsed_ms": 195
     },
     {
       "name": "kraken_hour",
-      "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1&since=1791408783",
+      "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1&since=1791664740",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:09 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:45 GMT",
         "Content-Type": "application/json",
         "Cache-Control": "public, max-age=2"
       },
-      "bytes": 4957,
+      "bytes": 4952,
       "json_valid": true,
-      "elapsed_ms": 192
+      "elapsed_ms": 198
     },
     {
       "name": "kraken_day",
-      "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=60&since=1791318903",
+      "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=5&since=1791581700",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:14 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:50 GMT",
         "Content-Type": "application/json",
         "Cache-Control": "public, max-age=2"
       },
-      "bytes": 2202,
+      "bytes": 23247,
       "json_valid": true,
-      "elapsed_ms": 188
+      "elapsed_ms": 208
     },
     {
       "name": "kraken_week",
-      "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=240&since=1790778903",
+      "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=60&since=1791057600",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:19 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:55 GMT",
         "Content-Type": "application/json",
         "Cache-Control": "public, max-age=2"
       },
-      "bytes": 3741,
+      "bytes": 14045,
       "json_valid": true,
-      "elapsed_ms": 194
+      "elapsed_ms": 202
     },
     {
-      "name": "kraken_month",
-      "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440&since=1788647703",
+      "name": "kraken_week_delta_1",
+      "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=60&since=1791658800",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:24 GMT",
+        "Date": "Sat, 10 Oct 2026 21:41:01 GMT",
         "Content-Type": "application/json",
+        "Content-Length": "299",
         "Cache-Control": "public, max-age=2"
       },
-      "bytes": 2789,
+      "bytes": 299,
       "json_valid": true,
-      "elapsed_ms": 184
+      "elapsed_ms": 195
     },
     {
-      "name": "kraken_year",
-      "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1440&since=1759703703",
+      "name": "kraken_week_delta_48",
+      "url": "https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=60&since=1791489600",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:30 GMT",
+        "Date": "Sat, 10 Oct 2026 21:41:06 GMT",
         "Content-Type": "application/json",
         "Cache-Control": "public, max-age=2"
       },
-      "bytes": 31425,
+      "bytes": 4158,
       "json_valid": true,
-      "elapsed_ms": 197
+      "elapsed_ms": 192
     },
     {
       "name": "bitstamp",
@@ -101,112 +129,138 @@
       "status": 200,
       "headers": {
         "Content-Type": "application/json",
-        "Content-Length": "256",
+        "Content-Length": "254",
         "Cache-Control": "max-age=1, public",
-        "Date": "Wed, 07 Oct 2026 22:35:03 GMT"
+        "Date": "Sat, 10 Oct 2026 21:40:29 GMT"
       },
-      "bytes": 256,
+      "bytes": 254,
       "json_valid": true,
-      "elapsed_ms": 978
+      "elapsed_ms": 113
+    },
+    {
+      "name": "bitstamp_5m",
+      "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=60&limit=5&end=1791668399&exclude_current_candle=true",
+      "status": 200,
+      "headers": {
+        "Date": "Sat, 10 Oct 2026 21:40:35 GMT",
+        "Content-Type": "application/json",
+        "Content-Length": "704"
+      },
+      "bytes": 704,
+      "json_valid": true,
+      "elapsed_ms": 403
+    },
+    {
+      "name": "bitstamp_30m",
+      "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=60&limit=30&end=1791668399&exclude_current_candle=true",
+      "status": 200,
+      "headers": {
+        "Date": "Sat, 10 Oct 2026 21:40:40 GMT",
+        "Content-Type": "application/json",
+        "Content-Length": "4029"
+      },
+      "bytes": 4029,
+      "json_valid": true,
+      "elapsed_ms": 402
     },
     {
       "name": "bitstamp_hour",
-      "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=60&limit=63",
+      "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=60&limit=60&end=1791668399&exclude_current_candle=true",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:09 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:45 GMT",
         "Content-Type": "application/json",
-        "Content-Length": "8419"
+        "Content-Length": "8019"
       },
-      "bytes": 8419,
+      "bytes": 8019,
       "json_valid": true,
-      "elapsed_ms": 530
+      "elapsed_ms": 202
     },
     {
       "name": "bitstamp_day",
-      "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=3600&limit=27",
+      "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=300&limit=288&end=1791668399&exclude_current_candle=true",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:15 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:50 GMT",
         "Content-Type": "application/json",
-        "Content-Length": "3659"
+        "Content-Length": "38346"
       },
-      "bytes": 3659,
+      "bytes": 38346,
       "json_valid": true,
-      "elapsed_ms": 512
+      "elapsed_ms": 354
     },
     {
       "name": "bitstamp_week",
-      "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=14400&limit=45",
+      "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=3600&limit=168&end=1791665999&exclude_current_candle=true",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:20 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:56 GMT",
         "Content-Type": "application/json",
-        "Content-Length": "6103"
+        "Content-Length": "22557"
       },
-      "bytes": 6103,
+      "bytes": 22557,
       "json_valid": true,
-      "elapsed_ms": 542
+      "elapsed_ms": 338
     },
     {
-      "name": "bitstamp_month",
-      "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=86400&limit=33",
+      "name": "bitstamp_week_delta_1",
+      "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=3600&limit=1&end=1791665999&exclude_current_candle=true",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:25 GMT",
+        "Date": "Sat, 10 Oct 2026 21:41:01 GMT",
         "Content-Type": "application/json",
-        "Content-Length": "4518"
+        "Content-Length": "172"
       },
-      "bytes": 4518,
+      "bytes": 172,
       "json_valid": true,
       "elapsed_ms": 187
     },
     {
-      "name": "bitstamp_year",
-      "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=86400&limit=368",
+      "name": "bitstamp_week_delta_48",
+      "url": "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=3600&limit=48&end=1791665999&exclude_current_candle=true",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:31 GMT",
+        "Date": "Sat, 10 Oct 2026 21:41:07 GMT",
         "Content-Type": "application/json",
-        "Content-Length": "50153"
+        "Content-Length": "6466"
       },
-      "bytes": 50153,
+      "bytes": 6466,
       "json_valid": true,
-      "elapsed_ms": 460
+      "elapsed_ms": 416
     },
     {
       "name": "gemini",
       "url": "https://api.gemini.com/v2/ticker/btcusd",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:04 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:29 GMT",
         "Content-Type": "application/json",
-        "Content-Length": "399"
+        "Content-Length": "400"
       },
-      "bytes": 399,
+      "bytes": 400,
       "json_valid": true,
-      "elapsed_ms": 977
+      "elapsed_ms": 195
     },
     {
       "name": "bitfinex",
       "url": "https://api-pub.bitfinex.com/v2/ticker/tBTCUSD",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:04 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:29 GMT",
         "Content-Type": "application/json; charset=utf-8",
-        "Content-Length": "99",
-        "Age": "0"
+        "Content-Length": "95",
+        "Age": "7"
       },
-      "bytes": 99,
+      "bytes": 95,
       "json_valid": true,
-      "elapsed_ms": 157
+      "elapsed_ms": 124
     },
     {
       "name": "binance",
       "url": "https://data-api.binance.vision/api/v3/ticker/price?symbol=BTCUSDT",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:04 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:30 GMT",
         "Content-Type": "application/json;charset=UTF-8",
         "Content-Length": "45",
         "x-mbx-used-weight": "2",
@@ -215,27 +269,27 @@
       },
       "bytes": 45,
       "json_valid": true,
-      "elapsed_ms": 687
+      "elapsed_ms": 875
     },
     {
       "name": "okx",
       "url": "https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:04 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:30 GMT",
         "Content-Type": "application/json",
         "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate"
       },
       "bytes": 364,
       "json_valid": true,
-      "elapsed_ms": 279
+      "elapsed_ms": 256
     },
     {
       "name": "kucoin",
       "url": "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=BTC-USDT",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:04 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:30 GMT",
         "Content-Type": "application/json",
         "Content-Length": "204",
         "gw-ratelimit-remaining": "1998",
@@ -244,35 +298,35 @@
       },
       "bytes": 204,
       "json_valid": true,
-      "elapsed_ms": 279
+      "elapsed_ms": 268
     },
     {
       "name": "gate",
       "url": "https://api.gateio.ws/api/v4/spot/tickers?currency_pair=BTC_USDT",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:05 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:31 GMT",
         "Content-Type": "application/json",
         "X-Gate-RateLimit-Requests-Remain": "199",
         "X-Gate-RateLimit-Limit": "200",
-        "X-Gate-RateLimit-Reset-Timestamp": "1791412505"
+        "X-Gate-RateLimit-Reset-Timestamp": "1791668431"
       },
-      "bytes": 273,
+      "bytes": 276,
       "json_valid": true,
-      "elapsed_ms": 778
+      "elapsed_ms": 861
     },
     {
       "name": "bitget",
       "url": "https://api.bitget.com/api/v2/spot/market/tickers?symbol=BTCUSDT",
       "status": 200,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:05 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:30 GMT",
         "Content-Type": "application/json",
-        "Content-Length": "429"
+        "Content-Length": "421"
       },
-      "bytes": 429,
+      "bytes": 421,
       "json_valid": true,
-      "elapsed_ms": 289
+      "elapsed_ms": 276
     },
     {
       "name": "mexc",
@@ -281,27 +335,28 @@
       "headers": {
         "Content-Type": "application/json",
         "Cache-Control": "max-age=0, no-cache, no-store",
-        "Date": "Wed, 07 Oct 2026 22:35:05 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:31 GMT",
         "Content-Length": "39"
       },
       "bytes": 39,
       "json_valid": true,
-      "elapsed_ms": 435
+      "elapsed_ms": 206
     },
     {
       "name": "bybit",
       "url": "https://api.bybit.com/v5/market/tickers?category=spot&symbol=BTCUSDT",
       "status": 403,
       "headers": {
-        "Date": "Wed, 07 Oct 2026 22:35:05 GMT",
+        "Date": "Sat, 10 Oct 2026 21:40:31 GMT",
         "Content-Length": "96",
         "Content-Type": "application/json"
       },
       "bytes": 96,
       "error": "HTTP 403",
-      "elapsed_ms": 142
+      "elapsed_ms": 118
     }
   ],
+  "history_epoch": 1791668429,
   "binance_limits_check": {
     "name": "binance_limits",
     "url": "https://data-api.binance.vision/api/v3/exchangeInfo?symbol=BTCUSDT",

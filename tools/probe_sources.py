@@ -85,10 +85,17 @@ def main():
     endpoints = dict(ENDPOINTS)
     if args.history:
         now = int(time.time())
-        for name, window, minutes in [("hour", 3600, 1), ("day", 86400, 60), ("week", 604800, 240), ("month", 2592000, 1440), ("year", 31536000, 1440)]:
-            endpoints["kraken_" + name] = f"https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval={minutes}&since={now-window-2*minutes*60}"
-            count = window // (minutes * 60) + 3
-            endpoints["bitstamp_" + name] = f"https://www.bitstamp.net/api/v2/ohlc/btcusd/?step={minutes*60}&limit={count}"
+        for name, window, minutes in [("5m", 300, 1), ("30m", 1800, 1), ("hour", 3600, 1), ("day", 86400, 5), ("week", 604800, 60)]:
+            step=minutes*60
+            first=(now-window+step-1)//step*step
+            start=first-step
+            endpoints["kraken_" + name] = f"https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval={minutes}&since={start-step}"
+            count = (now//step*step-start)//step
+            endpoints["bitstamp_" + name] = f"https://www.bitstamp.net/api/v2/ohlc/btcusd/?step={step}&limit={count}&end={now//step*step-1}&exclude_current_candle=true"
+        for rows in (1,48):
+            last=now//3600*3600;start=last-rows*3600
+            endpoints[f"kraken_week_delta_{rows}"]=f"https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=60&since={start-3600}"
+            endpoints[f"bitstamp_week_delta_{rows}"]=f"https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=3600&limit={rows}&end={last-1}&exclude_current_candle=true"
     directory = ROOT / "test" / "live_fixtures"
     groups = {}
     for name, url in endpoints.items():
@@ -102,7 +109,7 @@ def main():
         return found
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         results = [result for group in pool.map(probe_group, groups.values()) for result in group]
-    report = {"checked_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "transport": "HTTPS with embedded Mozilla roots; HTTP/1.0; identity encoding; no redirects", "results": results}
+    report = {"checked_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "transport": "HTTPS with embedded Mozilla roots; HTTP/1.0; identity encoding; no redirects", "results": results, **({"history_epoch": now} if args.history else {})}
     previous = ROOT / "test/live_probe_report.json"
     if previous.exists():
         prior = json.loads(previous.read_text())

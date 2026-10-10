@@ -3,7 +3,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
-#include "ClockCore.h"
+#include "HistoryCache.h"
 
 namespace btc {
 struct Quote {
@@ -115,15 +115,22 @@ inline void historyFilter(JsonDocument& filter, bool bitstamp) {
     filter["result"]["XXBTZUSD"][0][4] = true;
   }
 }
-inline size_t historyCapacity(bool bitstamp, uint8_t window) {
+inline uint32_t historyRequestStart(uint8_t window, uint32_t epoch, uint32_t start = 0) {
+  uint32_t first = firstHistoryClose(window, epoch);
+  if (!first) return 0;
+  uint32_t interval = config::kCandleSeconds[window], oldest = first - interval;
+  return start && start >= oldest && start % interval == 0 && start < epoch / interval * interval ? start : oldest;
+}
+inline size_t historyCapacity(bool bitstamp, uint8_t window, uint32_t epoch = 0, uint32_t start = 0) {
   if (window>=5) return 0;
   size_t rows=config::kWindowSeconds[window]/config::kCandleSeconds[window]+4;
+  if (epoch && start) rows = std::min<size_t>(rows, (epoch - historyRequestStart(window, epoch, start)) / config::kCandleSeconds[window] + 3);
   // ArduinoJson 6 array filters retain the entire numeric Kraken candle.
   // Reserve per-row slots and copied strings, with room for metadata/errors.
   return 2048+rows*(bitstamp ? JSON_ARRAY_SIZE(1)+JSON_OBJECT_SIZE(2)+48
                                    : JSON_ARRAY_SIZE(9)+64);
 }
-inline bool parseHistory(JsonVariantConst root, bool bitstamp, uint8_t window, uint32_t now, History& history) {
+inline bool parseHistory(JsonVariantConst root, bool bitstamp, uint8_t window, uint32_t now, History& history, uint32_t start = 0) {
   history.count = 0;
   if (window >= 5 || now < config::kWindowSeconds[window]) return false;
   if (!bitstamp && (!root["error"].is<JsonArrayConst>() || root["error"].size())) return false;
@@ -132,6 +139,7 @@ inline bool parseHistory(JsonVariantConst root, bool bitstamp, uint8_t window, u
   if (rows.isNull() || rows.size() > 720) return false;
   uint32_t lastStart = 0;
   const uint32_t interval = config::kCandleSeconds[window];
+  const uint32_t first = historyRequestStart(window, now, start) + interval;
   for (JsonVariantConst row : rows) {
     uint32_t start = numericTimestamp(bitstamp ? row["timestamp"] : row[0]);
     double price;
@@ -139,9 +147,10 @@ inline bool parseHistory(JsonVariantConst root, bool bitstamp, uint8_t window, u
     lastStart = start;
     uint64_t close = uint64_t(start) + interval;
     if (close > now + uint64_t(interval)) return false;
-    if (close > now || close < now - config::kWindowSeconds[window]) continue;
+    if (close > now || close < first) continue;
     if (!history.add(uint32_t(close),price)) return false;
   }
-  return history.count >= 2 && history.samples[0].timestamp <= now - config::kWindowSeconds[window] + interval * 2 && history.samples[history.count-1].timestamp + interval * 2 >= now;
+  return history.count >= 1 && history.samples[0].timestamp == first &&
+    history.samples[history.count-1].timestamp == now / interval * interval;
 }
 }

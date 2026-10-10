@@ -48,8 +48,9 @@ void fetch(const market::Request& request) {
   String url;
   bool history=request.kind==market::Kind::History;
   // Reserve the contiguous JSON pool before TLS fragments the ESP32 heap.
-  // Short chart windows use a smaller pool than the one-year history.
-  DynamicJsonDocument document(history ? btc::historyCapacity(request.source==2,request.window) : 8192);
+  // Incremental chart requests reserve only the missing range plus overlap.
+  if (request.source >= btc::kSourceCount || request.window >= 5) return;
+  DynamicJsonDocument document(history ? btc::historyCapacity(request.source==2,request.window,request.epoch,request.start) : 8192);
   if (!document.capacity()) {
     Serial.printf("Market JSON allocation failed: %u free; largest %u\n",ESP.getFreeHeap(),ESP.getMaxAllocHeap());
     return;
@@ -57,10 +58,11 @@ void fetch(const market::Request& request) {
   if (!history) url=btc::kSources[request.source].url;
   else {
     uint32_t interval=config::kCandleSeconds[request.window];
+    uint32_t start=btc::historyRequestStart(request.window,request.epoch,request.start);
     if (request.source==1)
-      url="https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval="+String(interval/60)+"&since="+String(request.epoch-config::kWindowSeconds[request.window]-interval*2);
+      url="https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval="+String(interval/60)+"&since="+String(start-interval);
     else
-      url="https://www.bitstamp.net/api/v2/ohlc/btcusd/?step="+String(interval)+"&limit="+String(config::kWindowSeconds[request.window]/interval+3);
+      url="https://www.bitstamp.net/api/v2/ohlc/btcusd/?step="+String(interval)+"&limit="+String((request.epoch/interval*interval-start)/interval)+"&end="+String(request.epoch/interval*interval-1)+"&exclude_current_candle=true";
   }
   WiFiClientSecure tls;
   tls.setCACertBundle(caBundle); tls.setHandshakeTimeout(6); tls.setTimeout(6);
@@ -97,7 +99,7 @@ void fetch(const market::Request& request) {
         } else error=deserializeJson(document,reader,DeserializationOption::NestingLimit(12));
         if (!error) {
           response.epoch=uint32_t(time(nullptr));
-          response.ok=history ? btc::parseHistory(document.as<JsonVariantConst>(),request.source==2,request.window,response.epoch,response.history)
+          response.ok=history ? btc::parseHistory(document.as<JsonVariantConst>(),request.source==2,request.window,request.epoch,response.history,request.start)
                               : btc::parseQuote(btc::kSources[request.source].provider,document.as<JsonVariantConst>(),response.epoch,response.quote);
           if (!response.ok) { int code=apiError(document.as<JsonVariantConst>()); if (code) response.status=code; }
         } else Serial.printf("%s JSON failed: %s\n",btc::kSources[request.source].name,error.c_str());

@@ -1,8 +1,8 @@
 # Free Bitcoin market data sources
 
-Verified on 2026-10-07 using HTTP/1.0, identity encoding and the same Mozilla roots embedded in the firmware: all eleven default tickers returned HTTP 200 and parsed as valid prices. Kraken and Bitstamp returned valid history for all five windows. Bybit returned HTTP 403 from this network and is excluded. The exact responses, timings and headers are in `test/live_probe_report.json` and `test/live_fixtures/`.
+Verified on 2026-10-10 using HTTP/1.0, identity encoding and the same Mozilla roots embedded in the firmware: all eleven default tickers returned HTTP 200 and parsed as valid prices. Kraken and Bitstamp returned valid history for all five windows and actual incremental requests for one closed hour and 48 closed hours. Bybit returned HTTP 403 from this network and is excluded. The exact responses, timings and headers are in `test/live_probe_report.json` and `test/live_fixtures/`.
 
-These are independent exchanges, so their last trade prices can differ. Rotation distributes a very small request load while respecting each provider's limits; it does not bypass a provider's quota or IP restrictions. Firmware uses a minimum five-second interval per provider (at most 12 requests/minute per provider), including shared Kraken/Bitstamp history traffic. A fully healthy two-second rotation normally visits a provider roughly once every 22 seconds. Normal polling, FX refresh and history are serialized by one worker.
+These are independent exchanges, so their last trade prices can differ. Rotation distributes a very small request load while respecting each provider's limits; it does not bypass a provider's quota or IP restrictions. Firmware uses a minimum five-second interval per provider (at most 12 requests/minute per provider), including shared Kraken/Bitstamp history traffic. At the 0.5-second target, the per-provider five-second minimum still applies; HTTPS latency also limits actual throughput. Normal polling, FX refresh and history are serialized by one worker.
 
 | Provider | Verified public endpoint | Official quota/rule | Parsed last price / freshness |
 | --- | --- | --- | --- |
@@ -32,17 +32,17 @@ HTTP 429/418 and recognized JSON rate-limit errors produce at least a one-minute
 
 Kraken primary: `https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=MINUTES&since=EPOCH`. Parse `result.XXBTZUSD`, close at index 4. [Official documentation](https://docs.kraken.com/api-reference/market-data/get-ohlc-data) limits the response to 720 rows and identifies the final candle as unfinished.
 
-Bitstamp fallback: `https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=SECONDS&limit=COUNT`. Parse `data.ohlc[].close`; confirm pair BTC/USD. [Official documentation](https://www.bitstamp.net/api/) allows at most 1,000 candles. These are genuine USD history, so a current FX rate is never applied retrospectively to stablecoin history.
+Bitstamp fallback: `https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=SECONDS&limit=MISSING_COUNT&end=LAST_CLOSED_SECOND&exclude_current_candle=true`. Parse `data.ohlc[].close`; confirm pair BTC/USD. [Official documentation](https://www.bitstamp.net/api/) allows at most 1,000 candles. These are genuine USD history, so a current FX rate is never applied retrospectively to stablecoin history.
 
-| Window | Candle interval | Bitstamp limit | History refresh |
+| Window | Candle interval | Full closed-candle count | Update trigger |
 | --- | --- | --- | --- |
-| 1 hour | 60 s | 63 | 60 s |
-| 1 day | 3,600 s | 27 | 5 min |
-| 1 week | 14,400 s | 45 | 15 min |
-| 30 days | 86,400 s | 33 | 1 h |
-| 365 days | 86,400 s | 368 | 1 h |
+| 5 minutes | 60 s | 5–6 | New closed minute |
+| 30 minutes | 60 s | 30–31 | New closed minute |
+| 1 hour | 60 s | 60–61 | New closed minute |
+| 24 hours | 300 s | 288–289 | New closed five-minute candle |
+| 7 days | 3,600 s | 168–169 | New closed hour |
 
-Only closed candles are plotted, timestamped at close. Rows are validated for order, duplicates, interval alignment, coverage, recency and finite positive prices. Live data overlays its actual timestamp bucket. No synthetic history or invented gap filling is used. Only the selected window fetches history; other caches remain available without polling.
+Only closed candles are plotted, timestamped at close. Rows are validated for order, duplicates, interval alignment, coverage, recency and finite positive prices. Live data overlays its actual timestamp bucket. No synthetic history or invented gap filling is used. Only the selected window fetches history; all caches persist in flash. The three short windows share incoming one-minute candles. Incremental requests begin at the first missing closed candle in the current range, including internal gaps. Kraken gets `since` with one-candle overlap; Bitstamp gets the missing count and an explicit closed end time. A new one-candle response is valid. Merging preserves existing points, replaces matching timestamps, inserts missing points in order and discards points outside the current range. The 5-minute range initially has five or six minute-resolution historical points; live prices continue independently.
 
 ## OTA endpoint
 

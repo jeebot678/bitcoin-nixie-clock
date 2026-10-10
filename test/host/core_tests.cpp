@@ -53,7 +53,7 @@ void coreTests() {
   std::set<unsigned> mapped;for(uint8_t row=0;row<13;++row)for(uint8_t col=0;col<21;++col){auto p=led_matrix::mapPixel(row,col);assert(p.valid&&p.driver<6&&p.digit<8&&p.segmentBit<8);assert(mapped.insert(p.driver*64+p.digit*8+p.segmentBit).second);}
   assert(mapped.size()==273&&!led_matrix::mapPixel(13,0).valid&&!led_matrix::mapPixel(0,21).valid);
 }
-void fixtures(const std::string& directory,uint32_t now) {
+void fixtures(const std::string& directory,uint32_t now,uint32_t historyEpoch) {
   const char* names[]={"coinbase","kraken","bitstamp","gemini","bitfinex","binance","okx","kucoin","gate","bitget","mexc"};
   for(size_t i=0;i<11;++i){DynamicJsonDocument doc(16000);assert(!deserializeJson(doc,readFile(directory+"/"+names[i]+".json")));btc::Quote quote;
     assert(btc::parseQuote(btc::kSources[i].provider,doc.as<JsonVariantConst>(),now,quote));assert(quote.price>80000&&quote.price<90000);
@@ -61,13 +61,14 @@ void fixtures(const std::string& directory,uint32_t now) {
     if(i==1)assert(quote.usdtUsd>.99&&quote.usdtUsd<1.01);
     assert(!btc::parseQuote(btc::kSources[i].provider,JsonVariantConst(),now,quote));
   }
-  const char* windows[]={"hour","day","week","month","year"};
+  now=historyEpoch;
+  const char* windows[]={"5m","30m","hour","day","week"};
   for(int provider=0;provider<2;++provider)for(uint8_t window=0;window<5;++window){
     DynamicJsonDocument doc(btc::historyCapacity(provider==1,window));StaticJsonDocument<1024> filter;btc::historyFilter(filter,provider==1);
     assert(!deserializeJson(doc,readFile(directory+"/"+(provider?"bitstamp_":"kraken_")+windows[window]+".json"),DeserializationOption::Filter(filter)));
     btc::History history;assert(btc::parseHistory(doc.as<JsonVariantConst>(),provider==1,window,now,history));
-    assert(history.count>2&&history.count<=400);for(size_t i=0;i<history.count;++i)assert(history.samples[i].timestamp<=now);
-    auto plot=btc::makePlot(history,now,config::kWindowSeconds[window],83277.36,now);assert(__builtin_popcount(plot.valid)>=18);
+    assert(history.count>2&&history.count<=btc::kMaxCandles);for(size_t i=0;i<history.count;++i)assert(history.samples[i].timestamp<=now);
+    auto plot=btc::makePlot(history,now,config::kWindowSeconds[window],83277.36,now);assert(__builtin_popcount(plot.valid)>=int(std::min<size_t>(18,history.count)));
     // Estimated 32-bit ESP32 allocation: slots halve; strings remain unchanged.
     size_t hostUsage=doc.memoryUsage();size_t slots=slotsIn(doc.as<JsonVariantConst>());
     size_t espUsage=hostUsage-slots*(JSON_ARRAY_SIZE(1)-16);
@@ -88,4 +89,4 @@ void otaTests(){
   ota::Manifest manifest;assert(ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));assert(ota::canonical(manifest).find("1.0.1\n")==0);
   doc["size"]=0;assert(!ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));doc["size"]=2048;doc["board"]="esp32s3";assert(!ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));doc["board"]=ota_config::kBoard;doc["url"]="https://github.com/attacker/clock/releases/download/v1.0.1/firmware.bin";assert(!ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));
 }
-int main(int argc,char**argv){assert(argc==3);coreTests();fixtures(argv[1],uint32_t(strtoul(argv[2],nullptr,10)));otaTests();std::cout<<"PASS: core, all live quote/history fixtures, malformed input, OTA manifest rules\n";}
+int main(int argc,char**argv){assert(argc==4);coreTests();fixtures(argv[1],uint32_t(strtoul(argv[2],nullptr,10)),uint32_t(strtoul(argv[3],nullptr,10)));otaTests();std::cout<<"PASS: core, all live quote/history fixtures, malformed input, OTA manifest rules\n";}

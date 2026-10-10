@@ -6,17 +6,23 @@ The clock obtains BTC/USD from eleven independent, free public exchange endpoint
 
 ## Controls
 
-| Position | Refresh dial (GPIO34) | Timeline dial (GPIO35) |
+| Position | Frequency: JSEL1 (GPIO34) | Range: JSEL2 (GPIO35) |
 | --- | --- | --- |
-| 1 | 2 seconds | 1 hour |
-| 2 | 5 seconds | 1 day |
-| 3 | 15 seconds | 1 week |
-| 4 | 1 minute | 30 days |
-| 5 | 5 minutes | 365 days |
+| 1 | 0.5 seconds | 5 minutes |
+| 2 | 2 seconds | 30 minutes |
+| 3 | 30 seconds | 1 hour |
+| 4 | 5 minutes | 24 hours |
+| 5 | 30 minutes | 7 days |
 
-The Nixies show the latest accepted price rounded to whole USD. The graph samples real closed candles into 21 time buckets and overlays the live tick. Changes below a pixel do not cause display traffic. Empty history remains empty until actual data arrives. Current prices are refreshed separately from historical candles. The fastest setting is a polling target; HTTPS latency, outages and firmware installation can extend the interval.
+The Nixies show the latest accepted price rounded to whole USD. The graph samples real closed candles into 21 time buckets and overlays the live tick. Changes below a pixel do not cause display traffic. Each visited range is saved in onboard flash, restored at boot and immediately available on later dial changes. Current prices are refreshed separately from historical candles. The fastest setting is a polling target; HTTPS latency, outages and firmware installation can extend the interval.
 
-`include/DeviceConfig.h` contains independent calibration centers for each dial, debounce, intervals and brightness. The archived board documentation described six resistor positions; this application uses the first five (0, 503, 926, 1336, 1800 mV). The unused sixth contact and open-switch transitions retain the prior setting. **Measure your actual five selector positions with the serial `dials` command before device acceptance.** GPIO34/35 are ADC1 inputs, so they work with Wi-Fi enabled. Display wiring, matrix mapping and chain order follow the working demo.
+The caches retain actual UTC candle-close timestamps. After SNTP synchronization, the chart uses the current time, ages points out of the selected range and requests from the first missing candle. A two-day shutdown in the seven-day range reuses the remaining five days and requests the missing 48 hourly candles. Gaps stay empty until real data arrives. Turning the dial back to a complete cache makes no history request; the next request waits for a new candle. The three short ranges reuse their shared one-minute candles. Closed candles are independent of the price-frequency dial; 0.5 seconds is a request target, not a guaranteed network response time.
+
+Snapshots use the existing 128 KiB SPIFFS partition, preserving Wi-Fi NVS and both OTA slots. Each range has two alternating, versioned files with checksums; incomplete writes fall back to the previous valid snapshot. Only changed closed-candle histories write to flash, never each live price tick. Normal USB application uploads and OTA preserve the caches; whole-chip erasure or filesystem formatting removes them. Failed storage writes retain RAM data and retry once per minute.
+
+Without a battery-backed RTC, the ESP32 cannot know how long it was powered off until SNTP answers. Before synchronization, an available saved chart is shown at its recorded snapshot time; it is then immediately positioned against current UTC. Saved history never initializes the live price or the HTTPS clock. During Wi-Fi setup, the setup status still takes priority on the matrix.
+
+`include/DeviceConfig.h` contains independent calibration centers for each dial, debounce, intervals and brightness. The archived board documentation described six resistor positions; this application uses the first five (0, 503, 926, 1336, 1800 mV). The unused sixth contact and open-switch transitions retain the prior setting. **Measure your actual five selector positions with the serial `dials` command before device acceptance.** The pin assignments were checked against the linked PCB-design session and its Rev20 schematic/board; see [PCB pin mapping](docs/PCB_PIN_MAP.md). GPIO34/35 are ADC1 inputs, so they work with Wi-Fi enabled. Display wiring, matrix mapping and chain order follow the working demo.
 
 ## Program the ESP32
 
@@ -66,10 +72,10 @@ pio run
 python3 tools/run_tests.py
 ```
 
-The host tests compile the actual provisioning, display, application-loop, HTTP worker, TLS bundle callback and OTA code with modeled hardware/network/flash and address/undefined-behavior sanitizers. They cover all eleven live quote fixtures, both history providers at five scales and their ESP32 memory budgets, truncated/stale HTTP responses, dial noise/debounce, rollover, currency conversion, stale data, Nixie packet bytes, setup text/scrolling and single-zero chase timing, LED chain ordering, Wi-Fi errors/reconnection/persistence, OTA signatures/corruption/interruption/flash failure, and boot rollback decisions. The portal's actual JavaScript runs against a DOM/network model to check selection, safe SSID rendering, scanning/retries, passwords, submission and connection status. TLS tests require exact trusted-root subjects and public keys, verify real ECDSA signatures and preserve certificate validation failures. A two-hour simulated runtime crosses the `millis()` wrap and injects rate-limit failures. OpenSSL independently supplies the host crypto adapter; ESP32 builds use mbedTLS. CI repeats the build and host suites on `main` and pull requests.
+The host tests compile the actual provisioning, display, application-loop, HTTP worker, TLS bundle callback and OTA code with modeled hardware/network/flash and address/undefined-behavior sanitizers. They cover all eleven live quote fixtures, both history providers at five scales and their ESP32 memory budgets, truncated/stale HTTP responses, dial noise/debounce, rollover, currency conversion, stale data, Nixie packet bytes, setup text/scrolling and single-zero chase timing, LED chain ordering, Wi-Fi errors/reconnection/persistence, OTA signatures/corruption/interruption/flash failure, and boot rollback decisions. The portal's actual JavaScript runs against a DOM/network model to check selection, safe SSID rendering, scanning/retries, passwords, submission and connection status. TLS tests require exact trusted-root subjects and public keys, verify real ECDSA signatures and preserve certificate validation failures. The actual history-store code is tested for restoration of every range, two-day incremental backfill, internal gaps, duplicates, expired data, every truncated-write/byte-corruption offset, failed storage and generation rollover. Runtime tests verify instant range recall, no redundant downloads/writes and saved charts before SNTP. A two-hour simulated runtime crosses the `millis()` wrap and injects rate-limit failures. OpenSSL independently supplies the host crypto adapter; ESP32 builds use mbedTLS. CI repeats the build and host suites on `main` and pull requests.
 
 `src/CertificateBundle.cpp` adapts the Apache-licensed Arduino-ESP32 bundle verifier so a cross-signed root can terminate a chain when its complete subject and public key match the embedded Mozilla trust store. Certificate dates, hostnames and other verification failures remain enforced. Chart JSON pools are sized for the selected window and reserved before the HTTPS handshake to avoid heap fragmentation.
 
-Endpoint probes are low-volume public requests, not load tests. `test/live_probe_report.json` records verification time, status and response headers. `docs/SOURCES.md` records official quota and freshness documentation. Firmware has been USB-flashed to the attached ESP32 with esptool hash verification. ADC calibration, real Wi-Fi/TLS memory use, visible tube/LED appearance and actual power-loss/bootloader rollback still require the device acceptance checks in `docs/DEVICE_ACCEPTANCE.md`.
+Endpoint probes are low-volume public requests, not load tests. `test/live_probe_report.json` records verification time, status and response headers. `docs/SOURCES.md` records official quota and freshness documentation. Earlier firmware has been USB-flashed to the attached ESP32 with esptool hash verification; v1.0.4 device acceptance is tracked separately. ADC calibration, real Wi-Fi/TLS memory use, visible tube/LED appearance and actual power-loss/bootloader rollback still require the device acceptance checks in `docs/DEVICE_ACCEPTANCE.md`.
 
 After publishing, `python3 tools/verify_deployment.py` independently verifies the public `main` manifest signature and downloaded release image, using the firmware's HTTP mode, redirect hosts and Mozilla certificate roots. `python3 tools/probe_sources.py --history` refreshes the public market fixtures with five-second spacing between requests to the same provider; the excluded Bybit endpoint remains a geographic-access diagnostic.
