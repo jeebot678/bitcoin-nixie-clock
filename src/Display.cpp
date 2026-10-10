@@ -13,6 +13,10 @@ bool textActive = false, chasing = false;
 char messageTop[32] = {}, messageBottom[32] = {};
 uint32_t messageStartedAt = 0, nextZeroAt = 0;
 uint8_t zeroPosition = 0;
+enum class StartupPhase { Waiting, Filling, Unfilling, Done };
+StartupPhase startupPhase = StartupPhase::Waiting;
+uint32_t startupStartedAt = 0;
+constexpr uint16_t kMatrixCells = 13 * 21;
 void registers(const uint8_t regs[6], const uint8_t values[6]) {
   matrix.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
   digitalWrite(config::kMaxLoad, LOW);
@@ -52,6 +56,8 @@ void tubeDigit(uint8_t module, uint8_t digit) {
 }
 namespace display {
 void begin() {
+  startupPhase=StartupPhase::Waiting;
+  textActive=false;
   // Set every CS latch inactive before enabling any SPI output.
   for (uint8_t pin : config::kNixieCs) digitalWrite(pin,HIGH);
   for (uint8_t pin : config::kNixieCs) pinMode(pin,OUTPUT);
@@ -91,6 +97,31 @@ void plot(const btc::Plot& chart) {
   memset(frame,0,sizeof(frame));
   for (uint8_t col=0;col<21;++col) if (chart.valid&(1U<<col)) pixel(chart.rows[col],col);
   flush();
+}
+bool startupPending() { return startupPhase==StartupPhase::Waiting; }
+bool startupAnimating() { return startupPhase==StartupPhase::Filling || startupPhase==StartupPhase::Unfilling; }
+void startupPlot(const btc::Plot& chart,uint32_t now) {
+  if (startupPhase==StartupPhase::Done) { plot(chart); return; }
+  if (startupPhase==StartupPhase::Waiting) {
+    startupPhase=StartupPhase::Filling; startupStartedAt=now;
+  }
+  uint32_t cells=uint32_t(now-startupStartedAt)/config::kStartupCellMs;
+  if (cells>kMatrixCells) cells=kMatrixCells;
+  bool filling=startupPhase==StartupPhase::Filling;
+  textActive=false;
+  memset(frame,0,sizeof(frame));
+  for (uint16_t cell=0;cell<kMatrixCells;++cell) {
+    uint8_t row=cell/21,col=cell%21;
+    bool chartPixel=(chart.valid&(1U<<col)) && chart.rows[col]==row;
+    if (filling ? cell<cells : cell>=cells || chartPixel) pixel(row,col);
+  }
+  flush();
+  if (cells==kMatrixCells) {
+    // Always send a completely lit frame before starting the return pass,
+    // even when a slow loop skips over the nominal turnaround time.
+    startupPhase=filling?StartupPhase::Unfilling:StartupPhase::Done;
+    startupStartedAt=now;
+  }
 }
 void offline() {
   textActive=false;

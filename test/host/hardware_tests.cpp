@@ -132,4 +132,50 @@ void displayTests(){
   for(int digit=0;digit<8;++digit){const auto&p=packets[digit];assert(p.bus==HSPI&&p.bytes.size()==12);for(int slot=0;slot<6;++slot){assert(p.bytes[slot*2]==digit+1);assert(p.bytes[slot*2+1]==(digit==0&&order[slot]==0?0x08:0));}}
   packets.clear();display::plot(plot);assert(packets.empty());
 }
-int main(){displayTests();setupDisplayTests();provisioningTests();std::cout<<"PASS: real display transport, setup text/scrolling, 100 ms single-zero chase, and provisioning states with host hardware/network models\n";}
+void startupDisplayTests(){
+  display::begin();packets.clear();
+  assert(display::startupPending()&&!display::startupAnimating());
+  btc::Plot chart={};chart.valid=(1U<<1)|(1U<<12)|(1U<<20);
+  chart.rows[1]=2;chart.rows[12]=6;chart.rows[20]=12;
+  Matrix previousImage={};
+  auto check=[&](const Matrix& expected){
+    for(const auto&p:packets)assert(p.bus==HSPI); // No tube animation or price interruption.
+    if(expected==previousImage)assert(packets.empty());
+    else assert(matrixPackets()==expected);
+    previousImage=expected;packets.clear();
+  };
+  uint32_t start=UINT32_MAX-400; // Both passes must survive clock rollover.
+  display::startupPlot(chart,start);check(Matrix{});
+  assert(!display::startupPending()&&display::startupAnimating());
+  // Check every physical cell, including row transitions and the last cell.
+  for(unsigned filled=1;filled<=273;++filled){
+    display::startupPlot(chart,start+filled*config::kStartupCellMs);
+    Matrix expected={};for(unsigned index=0;index<filled;++index)expected[index/21][index%21]=true;
+    check(expected);assert(display::startupAnimating());
+  }
+  display::price(765432);assert(packets.size()==6);for(const auto&p:packets)assert(p.bus==VSPI);packets.clear();
+  uint32_t turnaround=start+273*config::kStartupCellMs;
+  display::startupPlot(chart,turnaround);check(previousImage); // Fully lit at the turnaround.
+  for(unsigned cleared=1;cleared<=273;++cleared){
+    if(cleared==137){ // Finish with the current chart, even if the dial/price changed.
+      chart.valid=(1U<<0)|(1U<<12)|(1U<<20);chart.rows[0]=0;chart.rows[12]=4;
+    }
+    display::startupPlot(chart,turnaround+cleared*config::kStartupCellMs);
+    Matrix expected={};for(unsigned index=cleared;index<273;++index)expected[index/21][index%21]=true;
+    for(unsigned col=0;col<21;++col)if(chart.valid&(1U<<col))expected[chart.rows[col]][col]=true;
+    check(expected);
+  }
+  assert(!display::startupPending()&&!display::startupAnimating());
+  display::startupPlot(chart,turnaround+100000);check(previousImage); // Once per boot.
+  chart.rows[0]=3;display::startupPlot(chart,turnaround+100001);
+  Matrix changed={};changed[3][0]=changed[4][12]=changed[12][20]=true;check(changed);
+  // Slow loops still show all LEDs before unfill, rather than skipping that frame.
+  display::begin();packets.clear();previousImage={};
+  display::startupPlot(chart,1000);check(Matrix{});
+  display::startupPlot(chart,100000);Matrix allOn={};for(auto&row:allOn)row.fill(true);check(allOn);
+  assert(display::startupAnimating());
+  display::startupPlot(chart,100003);allOn[0][0]=false;check(allOn);
+  display::startupPlot(chart,200000);check(changed);assert(!display::startupAnimating());
+  std::cout<<"PASS: all 273 startup fill/unfill cells in physical SPI order, chart preservation/change, full turnaround, once per boot, delayed frames and millis rollover\n";
+}
+int main(){displayTests();setupDisplayTests();startupDisplayTests();provisioningTests();std::cout<<"PASS: real display transport, setup text/scrolling, 100 ms single-zero chase, and provisioning states with host hardware/network models\n";}

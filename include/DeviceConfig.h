@@ -26,6 +26,8 @@ constexpr uint32_t kQuoteMaxAgeSeconds = 120;
 constexpr uint32_t kFxMaxAgeMs = 120000, kFxRefreshMs = 60000;
 constexpr uint32_t kConnectTimeoutMs = 25000, kRecoveryApMs = 120000;
 constexpr uint8_t kMatrixIntensity = 2, kNixieBrightness = 64;
+// 273 cells, about 0.82 s per pass. Group cells into nonblocking 16 ms frames.
+constexpr uint32_t kStartupCellMs = 3, kStartupFrameMs = 16;
 constexpr uint32_t kSetupFrameMs = 25, kSetupNixieStepMs = 100;
 constexpr uint32_t kSetupScrollStepMs = 120, kSetupScrollPauseMs = 600;
 constexpr uint32_t kMinimumEpoch = 1704067200;

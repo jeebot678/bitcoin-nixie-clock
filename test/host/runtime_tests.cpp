@@ -9,6 +9,7 @@
 #include "Provisioning.h"
 #include "OtaUpdate.h"
 #include "SPIFFS.h"
+#include "LedMatrixMap.h"
 
 SerialMock Serial;EspMock ESP;WifiMock WiFi;uint32_t testMillis=100;
 std::map<int,int>pins,modes,adc;std::vector<GpioEvent>gpioEvents;std::vector<SpiPacket>packets;
@@ -50,12 +51,16 @@ void settingsTests(){
   market::complete();processResult(testMillis);assert(guard.price==83300);
   packets.clear();draw(testMillis);unsigned liveDigits=0;for(const auto&p:packets)if(p.bus==VSPI)++liveDigits;assert(liveDigits==6);
   testMillis+=8001;wifi.loop(testMillis);assert(!wifi.portalActive());packets.clear();draw(testMillis);assert(!showingSetup&&nextDrawAt==testMillis+1000);
+  assert(display::startupPending()); // A live quote alone must not start the chart reveal.
   schedule(testMillis);assert(market::outstanding.kind==market::Kind::History);
   unsigned before=market::calls;
   adc[34]=1800;adc[35]=503;readDials(testMillis);testMillis+=151;readDials(testMillis);
   assert(refreshDial.stable==4&&timelineDial.stable==1);schedule(testMillis);assert(market::calls==before);
   Serial.input="dials\n";serialCommands(testMillis);assert(Serial.log.find("range JSEL2 GPIO35=503 mV")!=std::string::npos);
   market::complete();processResult(testMillis);
+  packets.clear();draw(testMillis);assert(display::startupAnimating()&&nextDrawAt==testMillis+config::kStartupFrameMs);
+  testMillis+=273*config::kStartupCellMs;draw(testMillis);assert(display::startupAnimating());
+  testMillis+=273*config::kStartupCellMs;draw(testMillis);assert(!display::startupAnimating()&&nextDrawAt==testMillis+1000);
   for(int setting=0;setting<5;++setting){
     testMillis+=6000;refreshDial.stable=setting;fx.usd=1;fx.receivedAt=testMillis;nextQuoteAt=testMillis;
     for(uint32_t&deadline:nextHistoryAt)deadline=testMillis+1000000;
@@ -88,8 +93,16 @@ void cacheRuntimeTests(){
   assert(historyStore.savedEpoch(4)==testEpoch&&!historyDirty[4]);
   // Before SNTP, a restored chart renders while current Nixies remain blank.
   testEpoch=0;guard=btc::PriceGuard{};lastPriceEpoch=0;nextDrawAt=testMillis;
+  display::begin(); // A new boot must reveal a saved chart without a network fetch.
   display::price(83300);display::message("SYNC","CLOCK",testMillis);packets.clear();draw(testMillis);
   assert(!packets.empty());for(const auto&p:packets)if(p.bus==VSPI)for(int digit=1;digit<16;++digit)assert(p.bytes[digit]==0x80);
+  assert(display::startupAnimating());
+  testMillis+=273*config::kStartupCellMs;draw(testMillis);assert(display::startupAnimating());
+  testMillis+=273*config::kStartupCellMs;packets.clear();draw(testMillis);assert(!display::startupAnimating());
+  uint8_t registers[6][8]={};unsigned frames=0;
+  for(const auto&p:packets)if(p.bus==HSPI){++frames;for(unsigned slot=0;slot<6;++slot)registers[config::kMaxShiftOrder[slot]][p.bytes[slot*2]-1]=p.bytes[slot*2+1];}
+  assert(frames==8);auto chart=btc::makePlot(histories[4],historyStore.savedEpoch(4),config::kWindowSeconds[4],0,0);
+  for(uint8_t row=0;row<13;++row)for(uint8_t col=0;col<21;++col){auto p=led_matrix::mapPixel(row,col);assert(bool(registers[p.driver][p.digit]&(1U<<p.segmentBit))==bool((chart.valid&(1U<<col))&&chart.rows[col]==row));}
   guard.price=83300;guard.acceptedAt=testMillis;lastPriceEpoch=1800172800;testEpoch=1800172800;
   std::cout<<"PASS: actual runtime cache persistence, instant range recall, no redundant writes/fetches, two-day suffix repair and saved chart before SNTP\n";
 }

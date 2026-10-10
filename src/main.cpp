@@ -163,7 +163,7 @@ void draw(uint32_t now) {
   bool setupDisplay=wifi.portalActive()||!wifi.online();
   if (setupDisplay!=showingSetup) { showingSetup=setupDisplay; nextDrawAt=now; }
   if (!btc::due(now,nextDrawAt)) return;
-  nextDrawAt=now+(setupDisplay?config::kSetupFrameMs:1000);
+  nextDrawAt=now+(setupDisplay?config::kSetupFrameMs:display::startupAnimating()?config::kStartupFrameMs:1000);
   if (testEndsAt && !btc::due(now,testEndsAt)) { display::selfTest(uint8_t((4500-(testEndsAt-now))/750)); return; }
   testEndsAt=0;
   bool stale=!guard.price || uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(config::kRefreshMs[refreshDial.stable]);
@@ -179,10 +179,19 @@ void draw(uint32_t now) {
   // A bare ESP32 cannot know how long it was off until SNTP succeeds. Before
   // then, show the saved dated snapshot; never use it as the TLS/current clock.
   if (epoch<config::kMinimumEpoch) epoch=historyStore.savedEpoch(timelineDial.stable);
-  auto chart=btc::makePlot(histories[timelineDial.stable],epoch,config::kWindowSeconds[timelineDial.stable],guard.price,lastPriceEpoch);
-  if (chart.valid) display::plot(chart);
+  const auto& history=histories[timelineDial.stable];
+  uint32_t window=config::kWindowSeconds[timelineDial.stable];
+  auto chart=btc::makePlot(history,epoch,window,guard.price,lastPriceEpoch);
+  // Wait for dated history on the first boot rather than revealing a lone
+  // live quote and fetching the selected chart only after the animation ends.
+  bool waitingForHistory=display::startupPending() && !btc::makePlot(history,epoch,window,0,0).valid;
+  if (chart.valid && !waitingForHistory) {
+    display::startupPlot(chart,now);
+    nextDrawAt=now+(display::startupAnimating()?config::kStartupFrameMs:1000);
+  }
   else if (epoch<config::kMinimumEpoch) display::message("SYNC","CLOCK",now);
   else if (!guard.price) display::message("FETCH","PRICE",now);
+  else if (waitingForHistory) display::message("FETCH","HISTORY",now);
   else display::offline();
 }
 void saveHistory(uint32_t now) {
