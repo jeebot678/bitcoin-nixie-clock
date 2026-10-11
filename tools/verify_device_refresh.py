@@ -47,6 +47,8 @@ def summarize(text, duration, version, interval, minimum_frames, max_jitter=10,
     gaps = [b["gap"] for a, b in zip(frames, frames[1:]) if a["interval"] == b["interval"] == interval]
     if gaps and max(gaps) > interval + max_jitter:
         errors.append(f"A display frame missed its deadline by more than {max_jitter} ms")
+    if gaps and min(gaps)<interval-max_jitter:
+        errors.append(f"A display frame arrived more than {max_jitter} ms early")
     sources=sorted({f["source"] for f in frames if f["source"]})
     changes=sum(a["digits"]!=b["digits"] for a,b in zip(frames,frames[1:]))
     motion=changes/(len(frames)-1) if len(frames)>1 else 0
@@ -139,6 +141,7 @@ def main():
                        args.version, args.interval_ms, args.minimum_frames, args.max_jitter_ms,
                        args.max_quote_age_ms,args.minimum_sources,args.minimum_motion_ratio)
     report["startup_warmup_seconds"]=args.warmup
+    report["ota_check_completed_during_entire_observation"]="OTA: firmware is current" in output.decode("utf-8",errors="replace")
     if any(fault in output.decode("utf-8",errors="replace") for fault in ("Guru Meditation","abort()","Backtrace:","task_wdt:")) and "A device fault was observed" not in report["errors"]:
         report["errors"].append("A device fault was observed during warm-up");report["pass"]=False
     binary = ROOT / ".pio/build/esp32-devkitc-32e/firmware.bin"

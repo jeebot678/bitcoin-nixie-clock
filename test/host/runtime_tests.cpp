@@ -177,6 +177,25 @@ void nixieCadenceTests(){
   lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(guard.price);
   // A late loop emits one current frame, without fake catch-up frames or timer drift.
   uint32_t deadline=nextNixieAt;testMillis=deadline+1005;lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(guard.price+1);assert(nextNixieAt==deadline+1500);
+  // Confirming the default detent must not emit an early same-frequency frame.
+  deadline=nextNixieAt;refreshDial.initialized=false;refreshDial.candidate=-1;
+  nextDialsAt=testMillis;adc[35]=0;readDials(testMillis);testMillis+=151;readDials(testMillis);
+  assert(refreshDial.initialized&&refreshDial.stable==0&&nextNixieAt==deadline);
   std::cout<<"PASS: actual Nixie SPI frames at all five selected intervals, unchanged digits, newest stream values, blocked history/TLS, immediate dial changes, REST fallback, outage blanking and millis rollover\n";
 }
-int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();soak();}
+void quoteSelectionRuntimeTests(){
+  testMillis+=6000;refreshDial.stable=0;guard=btc::PriceGuard{};quotes.clear();shownPrice=0;
+  auto tick=[&](uint8_t provider,double value){live::pending.quote.price=value;live::pending.quote.timestamp=uint32_t(testEpoch);live::pending.receivedAt=testMillis;live::pending.source=provider;live::queued=true;processLive(testMillis);};
+  tick(0,80010.25);tick(1,80017.6);tick(0,80010.25);
+  for(unsigned i=0;i<100;++i)tick(1,80017.6);
+  packets.clear();refreshNixies(testMillis);assertPriceFrame(80018);
+  testMillis+=500;tick(1,80017.6);packets.clear();refreshNixies(testMillis);assertPriceFrame(80010);
+  assert(shownSource==0&&shownPrice==80010.25&&guard.price==80017.6&&lastPriceEpoch==uint32_t(testEpoch));
+  testMillis+=500;tick(1,80017.6);packets.clear();refreshNixies(testMillis);assertPriceFrame(80018);
+  // Expired alternative quotes cannot be used to create apparent movement.
+  testMillis+=5000;tick(1,80017.6);packets.clear();refreshNixies(testMillis);assertPriceFrame(80017);
+  assert(guard.price==80017.6&&shownPrice==80017.6&&lastPriceEpoch==uint32_t(testEpoch));
+  quotes.clear();
+  std::cout<<"PASS: actual runtime/SPI source rotation survives burst overwrite; expired alternatives yield bounded cosmetic rendering without changing chart price/timestamp\n";
+}
+int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();soak();}

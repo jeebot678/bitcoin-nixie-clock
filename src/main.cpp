@@ -49,9 +49,9 @@ uint32_t millivolts(uint8_t pin) {
 void readDials(uint32_t now) {
   if (!btc::due(now,nextDialsAt)) return;
   nextDialsAt=now+25;
+  const int previousFrequency=refreshDial.stable;
   if (refreshDial.update(btc::dialPosition(millivolts(config::kRefreshPin),config::kRefreshMv),now)) {
-    nextQuoteAt=now;
-    nextNixieAt=now;
+    if (previousFrequency!=refreshDial.stable) {nextQuoteAt=now;nextNixieAt=now;}
     Serial.printf("Frequency JSEL2/GPIO35 position %d: %lu ms\n",refreshDial.stable+1,(unsigned long)config::kRefreshMs[refreshDial.stable]);
   }
   if (timelineDial.update(btc::dialPosition(millivolts(config::kTimelinePin),config::kTimelineMv),now)) {

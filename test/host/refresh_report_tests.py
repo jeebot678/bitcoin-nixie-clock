@@ -15,6 +15,7 @@ assert report['maximum_display_rounding_error_usd']==1
 assert not summary(header+frames.replace('quoteAge=100','quoteAge=5001')+tail)['pass']
 assert not summary(header+frames.replace('digits=80001','digits=80000')+tail)['pass']
 assert not summary(header+frames.replace('gap=500','gap=511')+tail)['pass']
+assert not summary(header+frames.replace('gap=500','gap=489')+tail)['pass']
 assert not summary(header+frames.replace('digits=80001','digits=80002')+tail)['pass']
 assert not summary(header+frames+tail+'task_wdt: triggered')['pass']
 assert not summary(header+frames.replace('source=Coinbase','source=Kraken')+tail)['pass']
