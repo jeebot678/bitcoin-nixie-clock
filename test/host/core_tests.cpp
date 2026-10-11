@@ -25,6 +25,9 @@ void coreTests() {
   for (double bad:{0.0,-1.0,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) assert(!btc::priceDigits(bad,digits));
   for (int i=0;i<5;++i) { assert(btc::dialPosition(config::kRefreshMv[i],config::kRefreshMv)==i); assert(btc::dialPosition(config::kRefreshMv[i]+150,config::kRefreshMv)==i); }
   assert(btc::dialPosition(3200,config::kRefreshMv)==-1);assert(btc::dialPosition(2269,config::kRefreshMv)==-1);
+  for(uint32_t measured:{142U,155U,177U,182U,216U,222U,237U,240U,301U,309U,342U})
+    assert(btc::dialPosition(measured,config::kRefreshMv)==0);
+  assert(btc::dialPosition(343,config::kRefreshMv)==1);
   btc::Dial dial; assert(!dial.update(0,100));assert(!dial.update(0,249));assert(dial.update(0,250));
   assert(!dial.update(4,251));assert(!dial.update(-1,300));assert(!dial.update(4,400));assert(dial.update(4,550));assert(dial.stable==4);
   dial={};assert(!dial.update(2,UINT32_MAX-50));assert(dial.update(2,100));
@@ -38,9 +41,15 @@ void coreTests() {
   for(int i=0;i<100;++i) {int source=rotation.choose(10000000,false);assert(source>=0&&!btc::kSources[source].usdt);}
   btc::FxRate fx;double normalized;assert(!fx.normalize(100,true,0,normalized));fx.usd=.998;fx.receivedAt=100;
   assert(fx.normalize(100000,true,200,normalized)&&normalized==99800);assert(!fx.normalize(100000,true,120101,normalized));assert(fx.normalize(100000,false,120101,normalized));
-  btc::PriceGuard guard;assert(!guard.accept(80000,0,0));assert(!guard.accept(80001,0,10));assert(guard.accept(80002,1,20));
+  btc::PriceGuard guard;assert(guard.accept(80000,0,0)&&guard.price==80000&&!guard.confirmed());
+  assert(guard.accept(80001,0,10)&&!guard.confirmed());assert(guard.accept(80002,1,20)&&guard.confirmed());
   assert(!guard.accept(160000,2,100));assert(guard.accept(80003,3,200));assert(!guard.accept(100000,2,300));assert(guard.accept(100001,3,400));
   assert(!guard.accept(0,1,500));
+  btc::PriceGuard initial;assert(!initial.accept(NAN,0,0)&&!initial.price);
+  assert(initial.accept(80000,0,UINT32_MAX-100)&&!initial.confirmed());
+  assert(!initial.accept(100000,1,0)&&initial.price==80000&&!initial.confirmed());
+  assert(!initial.accept(100001,1,10)); // One disagreeing provider cannot confirm itself.
+  assert(initial.accept(100002,2,20)&&initial.confirmed()&&initial.price==100002);
   btc::QuoteBook book;btc::DisplayQuote selected;
   book.put(80000.1,0,100,1800000000);book.put(80007.2,1,100,1800000001);
   for(unsigned i=0;i<100;++i)book.put(80007.2,1,101+i,1800000001);

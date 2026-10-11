@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Observe real firmware frames and live reception over an explicit USB port.
+"""Observe firmware-reported frames and live reception over an explicit USB port.
+
+This observes commanded values, not cathode light or acknowledged SPI data:
+eXixe uses no MISO/readback. Visible output requires assembled-device inspection.
 
 Requires pyserial (available in PlatformIO's Python environment). Does not reset
 the device or change either dial, Wi-Fi credentials, history, or OTA settings.
@@ -65,6 +68,7 @@ def summarize(text, duration, version, interval, minimum_frames, max_jitter=10,
     return {
         "checked_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "duration_seconds": duration, "firmware_version": version,
+        "measurement": "firmware_uart_commands", "visible_tube_output_verified": False,
         "interval_ms": interval, "frames": len(frames), "measured_intervals": len(gaps),
         "allowed_jitter_ms": max_jitter,
         "gap_ms": {"min": min(gaps), "median": statistics.median(gaps), "max": max(gaps)} if gaps else None,

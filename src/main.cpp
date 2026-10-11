@@ -26,7 +26,7 @@ uint32_t nextSaveAt[5] = {};
 market::Result result;
 bool networkReady=false,inflight=false,timeStarted=false;
 bool liveReady=false,streamWarmupStarted=false;
-uint32_t streamWarmupUntil=0;
+uint32_t streamWarmupUntil=0,firstQuoteFallbackAt=0;
 bool showingSetup=false;
 bool needConfirmation=true,logNixies=false;
 double shownPrice=0;
@@ -37,7 +37,7 @@ uint32_t nextNixieAt=0,nixieFrames=0,lastNixieAt=0,acceptedQuotes=0;
 uint32_t nextQuoteAt=0,nextDialsAt=0,nextDrawAt=0,lastPriceEpoch=0,lastQuoteReceived=0;
 uint32_t nextHistoryAt[5]={},historyErrors[5]={};
 uint8_t historySource[5]={1,1,1,2,1}; // Bitstamp's day JSON uses less heap.
-uint32_t bootPressedAt=0,testEndsAt=0;
+uint32_t bootPressedAt=0,testEndsAt=0,tubeTestEndsAt=0;
 bool bootHandled=false;
 String serialLine;
 
@@ -72,7 +72,7 @@ void diagnostics(uint32_t now) {
   Serial.printf("  Nixie frames=%lu shown=%.2f latestQuoteAge=%lu ms nextFrame=%ld ms; frequencyDial=%s position=%d; stream=%s quotes=%lu accepted=%lu streamStackMin=%lu B\n",
     (unsigned long)nixieFrames,shownPrice,(unsigned long)uint32_t(now-lastQuoteReceived),(long)std::max<int32_t>(0,int32_t(nextNixieAt-now)),
     refreshDial.initialized?"stable":"unconfirmed",refreshDial.stable+1,stream.connected?"connected":"offline",(unsigned long)stream.quotes,(unsigned long)acceptedQuotes,(unsigned long)stream.stackFreeBytes);
-  Serial.printf("  Live connections=%u; displayed source=%s quoteAge=%lu ms\n",stream.connections,btc::kSources[shownSource].name,(unsigned long)uint32_t(now-shownQuoteReceived));
+  Serial.printf("  Live connections=%u; displayed source=%s quoteAge=%lu ms digits=%06lu confirmed=%s\n",stream.connections,btc::kSources[shownSource].name,(unsigned long)uint32_t(now-shownQuoteReceived),(unsigned long)shownDigits,guard.confirmed()?"yes":"no");
 }
 void serialCommands(uint32_t now) {
   while (Serial.available()) {
@@ -85,12 +85,16 @@ void serialCommands(uint32_t now) {
     else if (serialLine=="setup") wifi.openSetup();
     else if (serialLine=="wifi-reset") wifi.forget();
     else if (serialLine=="selftest") testEndsAt=now+4500;
+    else if (serialLine=="tube-test") {
+      tubeTestEndsAt=now+5000;
+      Serial.println("Tube test: all six digits advance every 500 ms for 5 seconds, then live display resumes.");
+    }
     else if (serialLine=="reboot") ESP.restart();
     else if (serialLine=="ticks" || serialLine=="ticks on" || serialLine=="ticks off") {
       logNixies=serialLine=="ticks"?!logNixies:serialLine=="ticks on";
       Serial.println(logNixies?"Nixie frame logging on":"Nixie frame logging off");
     }
-    else if (!serialLine.isEmpty()) Serial.println("Commands: status, dials, ticks, setup, wifi-reset, selftest, reboot");
+    else if (!serialLine.isEmpty()) Serial.println("Commands: status, dials, ticks, tube-test, setup, wifi-reset, selftest, reboot");
     serialLine="";
   }
   if (digitalRead(0)==LOW) {
@@ -104,7 +108,8 @@ void acceptQuote(const btc::Quote& quote,uint8_t source,uint32_t receivedAt,uint
   if (!fx.normalize(quote.price,btc::kSources[source].usdt,now,price)) {nextQuoteAt=now+500;return;}
   if (guard.accept(price,source,now)) {
     lastPriceEpoch=quote.timestamp?quote.timestamp:epoch;
-    lastQuoteReceived=receivedAt;++acceptedQuotes;needConfirmation=false;
+    lastQuoteReceived=receivedAt;++acceptedQuotes;needConfirmation=!guard.confirmed();
+    if (needConfirmation) nextQuoteAt=now; // Confirmation never waits for a slow display dial.
     lastAcceptedSource=source;quotes.put(price,source,receivedAt,lastPriceEpoch);
     nextDrawAt=now;
   } else {needConfirmation=true;nextQuoteAt=now;}
@@ -119,8 +124,14 @@ void processLive(uint32_t now) {
   }
 }
 void refreshNixies(uint32_t now) {
+  if (tubeTestEndsAt && !btc::due(now,tubeTestEndsAt)) {
+    display::testDigits(uint8_t((5000-uint32_t(tubeTestEndsAt-now))/500));
+    shownPrice=0;nextNixieAt=now;return;
+  }
+  tubeTestEndsAt=0;
   if (!wifi.online()) {quotes.clear();shownPrice=0;nextNixieAt=now;return;}
-  if (!guard.price || uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(config::kRefreshMs[refreshDial.stable])) {
+  if (!guard.price) {display::setupZero(now);shownPrice=0;return;}
+  if (uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(config::kRefreshMs[refreshDial.stable])) {
     display::blankPrice();shownPrice=0;return;
   }
   if (!shownPrice || btc::due(now,nextNixieAt)) {
@@ -129,9 +140,12 @@ void refreshNixies(uint32_t now) {
     btc::DisplayQuote selected{guard.price,lastQuoteReceived,lastPriceEpoch,lastAcceptedSource};
     quotes.choose(now,firstFrame?0:shownDigits,shownSource,guard.price,fx.fresh(now),selected);
     bool cosmetic=false;
-    shownDigits=btc::displayDollars(selected.price,shownDigits,!firstFrame && period==500 && uint32_t(now-selected.receivedAt)<=5000,cosmetic);
+    // Keep the explicitly cosmetic fast-mode effect running while a real
+    // quote is held through a brief reconnect. Its receipt timestamp stays
+    // intact; the ordinary stale check above still blanks an actual outage.
+    shownDigits=btc::displayDollars(selected.price,shownDigits,!firstFrame && period==500,cosmetic);
     display::price(double(shownDigits),true);shownPrice=selected.price;shownSource=selected.source;shownQuoteReceived=selected.receivedAt;++nixieFrames;
-    if (logNixies) Serial.printf("Nixie frame at %lu ms: %.2f interval=%lu ms gap=%lu ms quoteAge=%lu ms source=%s digits=%lu cosmetic=%s\n",(unsigned long)now,shownPrice,
+    if (logNixies || nixieFrames==1) Serial.printf("Nixie frame at %lu ms: %.2f interval=%lu ms gap=%lu ms quoteAge=%lu ms source=%s digits=%lu cosmetic=%s\n",(unsigned long)now,shownPrice,
       (unsigned long)config::kRefreshMs[refreshDial.stable],(unsigned long)uint32_t(now-lastNixieAt),(unsigned long)uint32_t(now-shownQuoteReceived),btc::kSources[shownSource].name,(unsigned long)shownDigits,cosmetic?"yes":"no");
     lastNixieAt=now;
     // Preserve the timer phase through normal loop jitter. If work delays a
@@ -190,13 +204,28 @@ void schedule(uint32_t now) {
   if (!networkReady || inflight || !wifi.online()) return;
   uint32_t epoch=uint32_t(time(nullptr));
   if (epoch<config::kMinimumEpoch) return;
-  // Let both USD streams establish before HTTP confirmation repeatedly takes
-  // the secondary's memory away. If streams fail, REST starts after 35 s.
-  if (!streamWarmupStarted) {streamWarmupStarted=true;streamWarmupUntil=now+35000;}
-  if (!guard.price && liveReady && !btc::due(now,streamWarmupUntil)) return;
+  // A first stream quote lights the tubes immediately. Try a direct USD HTTP
+  // ticker after 5 s if none arrived; FX must not block the first USD price.
+  // After one feed starts, give the second time to establish without history
+  // or confirmation HTTP repeatedly reclaiming its TLS allocation.
+  if (!streamWarmupStarted) {
+    streamWarmupStarted=true;streamWarmupUntil=now+35000;firstQuoteFallbackAt=now+5000;
+  }
   const uint8_t window=timelineDial.stable;
-  if (ota::checkDue(now,wifi.online()) && market::send({market::Kind::Ota,0,window,epoch})) {
+  // An unavailable market must not prevent the device from receiving an OTA
+  // fix. Only the bounded initial stream grace precedes manifest checks.
+  if (btc::due(now,streamWarmupUntil) && ota::checkDue(now,wifi.online()) && market::send({market::Kind::Ota,0,window,epoch})) {
     ota::defer(now);inflight=true;live::httpBusy(true);return;
+  }
+  if (!guard.confirmed()) {
+    if (liveReady && !btc::due(now,guard.price?streamWarmupUntil:firstQuoteFallbackAt)) return;
+    if (btc::due(now,nextQuoteAt)) {
+      int source=rotation.choose(now,false);
+      if (source>=0 && dispatch(market::Kind::Quote,uint8_t(source),timelineDial.stable,now,epoch))
+        nextQuoteAt=now+config::kRefreshMs[refreshDial.stable];
+      else nextQuoteAt=now+500;
+    }
+    return;
   }
   if (guard.price && btc::due(now,nextHistoryAt[window])) {
     btc::trimHistory(histories[window],window,epoch);
@@ -231,13 +260,16 @@ void draw(uint32_t now) {
   if (testEndsAt && !btc::due(now,testEndsAt)) { display::selfTest(uint8_t((4500-(testEndsAt-now))/750)); return; }
   testEndsAt=0;
   bool stale=!guard.price || uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(config::kRefreshMs[refreshDial.stable]);
+  const bool testingTubes=tubeTestEndsAt && !btc::due(now,tubeTestEndsAt);
   if (setupDisplay) {
     display::setupStatus(wifi.setupState(),now);
-    if (!wifi.online()) display::setupZero(now);
-    else if (stale) display::blankPrice();
+    if (!testingTubes) {
+      if (!wifi.online()) display::setupZero(now);
+      else if (stale && guard.price) display::blankPrice();
+    }
     return;
   }
-  if (stale) display::blankPrice();
+  if (stale && guard.price && !testingTubes) display::blankPrice();
   uint32_t epoch=uint32_t(time(nullptr));
   // A bare ESP32 cannot know how long it was off until SNTP succeeds. Before
   // then, show the saved dated snapshot; never use it as the TLS/current clock.
@@ -273,6 +305,7 @@ void setup() {
   // drain over USB; status logging must not hold up the display timer.
   Serial.setTxBufferSize(2048);
   Serial.begin(115200); serialLine.reserve(64);
+  Serial.printf("Firmware boot: %s\n",ota_config::kVersion);
   display::begin();
   historyStore.begin(histories);
   pinMode(0,INPUT_PULLUP); pinMode(config::kRefreshPin,INPUT); pinMode(config::kTimelinePin,INPUT);

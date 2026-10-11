@@ -95,6 +95,10 @@ void setupZero(uint32_t now) {
   for (uint8_t i=0;i<6;++i) if (i!=zeroPosition) tubeDigit(i,254);
   tubeDigit(zeroPosition,0);
 }
+void testDigits(uint8_t step) {
+  chasing=false;
+  for (uint8_t module=0;module<6;++module) tubeDigit(module,uint8_t((step+module)%10));
+}
 void plot(const btc::Plot& chart) {
   textActive=false;
   memset(frame,0,sizeof(frame));

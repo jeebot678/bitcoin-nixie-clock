@@ -15,5 +15,7 @@ void offline();
 void message(const char* top, const char* bottom, uint32_t now);
 void setupStatus(btc::WifiSetupState state, uint32_t now);
 void setupZero(uint32_t now);
+// Explicit serial diagnostic: six different digits, independent of markets.
+void testDigits(uint8_t step);
 void selfTest(uint8_t driver);
 }

@@ -19,6 +19,11 @@ inline bool priceDigits(double price, uint8_t digits[6]) {
   return true;
 }
 inline int dialPosition(uint32_t mv, const uint16_t centers[5]) {
+  // The grounded contact reads above zero on this board's calibrated ADC.
+  // Logs measured 142..309 mV here. Include the low end up to the second
+  // contact's acceptance band, otherwise returning from a slow setting can
+  // retain it forever. Open/high contacts still fall through as invalid.
+  if (mv < centers[1] && centers[1] - mv > config::kDialToleranceMv) return 0;
   for (int i = 0; i < 5; ++i)
     if (std::abs(int(mv) - int(centers[i])) <= config::kDialToleranceMv) return i;
   return -1; // Open switch/transition: retain last stable setting.
@@ -75,23 +80,31 @@ struct FxRate {
     return validPrice(result);
   }
 };
-// Require independent confirmation at startup and for jumps over 5%.
-// Accept a genuine large move when two different providers agree within 1%.
+// Display the first validated source immediately; independently confirm it
+// in the background. Until confirmed, accept only moves within 1%. Later
+// jumps over 5% still require two independent providers to agree within 1%.
 class PriceGuard {
  public:
   double price = 0;
   uint32_t acceptedAt = 0;
+  bool confirmed() const { return confirmed_; }
   bool accept(double value, size_t source, uint32_t now) {
     if (!validPrice(value)) return false;
-    if (price && uint32_t(now - acceptedAt) < 600000 && std::abs(value / price - 1) <= 0.05) {
+    if (!price) {
+      price=value;acceptedAt=now;initialSource_=source;return true;
+    }
+    if (uint32_t(now - acceptedAt) < 600000 && std::abs(value / price - 1) <= (confirmed_?0.05:0.01)) {
+      if (source!=initialSource_) confirmed_=true;
       price = value; acceptedAt = now; pending_ = 0; return true;
     }
     if (pending_ && source != pendingSource_ && uint32_t(now - pendingAt_) <= 60000 && std::abs(value / pending_ - 1) <= 0.01) {
-      price = value; acceptedAt = now; pending_ = 0; return true;
+      price = value; acceptedAt = now; pending_ = 0; confirmed_=true; return true;
     }
     pending_ = value; pendingSource_ = source; pendingAt_ = now; return false;
   }
  private:
+  bool confirmed_=false;
+  size_t initialSource_=0;
   double pending_ = 0;
   size_t pendingSource_ = 0;
   uint32_t pendingAt_ = 0;

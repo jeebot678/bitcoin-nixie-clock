@@ -24,7 +24,7 @@ void complete(bool ok=true,int status=200){queued={};queued.request=outstanding;
   if(outstanding.kind==Kind::History){uint32_t step=config::kCandleSeconds[outstanding.window];for(uint32_t close=outstanding.start+step;close<=outstanding.epoch;close+=step)assert(queued.history.add(close,83300));}
   ready=true;}
 }
-namespace ota {void begin(){}void healthCheck(uint32_t,bool){}bool checkDue(uint32_t,bool){return false;}void defer(uint32_t){}bool checkAndInstall(){return true;}}
+namespace ota {bool due=false;void begin(){}void healthCheck(uint32_t,bool){}bool checkDue(uint32_t,bool){return due;}void defer(uint32_t){due=false;}bool checkAndInstall(){return true;}}
 namespace live {
 Tick pending;bool queued=false,healthy=false,busy=false;
 bool begin(){return true;}bool receive(Tick& tick){if(!queued)return false;tick=pending;queued=false;return true;}
@@ -51,15 +51,20 @@ void settingsTests(){
   unsigned nixies=0;for(const auto&p:packets)if(p.bus==VSPI)++nixies;assert(nixies==0&&packets.size()==8);
   WiFi.connection=WL_CONNECTED;
   wifi.loop(testMillis);schedule(testMillis);assert(!market::sent&&streamWarmupStarted);
-  testMillis+=35001;schedule(testMillis);assert(market::sent&&market::outstanding.kind==market::Kind::Fx&&market::outstanding.source==1);
+  testMillis+=4999;schedule(testMillis);assert(!market::sent);
+  testMillis+=1;schedule(testMillis);assert(market::sent&&market::outstanding.kind==market::Kind::Quote&&!btc::kSources[market::outstanding.source].usdt);
   assert(wifi.setupState()==btc::WifiSetupState::Connected);testMillis+=25;packets.clear();draw(testMillis);
-  for(const auto&p:packets)if(p.bus==VSPI)for(int digit=1;digit<16;++digit)assert(p.bytes[digit]==0x80);
-  market::complete();processResult(testMillis);assert(!guard.price);
-  testMillis+=501;schedule(testMillis);assert(market::outstanding.kind==market::Kind::Quote&&market::outstanding.source!=1);
-  market::complete();processResult(testMillis);assert(guard.price==83300);
+  assert(display::startupPending());
+  market::complete();processResult(testMillis);assert(guard.price==83300&&!guard.confirmed()&&needConfirmation);
+  assert(nextQuoteAt==testMillis);
   packets.clear();refreshNixies(testMillis);draw(testMillis);unsigned liveDigits=0;for(const auto&p:packets)if(p.bus==VSPI)++liveDigits;assert(liveDigits==6);
   testMillis+=8001;wifi.loop(testMillis);assert(!wifi.portalActive());packets.clear();draw(testMillis);assert(!showingSetup&&nextDrawAt==testMillis+1000);
   assert(display::startupPending()); // A live quote alone must not start the chart reveal.
+  schedule(testMillis);assert(!market::sent); // Background confirmation must not cut off stream startup.
+  testMillis+=25000;schedule(testMillis);assert(market::sent); // Stream grace is bounded.
+  // An independent live quote confirms the initial source in the background.
+  live::pending.quote.price=83300;live::pending.quote.timestamp=uint32_t(testEpoch);live::pending.receivedAt=testMillis;live::pending.source=1;live::queued=true;processLive(testMillis);
+  assert(guard.confirmed()&&!needConfirmation);market::complete();processResult(testMillis);
   schedule(testMillis);assert(market::outstanding.kind==market::Kind::History);
   unsigned before=market::calls;
   adc[35]=1800;adc[34]=503;readDials(testMillis);testMillis+=151;readDials(testMillis);
@@ -198,4 +203,74 @@ void quoteSelectionRuntimeTests(){
   quotes.clear();
   std::cout<<"PASS: actual runtime/SPI source rotation survives burst overwrite; expired alternatives yield bounded cosmetic rendering without changing chart price/timestamp\n";
 }
-int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();soak();}
+void startupAndDialRegressionTests(){
+  testMillis+=6000;refreshDial=btc::Dial(0);guard=btc::PriceGuard{};quotes.clear();shownPrice=0;
+  display::blankPrice();packets.clear();refreshNixies(testMillis);
+  assert(packets.size()==1&&packets[0].selected==16&&packets[0].bytes[10]==0xC0);
+  testMillis+=100;packets.clear();refreshNixies(testMillis);draw(testMillis);
+  assert(packets.size()==2&&packets[0].selected==16&&packets[1].selected==17);
+  // The first valid quote must replace the startup chase on this same loop,
+  // even if the dial previously had a deadline an hour away and no other
+  // exchange has connected yet.
+  nextNixieAt=testMillis+3600000;
+  auto tick=[&](double price){live::pending.quote.price=price;live::pending.quote.timestamp=uint32_t(testEpoch);live::pending.receivedAt=testMillis;live::pending.source=0;live::queued=true;processLive(testMillis);};
+  tick(80000.25);assert(guard.price==80000.25&&!guard.confirmed()&&needConfirmation);
+  packets.clear();refreshNixies(testMillis);assertPriceFrame(80000);assert(nextNixieAt==testMillis+500);
+  testMillis+=500;tick(80000.25);packets.clear();refreshNixies(testMillis);assertPriceFrame(80001);
+  testMillis+=500;tick(80000.25);packets.clear();refreshNixies(testMillis);assertPriceFrame(80000);
+  uint32_t received=lastQuoteReceived;uint32_t last=shownDigits;
+  for(unsigned frame=0;frame<24;++frame){ // 12-second reconnect, no fabricated input ticks.
+    testMillis+=500;packets.clear();refreshNixies(testMillis);assert(shownDigits!=last);
+    assertPriceFrame(shownDigits);assert(std::abs(double(shownDigits)-80000.25)<=1);
+    assert(lastQuoteReceived==received&&shownQuoteReceived==received&&guard.price==80000.25);last=shownDigits;
+  }
+  // Replay observed readings at the fast contact after a stable 1-hour
+  // setting. All readings represent the same detent, so noise must not
+  // keep resetting its debounce or strand the display at the old rate.
+  refreshDial=btc::Dial(4);refreshDial.initialized=true;nextNixieAt=testMillis+3600000;nextDialsAt=testMillis;
+  for(uint32_t measured:{142U,301U,309U,222U,237U,182U,309U}){
+    adc[35]=measured;readDials(testMillis);testMillis+=25;
+  }
+  assert(refreshDial.initialized&&refreshDial.stable==0&&nextNixieAt==testMillis-25);
+  tick(80000.25);packets.clear();refreshNixies(testMillis);assertPriceFrame(80001);
+  uint32_t deadline=nextNixieAt;assert(deadline==testMillis+475);
+  testMillis=deadline-1;packets.clear();refreshNixies(testMillis);assert(packets.empty());
+  testMillis=deadline;tick(80000.25);refreshNixies(testMillis);assertPriceFrame(80000);
+  // Background confirmation must leave a previously lit value usable.
+  btc::Quote independent;independent.price=80005;independent.timestamp=uint32_t(testEpoch);
+  acceptQuote(independent,1,testMillis,uint32_t(testEpoch),testMillis);
+  assert(guard.confirmed()&&!needConfirmation&&guard.price==80005);
+  // First-price/confirmation network deadlines cannot inherit a 1-hour dial.
+  guard=btc::PriceGuard{};quotes.clear();refreshDial.stable=4;nextQuoteAt=testMillis+3600000;
+  tick(80000.25);assert(!guard.confirmed()&&nextQuoteAt==testMillis);
+  liveReady=false;streamWarmupStarted=true;streamWarmupUntil=testMillis-1;
+  for(auto& state:rotation.states){state.availableAt=testMillis;state.failures=0;}
+  nextNixieAt=testMillis+3600000;shownPrice=0;packets.clear();refreshNixies(testMillis);assertPriceFrame(80000);
+  schedule(testMillis);assert(market::sent&&market::outstanding.kind==market::Kind::Quote&&!btc::kSources[market::outstanding.source].usdt);
+  market::complete();processResult(testMillis);
+  // OTA still runs if market data never arrives, so a network/source outage
+  // cannot strand the clock on old firmware.
+  guard=btc::PriceGuard{};ota::due=true;schedule(testMillis);
+  assert(market::sent&&market::outstanding.kind==market::Kind::Ota&&!ota::due);
+  market::complete();processResult(testMillis);liveReady=true;
+  std::cout<<"PASS: first-source display, startup chase, 500 ms tube packets during a 12-second reconnect without new ticks, observed dial noise recovering from 1-hour frequency, dial-independent confirmation and OTA without market data\n";
+}
+void tubeDiagnosticTests(){
+  guard=btc::PriceGuard{};quotes.clear();testMillis+=6000;Serial.input="tube-test\n";serialCommands(testMillis);
+  uint32_t start=testMillis;display::blankPrice();
+  for(unsigned step=0;step<10;++step){
+    testMillis=start+step*500;packets.clear();refreshNixies(testMillis);
+    assert(packets.size()==6);
+    for(unsigned module=0;module<6;++module){auto&p=packets[module];unsigned digit=(step+module)%10;
+      assert(p.selected==config::kNixieCs[module]&&p.bytes[0]==0xAA&&p.bytes.size()==16);
+      for(unsigned field=1;field<16;++field)assert(p.bytes[field]==((field==(digit?digit:10))?0xC0:0x80));}
+    packets.clear();testMillis+=499;refreshNixies(testMillis);assert(packets.empty());
+    draw(testMillis);for(const auto&p:packets)assert(p.bus==HSPI); // Setup/stale messages must not overwrite the diagnostic.
+  }
+  testMillis=start+5000;packets.clear();refreshNixies(testMillis);assert(!tubeTestEndsAt);
+  assert(packets.size()==6&&packets.back().selected==16&&packets.back().bytes[10]==0xC0); // Return to startup chase with no market.
+  btc::Quote tick;tick.price=83300;tick.timestamp=uint32_t(testEpoch);acceptQuote(tick,0,testMillis,uint32_t(testEpoch),testMillis);
+  packets.clear();refreshNixies(testMillis);assertPriceFrame(83300);assert(!tubeTestEndsAt);
+  std::cout<<"PASS: explicit five-second tube diagnostic advances every cathode on all six CS lines at 500 ms without prices, then restores the live/startup display\n";
+}
+int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();soak();}

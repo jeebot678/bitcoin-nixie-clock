@@ -1,5 +1,17 @@
 # Device acceptance checks
 
+Version **1.0.10** passes host tests/build and is awaiting USB and visible-output acceptance. It adds a
+grounded-contact decoder regression fix, immediate first-source display,
+continued zero chase while loading, a five-second USD HTTP fallback dispatch
+and a separate `tube-test`. Fast cosmetic motion continues during short feed
+gaps without altering quote timestamps, up to ordinary stale blanking.
+Capture serial from reset and check the boot version and first Nixie-frame
+timestamp. Confirm visible startup animation continues until that price
+appears. Run `tube-test` and visually verify all six tubes change every 500 ms;
+it stops automatically after five seconds. Then select 1 h, return to 0.5 s
+and verify `status` reports position 1 / 500 ms with a stable selector, as well
+as actual visible motion. UART commands alone do not prove the cathodes lit.
+
 Firmware 1.0.9 was USB-flashed with esptool hash verification. Hardware checks observe connected Wi-Fi/SNTP, advancing live quotes, 500 ms Nixie frame timing, history fetch/save and a successful OTA manifest check without watchdog resets; the final measurement is in [the device report](../test/device_refresh_report.json). All five frequency settings and all 21 chart buckets at each range pass sanitized host tests. Firmware 1.0.7 was withdrawn after physical TLS watchdog failures. Five-detent calibration, visible output, full-size 24-hour concurrent TLS memory and actual power-loss/bootloader rollback remain unverified. See [refresh behavior and reproduction](NIXIE_REFRESH.md). These remaining checks require the assembled clock; modeled hardware cannot certify analog resistor tolerances or visible tube output.
 
 1. Flash the complete initial PlatformIO build to the ESP32's explicit serial port. Confirm `status` shows firmware, heap and Wi-Fi state. Run `selftest`; confirm all six grids and orientation match the demo.
