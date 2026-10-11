@@ -1,6 +1,7 @@
 #include <cassert>
 #include <iostream>
 #include <vector>
+#include <thread>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 #include "../../src/CertificateBundle.cpp"
@@ -37,6 +38,14 @@ int main() {
   // Prefixes and arbitrary short DER inputs never read past their bounds.
   for(size_t n=0;n<subject.size();++n) {Bytes prefix(subject.begin(),subject.begin()+n);assert(!tls_bundle::find(s_crt_bundle.crts,1,prefix.data(),n));}
   arduino_esp_crt_bundle_detach(&conf);assert(!conf.verify);
+  // Closing a concurrent REST connection must not invalidate a stream's CA
+  // index. Repeated initialization/attachment races with real verification.
+  mbedtls_ssl_config stream;assert(arduino_esp_crt_bundle_attach(&stream)==ESP_OK);
+  const auto* original=s_crt_bundle.crts;
+  std::thread requests([&]{for(unsigned i=0;i<1000;++i){arduino_esp_crt_bundle_set(bundle.data());mbedtls_ssl_config http;assert(arduino_esp_crt_bundle_attach(&http)==ESP_OK);arduino_esp_crt_bundle_detach(&http);}});
+  for(unsigned i=0;i<1000;++i){uint32_t validation=8;assert(stream.verify(nullptr,&crossSigned,2,&validation)==0&&!validation);}
+  requests.join();assert(s_crt_bundle.crts==original);
+  arduino_esp_crt_bundle_detach(&stream);assert(!stream.verify);
   EVP_PKEY_free(rootKey);EVP_PKEY_free(otherKey);X509_NAME_free(rootName);
-  std::cout<<"PASS: actual TLS bundle callback; exact cross-signed root key, wrong keys, CA/depth checks, preserved failures, real ECDSA signatures and bounded lookup\n";
+  std::cout<<"PASS: actual TLS bundle callback; exact trusted keys, preserved failures, real ECDSA signatures, bounded lookup and concurrent stream/REST trust lifetime\n";
 }

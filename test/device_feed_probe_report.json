@@ -1,0 +1,22 @@
+{
+  "checked_at_utc": "2026-10-11T05:35:20.662Z",
+  "duration_ms": 60049.825625000005,
+  "feeds": {
+    "kraken": {
+      "quotes": 77,
+      "distinct_prices": 2,
+      "max_gap_ms": 5768.080333000002,
+      "last_at": 53907.326709,
+      "timestamps": 77,
+      "errors": []
+    },
+    "coinbase": {
+      "quotes": 61,
+      "distinct_prices": 2,
+      "max_gap_ms": 4623.1147089999995,
+      "last_at": 59990.277334000006,
+      "timestamps": 61,
+      "errors": []
+    }
+  }
+}

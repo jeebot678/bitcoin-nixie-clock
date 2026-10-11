@@ -10,5 +10,6 @@ class WiFiClient{
 };
 class WiFiClientSecure:public WiFiClient{
  public:
-  bool verified=false;void setCACertBundle(const uint8_t*){verified=true;}void setHandshakeTimeout(unsigned){}void setTimeout(unsigned){}
+  bool verified=false;unsigned handshakeSeconds=0,timeoutSeconds=0;
+  void setCACertBundle(const uint8_t*){verified=true;}void setHandshakeTimeout(unsigned n){handshakeSeconds=n;}void setTimeout(unsigned n){timeoutSeconds=n;}
 };

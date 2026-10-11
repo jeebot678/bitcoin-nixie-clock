@@ -74,11 +74,14 @@ void blankPrice() {
   chasing=false;
   for (uint8_t i=0;i<6;++i) tubeDigit(i,254);
 }
-void price(double usd) {
+void price(double usd, bool refresh) {
   chasing=false;
   uint8_t digits[6];
   if (!btc::priceDigits(usd,digits)) { blankPrice(); return; }
-  for (uint8_t i=0;i<6;++i) tubeDigit(i,digits[i]);
+  for (uint8_t i=0;i<6;++i) {
+    if (refresh) lastDigits[i]=255;
+    tubeDigit(i,digits[i]);
+  }
 }
 void setupZero(uint32_t now) {
   if (!chasing) {

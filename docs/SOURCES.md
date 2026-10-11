@@ -2,7 +2,17 @@
 
 Verified on 2026-10-10 using HTTP/1.0, identity encoding and the same Mozilla roots embedded in the firmware: all eleven default tickers returned HTTP 200 and parsed as valid prices. Kraken and Bitstamp returned valid history for all five windows and actual incremental requests for one closed hour and 48 closed hours. Bybit returned HTTP 403 from this network and is excluded. The exact responses, timings and headers are in `test/live_probe_report.json` and `test/live_fixtures/`.
 
-These are independent exchanges, so their last trade prices can differ. Rotation distributes a very small request load while respecting each provider's limits; it does not bypass a provider's quota or IP restrictions. Firmware uses a minimum five-second interval per provider (at most 12 requests/minute per provider), including shared Kraken/Bitstamp history traffic. At the 0.5-second target, the per-provider five-second minimum still applies; HTTPS latency also limits actual throughput. Normal polling, FX refresh and history are serialized by one worker.
+These are independent exchanges, so their last trade prices can differ. Rotation distributes a very small request load while respecting each provider's limits; it does not bypass a provider's quota or IP restrictions. REST uses a minimum five-second interval per provider (at most 12 requests/minute per provider), including shared Kraken/Bitstamp history traffic. REST, FX and history are serialized by one worker. From 1.0.7, one separate persistent USD stream supplies the latest accepted price, and the frequency dial controls an independent tube timer. A fresh stream suppresses redundant REST ticker requests; quiet/disconnected streams use REST fallback.
+
+## Device live stream
+
+Kraken primary: `wss://ws.kraken.com/v2`, `ticker`, symbol `BTC/USD`, `event_trigger:bbo`, snapshot enabled. Parse `data[0].last` and ticker `timestamp`; bid/ask changes can trigger delivery while the last trade price stays unchanged. [Official ticker schema](https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/ticker). The public endpoint needs no key. Kraken documents roughly 150 connection attempts per rolling ten minutes/IP and recommends at least five seconds between reconnections after downtime. [Official connection rules](https://docs.kraken.com/exchange/guides/websockets/introduction).
+
+Coinbase fallback: `wss://ws-feed.exchange.coinbase.com`, `ticker` and `heartbeat` for `BTC-USD`. Parse ticker `price` and `time`; heartbeats do not supply prices. Use the per-match ticker, rather than the five-second `ticker_batch`. [Official channels](https://docs.cdp.coinbase.com/exchange/websocket-feed/channels). Client control messages are limited to ten/s, with a 1,000-message burst; this implementation sends one subscription and a protocol ping every twenty seconds. [Official limits](https://docs.cdp.coinbase.com/exchange/websocket-feed/rate-limits).
+
+Only one stream is connected at a time on the ESP32. Failover alternates providers, respecting individual 5–60 s backoff, at least a minute after HTTP 429, and an hour after authorization/geographic errors. It does not use the computer benchmark's eight simultaneous TLS streams. New exchange trades are event-driven and cannot be guaranteed at every display deadline. The Nixies sample the latest accepted value at the selected cadence; see [refresh behavior](NIXIE_REFRESH.md).
+
+## Public REST endpoints
 
 | Provider | Verified public endpoint | Official quota/rule | Parsed last price / freshness |
 | --- | --- | --- | --- |

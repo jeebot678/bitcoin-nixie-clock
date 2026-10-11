@@ -14,6 +14,7 @@
 
 
 #include <string.h>
+#include <mutex>
 #include <esp_system.h>
 #include <esp32-hal-log.h>
 #include "esp_crt_bundle.h"
@@ -39,6 +40,9 @@ typedef struct crt_bundle_t {
 } crt_bundle_t;
 
 static crt_bundle_t s_crt_bundle;
+static std::mutex s_bundle_mutex;
+static const uint8_t* s_bundle_data = nullptr;
+static bool s_dummy_initialized = false;
 
 static int esp_crt_verify_callback(void *buf, mbedtls_x509_crt *crt, int data, uint32_t *flags);
 static int esp_crt_check_signature(mbedtls_x509_crt *child, const uint8_t *pub_key_buf, size_t pub_key_len);
@@ -95,6 +99,7 @@ cleanup:
 */
 int esp_crt_verify_callback(void *buf, mbedtls_x509_crt *crt, int depth, uint32_t *flags)
 {
+    std::lock_guard<std::mutex> lock(s_bundle_mutex);
     (void)buf;
     mbedtls_x509_crt *child = crt;
 
@@ -173,6 +178,7 @@ static esp_err_t esp_crt_bundle_init(const uint8_t *x509_bundle)
 
 esp_err_t arduino_esp_crt_bundle_attach(void *conf)
 {
+    std::lock_guard<std::mutex> lock(s_bundle_mutex);
     esp_err_t ret = ESP_OK;
     // If no bundle has been set by the user then use the bundle embedded in the binary
     if (s_crt_bundle.crts == NULL) {
@@ -186,7 +192,10 @@ esp_err_t arduino_esp_crt_bundle_attach(void *conf)
          * cacert_ptr passes non-NULL check during handshake
          */
         mbedtls_ssl_config *ssl_conf = (mbedtls_ssl_config *)conf;
-        mbedtls_x509_crt_init(&s_dummy_crt);
+        if (!s_dummy_initialized) {
+            mbedtls_x509_crt_init(&s_dummy_crt);
+            s_dummy_initialized = true;
+        }
         mbedtls_ssl_conf_ca_chain(ssl_conf, &s_dummy_crt, NULL);
         mbedtls_ssl_conf_verify(ssl_conf, esp_crt_verify_callback, NULL);
     }
@@ -196,8 +205,9 @@ esp_err_t arduino_esp_crt_bundle_attach(void *conf)
 
 void arduino_esp_crt_bundle_detach(mbedtls_ssl_config *conf)
 {
-    free(s_crt_bundle.crts);
-    s_crt_bundle.crts = NULL;
+    std::lock_guard<std::mutex> lock(s_bundle_mutex);
+    // Other HTTPS/stream connections can still use the shared trust index.
+    // Retain this small immutable allocation for the lifetime of the firmware.
     if (conf) {
         mbedtls_ssl_conf_verify(conf, NULL, NULL);
     }
@@ -205,8 +215,10 @@ void arduino_esp_crt_bundle_detach(mbedtls_ssl_config *conf)
 
 void arduino_esp_crt_bundle_set(const uint8_t *x509_bundle)
 {
+    std::lock_guard<std::mutex> lock(s_bundle_mutex);
+    if (s_bundle_data == x509_bundle && s_crt_bundle.crts) return;
     // Free any previously used bundle
     free(s_crt_bundle.crts);
     s_crt_bundle.crts = NULL;
-    esp_crt_bundle_init(x509_bundle);
+    if (esp_crt_bundle_init(x509_bundle) == ESP_OK) s_bundle_data = x509_bundle;
 }

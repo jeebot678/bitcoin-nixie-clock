@@ -1,5 +1,10 @@
 # Independent live-price benchmark
 
+This records the 1.0.6 computer experiments. Firmware 1.0.7 now adds one
+independent USD stream with failover and a separate Nixie display timer;
+see [the refresh correction and device checks](NIXIE_REFRESH.md). The measured
+eight-stream computer throughput below is not an ESP32 performance claim.
+
 The computer-side simulation met the requested 500 ms quote-delivery target.
 It uses real public market data, runs without an ESP32, and requires no API keys,
 subscriptions or npm packages. The recorded runs took place on 2026-10-10 in

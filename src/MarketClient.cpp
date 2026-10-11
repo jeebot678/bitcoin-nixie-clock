@@ -5,6 +5,7 @@
 #include <time.h>
 #include "MarketClient.h"
 #include "OtaUpdate.h"
+#include "LivePrice.h"
 
 extern const uint8_t caBundle[] asm("_binary_data_cert_x509_crt_bundle_bin_start");
 namespace {
@@ -44,7 +45,10 @@ void fetch(const market::Request& request) {
   response.ok=false; response.status=0; response.retryAfterMs=0;
   response.quote={}; response.history.count=0; response.request=request;
   if (WiFi.status()!=WL_CONNECTED || time(nullptr)<config::kMinimumEpoch) return;
-  if (request.kind==market::Kind::Ota) { response.ok=ota::checkAndInstall();return; }
+  if (request.kind==market::Kind::Ota) {
+    if (live::pauseAndWait(15000)) response.ok=ota::checkAndInstall();
+    live::resume();return;
+  }
   String url;
   bool history=request.kind==market::Kind::History;
   // Reserve the contiguous JSON pool before TLS fragments the ESP32 heap.

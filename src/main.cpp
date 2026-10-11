@@ -8,10 +8,12 @@
 #include "OtaUpdate.h"
 #include "OtaConfig.h"
 #include "HistoryStore.h"
+#include "LivePrice.h"
 
 namespace {
 Provisioning wifi;
-btc::Dial refreshDial,timelineDial;
+// An unread/unstable selector must not silently leave the price at 30 seconds.
+btc::Dial refreshDial(0),timelineDial;
 btc::Rotation rotation;
 btc::FxRate fx;
 btc::PriceGuard guard;
@@ -22,6 +24,9 @@ uint32_t nextSaveAt[5] = {};
 market::Result result;
 bool networkReady=false,inflight=false,timeStarted=false;
 bool showingSetup=false;
+bool needConfirmation=true,logNixies=false;
+double shownPrice=0;
+uint32_t nextNixieAt=0,nixieFrames=0,lastNixieAt=0,acceptedQuotes=0;
 uint32_t nextQuoteAt=0,nextDialsAt=0,nextDrawAt=0,lastPriceEpoch=0,lastQuoteReceived=0;
 uint32_t nextHistoryAt[5]={},historyErrors[5]={};
 uint8_t historySource[5]={1,1,1,1,1};
@@ -39,6 +44,7 @@ void readDials(uint32_t now) {
   nextDialsAt=now+25;
   if (refreshDial.update(btc::dialPosition(millivolts(config::kRefreshPin),config::kRefreshMv),now)) {
     nextQuoteAt=now;
+    nextNixieAt=now;
     Serial.printf("Frequency JSEL2/GPIO35 position %d: %lu ms\n",refreshDial.stable+1,(unsigned long)config::kRefreshMs[refreshDial.stable]);
   }
   if (timelineDial.update(btc::dialPosition(millivolts(config::kTimelinePin),config::kTimelineMv),now)) {
@@ -55,6 +61,10 @@ void diagnostics(uint32_t now) {
   for (uint8_t window=0;window<5;++window) Serial.printf("  Cache %s: %u candles, savedEpoch=%lu\n",config::kWindowNames[window],histories[window].count,(unsigned long)historyStore.savedEpoch(window));
   for (size_t i=0;i<btc::kSourceCount;++i)
     Serial.printf("  %s failures=%u cooldown=%ld ms\n",btc::kSources[i].name,rotation.states[i].failures,(long)std::max<int32_t>(0,int32_t(rotation.states[i].availableAt-now)));
+  auto stream=live::status();
+  Serial.printf("  Nixie frames=%lu shown=%.2f latestQuoteAge=%lu ms nextFrame=%ld ms; frequencyDial=%s position=%d; stream=%s quotes=%lu accepted=%lu\n",
+    (unsigned long)nixieFrames,shownPrice,(unsigned long)uint32_t(now-lastQuoteReceived),(long)std::max<int32_t>(0,int32_t(nextNixieAt-now)),
+    refreshDial.initialized?"stable":"unconfirmed",refreshDial.stable+1,stream.connected?"connected":"offline",(unsigned long)stream.quotes,(unsigned long)acceptedQuotes);
 }
 void serialCommands(uint32_t now) {
   while (Serial.available()) {
@@ -68,7 +78,8 @@ void serialCommands(uint32_t now) {
     else if (serialLine=="wifi-reset") wifi.forget();
     else if (serialLine=="selftest") testEndsAt=now+4500;
     else if (serialLine=="reboot") ESP.restart();
-    else if (!serialLine.isEmpty()) Serial.println("Commands: status, dials, setup, wifi-reset, selftest, reboot");
+    else if (serialLine=="ticks") {logNixies=!logNixies;Serial.println(logNixies?"Nixie frame logging on":"Nixie frame logging off");}
+    else if (!serialLine.isEmpty()) Serial.println("Commands: status, dials, ticks, setup, wifi-reset, selftest, reboot");
     serialLine="";
   }
   if (digitalRead(0)==LOW) {
@@ -76,9 +87,44 @@ void serialCommands(uint32_t now) {
     if (!bootHandled && uint32_t(now-bootPressedAt)>=5000) { bootHandled=true; wifi.openSetup(); }
   } else { bootPressedAt=0; bootHandled=false; }
 }
+void acceptQuote(const btc::Quote& quote,uint8_t source,uint32_t receivedAt,uint32_t epoch,uint32_t now) {
+  double price;
+  if (!fx.normalize(quote.price,btc::kSources[source].usdt,now,price)) {nextQuoteAt=now+500;return;}
+  if (guard.accept(price,source,now)) {
+    lastPriceEpoch=quote.timestamp?quote.timestamp:epoch;
+    lastQuoteReceived=receivedAt;++acceptedQuotes;needConfirmation=false;
+    nextDrawAt=now;
+  } else {needConfirmation=true;nextQuoteAt=now;}
+}
+void processLive(uint32_t now) {
+  live::Tick tick;
+  if (live::receive(tick) && tick.source<2 && wifi.online() &&
+      uint32_t(now-tick.receivedAt)<=5000 && btc::freshTimestamp(tick.quote.timestamp,uint32_t(time(nullptr))))
+    acceptQuote(tick.quote,tick.source,tick.receivedAt,tick.quote.timestamp,now);
+}
+void refreshNixies(uint32_t now) {
+  if (!wifi.online()) {shownPrice=0;nextNixieAt=now;return;}
+  if (!guard.price || uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(config::kRefreshMs[refreshDial.stable])) {
+    display::blankPrice();shownPrice=0;return;
+  }
+  if (!shownPrice || btc::due(now,nextNixieAt)) {
+    const bool firstFrame=!shownPrice;
+    const uint32_t period=config::kRefreshMs[refreshDial.stable];
+    // Sample the latest accepted market value at the dial's cadence. Refresh
+    // every module even when rounding produces exactly the previous digits.
+    display::price(guard.price,true);shownPrice=guard.price;++nixieFrames;
+    if (logNixies) Serial.printf("Nixie frame at %lu ms: %.2f interval=%lu ms gap=%lu ms quoteAge=%lu ms\n",(unsigned long)now,shownPrice,
+      (unsigned long)config::kRefreshMs[refreshDial.stable],(unsigned long)uint32_t(now-lastNixieAt),(unsigned long)uint32_t(now-lastQuoteReceived));
+    lastNixieAt=now;
+    // Preserve the timer phase through normal loop jitter. If work delays a
+    // frame, send the latest value once and skip expired deadlines.
+    nextNixieAt=firstFrame?now+period:nextNixieAt+(uint32_t(now-nextNixieAt)/period+1)*period;
+  }
+}
 void processResult(uint32_t now) {
   if (!market::receive(result)) return;
   inflight=false;
+  live::httpBusy(false);
   if (result.request.kind==market::Kind::Ota) { nextQuoteAt=now;return; }
   size_t source=result.request.source;
   if (!result.ok) {
@@ -111,19 +157,14 @@ void processResult(uint32_t now) {
   } else {
     if (source==1 && result.quote.usdtUsd>=0.5 && result.quote.usdtUsd<=1.5) { fx.usd=result.quote.usdtUsd; fx.receivedAt=result.receivedAt; }
     if (result.request.kind==market::Kind::Fx && guard.price) return;
-    double price;
-    if (!fx.normalize(result.quote.price,btc::kSources[source].usdt,now,price)) { nextQuoteAt=now+500; return; }
-    if (guard.accept(price,source,now)) {
-      lastPriceEpoch=result.quote.timestamp?result.quote.timestamp:result.epoch;
-      lastQuoteReceived=result.receivedAt;
-      if (wifi.online()&&!wifi.portalActive()) display::price(price);
-      nextDrawAt=now;
-      Serial.printf("%s: BTC/USD %.2f%s\n",btc::kSources[source].name,price,btc::kSources[source].usdt?" (converted from USDT)":"");
-    } else { Serial.println("Price awaiting an independent confirmation"); nextQuoteAt=now+500; }
+    acceptQuote(result.quote,uint8_t(source),result.receivedAt,result.epoch,now);
+    if (needConfirmation) Serial.println("Price awaiting an independent confirmation");
+    else Serial.printf("%s: BTC/USD %.2f%s\n",btc::kSources[source].name,guard.price,btc::kSources[source].usdt?" (converted from USDT)":"");
   }
 }
 bool dispatch(market::Kind kind,uint8_t source,uint8_t window,uint32_t now,uint32_t epoch,uint32_t start=0) {
   if (!market::send({kind,source,window,epoch,start})) return false;
+  live::httpBusy(true);
   rotation.started(source,now); inflight=true; return true;
 }
 void schedule(uint32_t now) {
@@ -132,7 +173,7 @@ void schedule(uint32_t now) {
   if (epoch<config::kMinimumEpoch) return;
   const uint8_t window=timelineDial.stable;
   if (ota::checkDue(now,wifi.online()) && market::send({market::Kind::Ota,0,window,epoch})) {
-    ota::defer(now);inflight=true;return;
+    ota::defer(now);inflight=true;live::httpBusy(true);return;
   }
   if (guard.price && btc::due(now,nextHistoryAt[window])) {
     btc::trimHistory(histories[window],window,epoch);
@@ -153,7 +194,7 @@ void schedule(uint32_t now) {
   if ((!fx.fresh(now) || uint32_t(now-fx.receivedAt)>=config::kFxRefreshMs) && btc::due(now,rotation.states[1].availableAt)) {
     if (dispatch(market::Kind::Fx,1,window,now,epoch)) return;
   }
-  if (btc::due(now,nextQuoteAt)) {
+  if (btc::due(now,nextQuoteAt) && (needConfirmation || !live::fresh(now))) {
     int source=rotation.choose(now,fx.fresh(now));
     if (source>=0 && dispatch(market::Kind::Quote,uint8_t(source),window,now,epoch)) nextQuoteAt=now+config::kRefreshMs[refreshDial.stable];
     else nextQuoteAt=now+500;
@@ -171,10 +212,9 @@ void draw(uint32_t now) {
     display::setupStatus(wifi.setupState(),now);
     if (!wifi.online()) display::setupZero(now);
     else if (stale) display::blankPrice();
-    else display::price(guard.price);
     return;
   }
-  if (stale) display::blankPrice(); else display::price(guard.price);
+  if (stale) display::blankPrice();
   uint32_t epoch=uint32_t(time(nullptr));
   // A bare ESP32 cannot know how long it was off until SNTP succeeds. Before
   // then, show the saved dated snapshot; never use it as the TLS/current clock.
@@ -214,13 +254,14 @@ void setup() {
   analogSetPinAttenuation(config::kRefreshPin,ADC_11db); analogSetPinAttenuation(config::kTimelinePin,ADC_11db);
   Serial.println("Bitcoin Clock live firmware. Type status or dials; hold BOOT for 5 seconds to set up Wi-Fi.");
   wifi.begin(); networkReady=market::begin(); ota::begin();
+  if (!live::begin()) Serial.println("Live stream worker unavailable; using REST fallback.");
   if (!networkReady) Serial.println("HTTP worker allocation failed; reboot to retry.");
 }
 void loop() {
   uint32_t now=millis();
   wifi.loop(now); readDials(now); serialCommands(now);
   if (wifi.online()&&!timeStarted) { configTime(0,0,"time.cloudflare.com","pool.ntp.org","time.google.com"); timeStarted=true; }
-  processResult(now); draw(now); saveHistory(now); schedule(now);
+  processResult(now); processLive(now); refreshNixies(now); draw(now); saveHistory(now); schedule(now);
   ota::healthCheck(now,networkReady&&wifi.online()&&guard.price>0&&ESP.getFreeHeap()>30000);
   delay(2);
 }

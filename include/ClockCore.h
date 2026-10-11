@@ -25,6 +25,8 @@ inline int dialPosition(uint32_t mv, const uint16_t centers[5]) {
 }
 struct Dial {
   int stable = 2, candidate = -1;
+  Dial() = default;
+  explicit Dial(int initial) : stable(initial) {}
   bool initialized = false;
   uint32_t since = 0;
   bool update(int value, uint32_t now) {

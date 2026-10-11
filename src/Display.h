@@ -4,7 +4,7 @@
 
 namespace display {
 void begin();
-void price(double usd);
+void price(double usd, bool refresh = false);
 void blankPrice();
 void plot(const btc::Plot& plot);
 // Starts once per boot when a real chart is ready, then follows its latest pixels.

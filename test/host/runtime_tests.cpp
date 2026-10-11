@@ -10,6 +10,7 @@
 #include "OtaUpdate.h"
 #include "SPIFFS.h"
 #include "LedMatrixMap.h"
+#include "LivePrice.h"
 
 SerialMock Serial;EspMock ESP;WifiMock WiFi;uint32_t testMillis=100;
 std::map<int,int>pins,modes,adc;std::vector<GpioEvent>gpioEvents;std::vector<SpiPacket>packets;
@@ -24,6 +25,12 @@ void complete(bool ok=true,int status=200){queued={};queued.request=outstanding;
   ready=true;}
 }
 namespace ota {void begin(){}void healthCheck(uint32_t,bool){}bool checkDue(uint32_t,bool){return false;}void defer(uint32_t){}bool checkAndInstall(){return true;}}
+namespace live {
+Tick pending;bool queued=false,healthy=false,busy=false;
+bool begin(){return true;}bool receive(Tick& tick){if(!queued)return false;tick=pending;queued=false;return true;}
+Status status(){return Status{};}bool fresh(uint32_t){return healthy;}
+bool pauseAndWait(uint32_t){return true;}void resume(){}void httpBusy(bool value){busy=value;}
+}
 #define time testTime
 #include "../../src/main.cpp"
 #undef time
@@ -49,7 +56,7 @@ void settingsTests(){
   market::complete();processResult(testMillis);assert(!guard.price);
   testMillis+=501;schedule(testMillis);assert(market::outstanding.kind==market::Kind::Quote&&market::outstanding.source!=1);
   market::complete();processResult(testMillis);assert(guard.price==83300);
-  packets.clear();draw(testMillis);unsigned liveDigits=0;for(const auto&p:packets)if(p.bus==VSPI)++liveDigits;assert(liveDigits==6);
+  packets.clear();refreshNixies(testMillis);draw(testMillis);unsigned liveDigits=0;for(const auto&p:packets)if(p.bus==VSPI)++liveDigits;assert(liveDigits==6);
   testMillis+=8001;wifi.loop(testMillis);assert(!wifi.portalActive());packets.clear();draw(testMillis);assert(!showingSetup&&nextDrawAt==testMillis+1000);
   assert(display::startupPending()); // A live quote alone must not start the chart reveal.
   schedule(testMillis);assert(market::outstanding.kind==market::Kind::History);
@@ -124,4 +131,49 @@ void soak(){
   assert(sources.size()==11&&failures>0&&guard.price>0&&refreshDial.initialized&&timelineDial.initialized);
   std::cout<<"PASS: five refresh settings, FX/display separation, responsive dials during requests, 2-hour runtime across millis rollover ("<<market::calls<<" requests; "<<failures<<" injected rate limits)\n";
 }
-int main(){settingsTests();cacheRuntimeTests();soak();}
+void assertPriceFrame(double value){
+  uint8_t digits[6];assert(btc::priceDigits(value,digits));assert(packets.size()==6);
+  for(unsigned module=0;module<6;++module){auto&p=packets[module];assert(p.bus==VSPI&&p.selected==config::kNixieCs[module]&&p.bytes.size()==16&&p.bytes[0]==0xAA);
+    for(unsigned digit=1;digit<16;++digit)assert(p.bytes[digit]==((digit==unsigned(digits[module]?digits[module]:10))?0xC0:0x80));}
+}
+void nixieCadenceTests(){
+  assert(wifi.online()&&!wifi.portalActive());
+  uint32_t initial=testMillis;
+  for(unsigned setting=0;setting<5;++setting){
+    uint32_t period=config::kRefreshMs[setting],start=initial+setting*10000000;
+    testMillis=start;refreshDial.stable=setting;guard=btc::PriceGuard{};guard.accept(83300,0,start);assert(guard.accept(83300,1,start));
+    shownPrice=0;lastQuoteReceived=start;nextNixieAt=start;needConfirmation=false;
+    packets.clear();refreshNixies(start);assertPriceFrame(83300);uint32_t frames=nixieFrames;
+    // A history/TLS request can remain blocked while the independent stream
+    // updates the latest value. It cannot block or accelerate tube frames.
+    inflight=true;market::sent=true;
+    testMillis=start+period/2;
+    for(uint8_t source:{uint8_t(1),uint8_t(0)}){live::pending.quote.price=83342;live::pending.quote.timestamp=uint32_t(testEpoch);live::pending.receivedAt=testMillis;live::pending.source=source;live::queued=true;processLive(testMillis);}
+    assert(guard.price==83342&&shownPrice==83300);
+    packets.clear();refreshNixies(testMillis);assert(packets.empty()&&nixieFrames==frames);
+    testMillis=start+period-1;refreshNixies(testMillis);assert(packets.empty());
+    testMillis=start+period;refreshNixies(testMillis);assertPriceFrame(83342);assert(nixieFrames==frames+1);
+    packets.clear();testMillis=start+2*period;refreshNixies(testMillis);assertPriceFrame(83342);assert(nixieFrames==frames+2); // Identical digits still refresh all six tubes.
+    inflight=false;market::sent=false;
+  }
+  // A dial change takes effect immediately even with a network request active.
+  testMillis+=100;refreshDial.stable=4;refreshDial.candidate=-1;nextDialsAt=testMillis;
+  inflight=true;adc[35]=0;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(refreshDial.stable==0&&nextNixieAt==testMillis);
+  lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(83342);assert(nextNixieAt==testMillis+500);inflight=false;
+  // Once a stream is fresh, REST traffic is only needed for confirmation or fallback.
+  needConfirmation=false;live::healthy=true;fx.usd=1;fx.receivedAt=testMillis;nextQuoteAt=testMillis;for(auto&deadline:nextHistoryAt)deadline=testMillis+100000;
+  unsigned calls=market::calls;schedule(testMillis);assert(market::calls==calls);
+  live::healthy=false;for(auto&state:rotation.states)state.availableAt=testMillis;schedule(testMillis);assert(market::calls==calls+1&&live::busy);
+  market::complete();processResult(testMillis);assert(!live::busy);
+  // Cadence and stale blanking remain correct across millis rollover.
+  testMillis=UINT32_MAX-249;lastQuoteReceived=testMillis;shownPrice=0;packets.clear();refreshNixies(testMillis);assertPriceFrame(guard.price);
+  packets.clear();testMillis=249;refreshNixies(testMillis);assert(packets.empty());
+  testMillis=250;refreshNixies(testMillis);assertPriceFrame(guard.price);
+  packets.clear();testMillis+=btc::staleAfterMs(500)+1;refreshNixies(testMillis);assert(shownPrice==0&&packets.size()==6);
+  for(auto&p:packets)for(unsigned digit=1;digit<16;++digit)assert(p.bytes[digit]==0x80);
+  lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(guard.price);
+  // A late loop emits one current frame, without fake catch-up frames or timer drift.
+  uint32_t deadline=nextNixieAt;testMillis=deadline+1005;lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(guard.price);assert(nextNixieAt==deadline+1500);
+  std::cout<<"PASS: actual Nixie SPI frames at all five selected intervals, unchanged digits, newest stream values, blocked history/TLS, immediate dial changes, REST fallback, outage blanking and millis rollover\n";
+}
+int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();soak();}

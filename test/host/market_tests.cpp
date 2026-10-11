@@ -20,7 +20,9 @@ std::map<int,int> pins,modes,adc;std::vector<GpioEvent> gpioEvents;
 const uint8_t caBundle[] asm("_binary_data_cert_x509_crt_bundle_bin_start")={0};
 time_t testEpoch;
 time_t testTime(time_t* out){if(out)*out=testEpoch;return testEpoch;}
-namespace ota {bool checkAndInstall(){return true;}}
+unsigned otaCalls=0,pauseCalls=0,resumeCalls=0;bool streamPaused=true;
+namespace ota {bool checkAndInstall(){++otaCalls;return true;}}
+namespace live {bool pauseAndWait(uint32_t timeout){assert(timeout==15000);++pauseCalls;return streamPaused;}void resume(){++resumeCalls;}}
 #define time testTime
 #include "../../src/MarketClient.cpp"
 #undef time
@@ -57,6 +59,10 @@ int main(int argc,char** argv){assert(argc==4);std::string directory=argv[1];tes
   reply=good;reply.headers["Transfer-Encoding"]="chunked";httpResponses()[btc::kSources[0].url]=reply;fetch(request);assert(!response.ok);
   reply=good;reply.declaredSize=8193;httpResponses()[btc::kSources[0].url]=reply;fetch(request);assert(!response.ok);
   reply=good;reply.status=429;reply.headers["Retry-After"]="90";httpResponses()[btc::kSources[0].url]=reply;fetch(request);assert(!response.ok&&response.status==429&&response.retryAfterMs==90000);
+  // OTA must release the stream's TLS allocation before downloading. If the
+  // pause deadline expires, skip OTA and always release the pause request.
+  fetch({market::Kind::Ota,0,0,uint32_t(testEpoch)});assert(response.ok&&otaCalls==1&&pauseCalls==1&&resumeCalls==1);
+  streamPaused=false;fetch({market::Kind::Ota,0,0,uint32_t(testEpoch)});assert(!response.ok&&otaCalls==1&&pauseCalls==2&&resumeCalls==2);
   WiFi.connection=0;fetch(request);assert(!response.ok);
   std::cout<<"PASS: actual HTTP worker; all 11 quote and 10 history fixtures, truncation, cache freshness, framing, size bounds, rate limits and Wi-Fi loss\n";
 }
