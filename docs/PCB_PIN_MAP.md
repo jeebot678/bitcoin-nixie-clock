@@ -7,11 +7,12 @@ and `Controller_Rev20.sch` agree:
 
 | Control | PCB connection | Filtered net | ESP32 U7 pad | GPIO |
 | --- | --- | --- | --- | --- |
-| Frequency | JSEL1 common, through R1ADC | SEL1_ADC / C1ADC | J2_5 / IO34 | 34 |
-| Range | JSEL2 common, through R2ADC | SEL2_ADC / C2ADC | J2_6 / IO35 | 35 |
+| Range | JSEL1 common, through R1ADC | SEL1_ADC / C1ADC | J2_5 / IO34 | 34 |
+| Frequency | JSEL2 common, through R2ADC | SEL2_ADC / C2ADC | J2_6 / IO35 | 35 |
 
-The firmware assigns those functions deliberately; the original board only names
-the selectors SEL1 and SEL2. Label/wire the controls accordingly. Contacts POS1
+The original board only names the selectors SEL1 and SEL2. Firmware 1.0.6 swaps
+the functions to match the user's assembled controls: JSEL1 is range; JSEL2 is
+frequency. Contacts POS1
 through POS5 select the settings in README order. COMMON is the wiper; the other
 pole of a two-pole selector is unused. POS6 is not a setting in this firmware.
 

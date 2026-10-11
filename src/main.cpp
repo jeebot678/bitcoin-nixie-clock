@@ -39,11 +39,11 @@ void readDials(uint32_t now) {
   nextDialsAt=now+25;
   if (refreshDial.update(btc::dialPosition(millivolts(config::kRefreshPin),config::kRefreshMv),now)) {
     nextQuoteAt=now;
-    Serial.printf("Frequency JSEL1/GPIO34 position %d: %lu ms\n",refreshDial.stable+1,(unsigned long)config::kRefreshMs[refreshDial.stable]);
+    Serial.printf("Frequency JSEL2/GPIO35 position %d: %lu ms\n",refreshDial.stable+1,(unsigned long)config::kRefreshMs[refreshDial.stable]);
   }
   if (timelineDial.update(btc::dialPosition(millivolts(config::kTimelinePin),config::kTimelineMv),now)) {
     nextHistoryAt[timelineDial.stable]=now; nextDrawAt=now;
-    Serial.printf("Range JSEL2/GPIO35 position %d: %s (%u cached candles)\n",timelineDial.stable+1,config::kWindowNames[timelineDial.stable],histories[timelineDial.stable].count);
+    Serial.printf("Range JSEL1/GPIO34 position %d: %s (%u cached candles)\n",timelineDial.stable+1,config::kWindowNames[timelineDial.stable],histories[timelineDial.stable].count);
   }
 }
 void diagnostics(uint32_t now) {
@@ -63,7 +63,7 @@ void serialCommands(uint32_t now) {
     if (c!='\n') { if (serialLine.length()<64) serialLine+=c; continue; }
     serialLine.trim();
     if (serialLine=="status") diagnostics(now);
-    else if (serialLine=="dials") Serial.printf("Frequency JSEL1 GPIO34=%lu mV; range JSEL2 GPIO35=%lu mV\n",(unsigned long)millivolts(config::kRefreshPin),(unsigned long)millivolts(config::kTimelinePin));
+    else if (serialLine=="dials") Serial.printf("Frequency JSEL2 GPIO35=%lu mV; range JSEL1 GPIO34=%lu mV\n",(unsigned long)millivolts(config::kRefreshPin),(unsigned long)millivolts(config::kTimelinePin));
     else if (serialLine=="setup") wifi.openSetup();
     else if (serialLine=="wifi-reset") wifi.forget();
     else if (serialLine=="selftest") testEndsAt=now+4500;

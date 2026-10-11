@@ -1,0 +1,1155 @@
+{
+  "description": "Measured public Bitcoin quotes on a computer, without an ESP32. Delivery metrics exclude warmup and shutdown drain; provider counts include completed drain requests. See docs/PRICE_REFRESH_BENCHMARK.md for limits, methodology and reproduction.",
+  "node_version": "25.9.0",
+  "experiments": [
+    {
+      "mode": "baseline",
+      "policy": "firmware",
+      "started_at_utc": "2026-10-11T03:23:05.179Z",
+      "duration_ms": 40001.131125,
+      "warmup_ms": 10000,
+      "target_ms": 500,
+      "sample_period_ms": 400,
+      "firmware_transport_difference": "Node REST uses HTTP/1.1; baseline disables connection reuse and serializes requests. This measures a computer, not ESP32 TLS/CPU/Wi-Fi.",
+      "successful_rest_sources": [
+        "Coinbase",
+        "Kraken",
+        "Bitstamp",
+        "Gemini",
+        "Bitfinex",
+        "Binance",
+        "OKX",
+        "KuCoin",
+        "Gate",
+        "Bitget",
+        "MEXC"
+      ],
+      "successful_stream_sources": [],
+      "accepted_quotes": 55,
+      "accepted_quotes_per_second": 1.833264211633954,
+      "quote_gap_ms": {
+        "p50": 445.189,
+        "p95": 1116.48,
+        "max": 1189.986
+      },
+      "display": {
+        "samples": 75,
+        "samples_with_new_accepted_quote": 50,
+        "samples_with_receipt_age_within_target": 58,
+        "samples_with_new_trade": 0,
+        "whole_dollar_changes": 48,
+        "sample_gap_ms": {
+          "p50": 400.025,
+          "p95": 400.807,
+          "max": 401.884
+        },
+        "quote_receipt_age_ms": {
+          "p50": 267.91,
+          "p95": 970.448,
+          "max": 1231.966
+        },
+        "target_met": false
+      },
+      "providers": {
+        "Coinbase": {
+          "rest_attempts": 7,
+          "rest_success": 7,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 7
+          },
+          "rest_distinct_prices": 6,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 1,
+          "duplicates": 0,
+          "available": 42057.637582999996,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 5932.521832999999,
+          "last_request_at": 37057.637582999996,
+          "lastError": null,
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": 89.302,
+            "p95": 112.802,
+            "max": 112.802
+          }
+        },
+        "Kraken": {
+          "rest_attempts": 7,
+          "rest_success": 7,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 7
+          },
+          "rest_distinct_prices": 5,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 42559.395082999996,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 5931.402790999997,
+          "last_request_at": 37559.395082999996,
+          "lastError": null,
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": 182.009,
+            "p95": 217.919,
+            "max": 217.919
+          }
+        },
+        "Bitstamp": {
+          "rest_attempts": 7,
+          "rest_success": 7,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 7
+          },
+          "rest_distinct_prices": 3,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 43062.474624999995,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 5933.636332999999,
+          "last_request_at": 38062.474624999995,
+          "lastError": null,
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": 65.138,
+            "p95": 148.788,
+            "max": 148.788
+          }
+        },
+        "Gemini": {
+          "rest_attempts": 7,
+          "rest_success": 7,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 7
+          },
+          "rest_distinct_prices": 1,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 43564.628292,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 5931.108584000001,
+          "last_request_at": 38564.628292,
+          "lastError": null,
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": 167.452,
+            "p95": 219.488,
+            "max": 219.488
+          }
+        },
+        "Bitfinex": {
+          "rest_attempts": 7,
+          "rest_success": 7,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 7
+          },
+          "rest_distinct_prices": 4,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 44066.172708,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 5929.526958000002,
+          "last_request_at": 39066.172708,
+          "lastError": null,
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": 107.433,
+            "p95": 154.961,
+            "max": 154.961
+          }
+        },
+        "Binance": {
+          "rest_attempts": 7,
+          "rest_success": 7,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 7
+          },
+          "rest_distinct_prices": 4,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 44569.857707999996,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 5929.529791000001,
+          "last_request_at": 39569.857707999996,
+          "lastError": null,
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": 725.043,
+            "p95": 946.895,
+            "max": 946.895
+          }
+        },
+        "OKX": {
+          "rest_attempts": 6,
+          "rest_success": 6,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 6
+          },
+          "rest_distinct_prices": 3,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 39323.1225,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 5957.310332999999,
+          "last_request_at": 34323.1225,
+          "lastError": null,
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": 232.262,
+            "p95": 288.859,
+            "max": 288.859
+          }
+        },
+        "KuCoin": {
+          "rest_attempts": 6,
+          "rest_success": 6,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 6
+          },
+          "rest_distinct_prices": 4,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 2,
+          "available": 39828.618542,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 5955.366041000001,
+          "last_request_at": 34828.618542,
+          "lastError": null,
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": 241.691,
+            "p95": 307.249,
+            "max": 307.249
+          }
+        },
+        "Gate": {
+          "rest_attempts": 6,
+          "rest_success": 6,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 6
+          },
+          "rest_distinct_prices": 4,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 40331.055167,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 5958.572042,
+          "last_request_at": 35331.055167,
+          "lastError": null,
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": 749.128,
+            "p95": 932.357,
+            "max": 932.357
+          }
+        },
+        "Bitget": {
+          "rest_attempts": 6,
+          "rest_success": 6,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 6
+          },
+          "rest_distinct_prices": 3,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 41056.073542,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 5934.3401669999985,
+          "last_request_at": 36056.073542,
+          "lastError": null,
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": 232.21,
+            "p95": 326.011,
+            "max": 326.011
+          }
+        },
+        "MEXC": {
+          "rest_attempts": 6,
+          "rest_success": 6,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 6
+          },
+          "rest_distinct_prices": 5,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 41556.737333,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 5934.080582999999,
+          "last_request_at": 36556.737333,
+          "lastError": null,
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": 185.147,
+            "p95": 268.207,
+            "max": 268.207
+          }
+        },
+        "Bybit": {
+          "rest_attempts": 1,
+          "rest_success": 0,
+          "rest_errors": 1,
+          "http_statuses": {
+            "403": 1
+          },
+          "rest_distinct_prices": 0,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 3606281.69575,
+          "busy": false,
+          "failures": 1,
+          "min_request_gap_ms": null,
+          "last_request_at": 6162.970917000001,
+          "lastError": "HTTP 403",
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": null,
+            "p95": null,
+            "max": null
+          }
+        }
+      },
+      "raw_logs_sha256": {
+        "events": "a75d1ca3c9e77dc9840103641180792e9f81420b197dc2f83abc3e263d10e23d",
+        "samples": "83955f01022ab4542d5a0a2cbda9e019cc0ef6e525d564f6ff3ea81e4b41e6bf"
+      },
+      "rate_limit_http_responses": 0
+    },
+    {
+      "mode": "rest",
+      "policy": "fast",
+      "started_at_utc": "2026-10-11T03:26:45.835Z",
+      "duration_ms": 60000.166375,
+      "warmup_ms": 10000,
+      "target_ms": 500,
+      "sample_period_ms": 400,
+      "firmware_transport_difference": "Node REST uses HTTP/1.1; baseline disables connection reuse and serializes requests. This measures a computer, not ESP32 TLS/CPU/Wi-Fi.",
+      "successful_rest_sources": [
+        "Coinbase",
+        "Kraken",
+        "Bitstamp",
+        "Gemini",
+        "Bitfinex",
+        "Binance",
+        "OKX",
+        "KuCoin",
+        "Gate",
+        "Bitget",
+        "MEXC"
+      ],
+      "successful_stream_sources": [],
+      "accepted_quotes": 487,
+      "accepted_quotes_per_second": 9.739967590257844,
+      "quote_gap_ms": {
+        "p50": 91.948,
+        "p95": 249.606,
+        "max": 378.391
+      },
+      "display": {
+        "samples": 125,
+        "samples_with_new_accepted_quote": 125,
+        "samples_with_receipt_age_within_target": 125,
+        "samples_with_new_trade": 0,
+        "whole_dollar_changes": 121,
+        "sample_gap_ms": {
+          "p50": 399.968,
+          "p95": 400.897,
+          "max": 401.326
+        },
+        "quote_receipt_age_ms": {
+          "p50": 54.286,
+          "p95": 192.15,
+          "max": 249.771
+        },
+        "target_met": true
+      },
+      "providers": {
+        "Coinbase": {
+          "rest_attempts": 58,
+          "rest_success": 58,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 58
+          },
+          "rest_distinct_prices": 18,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 1,
+          "duplicates": 15,
+          "available": 60797.083875,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1013.1242090000014,
+          "last_request_at": 59797.083875,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 21.909,
+            "p95": 40.551,
+            "max": 107.707
+          }
+        },
+        "Kraken": {
+          "rest_attempts": 58,
+          "rest_success": 58,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 58
+          },
+          "rest_distinct_prices": 9,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 60902.234,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1012.3891249999942,
+          "last_request_at": 59902.234,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 95.958,
+            "p95": 184.908,
+            "max": 188.526
+          }
+        },
+        "Bitstamp": {
+          "rest_attempts": 57,
+          "rest_success": 57,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 57
+          },
+          "rest_distinct_prices": 5,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 13,
+          "available": 59981.4105,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1012.7012919999997,
+          "last_request_at": 58981.4105,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 20.171,
+            "p95": 109.096,
+            "max": 222.375
+          }
+        },
+        "Gemini": {
+          "rest_attempts": 57,
+          "rest_success": 57,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 57
+          },
+          "rest_distinct_prices": 2,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 60081.728624999996,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1013.3548749999991,
+          "last_request_at": 59081.728624999996,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 45.107,
+            "p95": 155.458,
+            "max": 185.733
+          }
+        },
+        "Bitfinex": {
+          "rest_attempts": 57,
+          "rest_success": 57,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 57
+          },
+          "rest_distinct_prices": 4,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 60181.817583,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1013.0460830000011,
+          "last_request_at": 59181.817583,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 25.224,
+            "p95": 46.968,
+            "max": 163.26
+          }
+        },
+        "Binance": {
+          "rest_attempts": 57,
+          "rest_success": 57,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 57
+          },
+          "rest_distinct_prices": 8,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 60284.493375,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1012.0528750000012,
+          "last_request_at": 59284.493375,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 170.832,
+            "p95": 261.213,
+            "max": 721.962
+          }
+        },
+        "OKX": {
+          "rest_attempts": 57,
+          "rest_success": 57,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 57
+          },
+          "rest_distinct_prices": 9,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 60385.934125,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1016.1222500000003,
+          "last_request_at": 59385.934125,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 183.636,
+            "p95": 248.94,
+            "max": 295.394
+          }
+        },
+        "KuCoin": {
+          "rest_attempts": 57,
+          "rest_success": 57,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 57
+          },
+          "rest_distinct_prices": 6,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 48,
+          "available": 60488.471042,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1014.9986659999995,
+          "last_request_at": 59488.471042,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 176.66,
+            "p95": 215.362,
+            "max": 258.755
+          }
+        },
+        "Gate": {
+          "rest_attempts": 57,
+          "rest_success": 57,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 57
+          },
+          "rest_distinct_prices": 12,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 60592.246332999996,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1015.4547500000008,
+          "last_request_at": 59592.246332999996,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 185.623,
+            "p95": 454.378,
+            "max": 825.446
+          }
+        },
+        "Bitget": {
+          "rest_attempts": 57,
+          "rest_success": 57,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 57
+          },
+          "rest_distinct_prices": 8,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 2,
+          "available": 60695.750374999996,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1015.4213330000002,
+          "last_request_at": 59695.750374999996,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 180.895,
+            "p95": 255.242,
+            "max": 280.465
+          }
+        },
+        "MEXC": {
+          "rest_attempts": 12,
+          "rest_success": 12,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 12
+          },
+          "rest_distinct_prices": 7,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 63676.083291999996,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 5208.128166999995,
+          "last_request_at": 58676.083291999996,
+          "lastError": null,
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": 146.259,
+            "p95": 220.645,
+            "max": 220.645
+          }
+        },
+        "Bybit": {
+          "rest_attempts": 1,
+          "rest_success": 0,
+          "rest_errors": 1,
+          "http_statuses": {
+            "403": 1
+          },
+          "rest_distinct_prices": 0,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 3601341.22275,
+          "busy": false,
+          "failures": 1,
+          "min_request_gap_ms": null,
+          "last_request_at": 1211.955083,
+          "lastError": "HTTP 403",
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": null,
+            "p95": null,
+            "max": null
+          }
+        }
+      },
+      "raw_logs_sha256": {
+        "events": "62aa9cec8db3c50dbe3ae517625d999414fc313b950d3bf676d0111db5c70fb6",
+        "samples": "9260f0e6c7b5add949407b26f6ec8a1339c28bf8a70c40cfaaca3fa8bba140a1"
+      },
+      "rate_limit_http_responses": 0
+    },
+    {
+      "mode": "stream",
+      "policy": "fast",
+      "started_at_utc": "2026-10-11T03:09:50.917Z",
+      "duration_ms": 180002.124875,
+      "warmup_ms": 10000,
+      "target_ms": 500,
+      "sample_period_ms": 400,
+      "firmware_transport_difference": "Node REST uses HTTP/1.1; baseline disables connection reuse and serializes requests. This measures a computer, not ESP32 TLS/CPU/Wi-Fi.",
+      "successful_rest_sources": [
+        "Coinbase",
+        "Kraken",
+        "Bitstamp",
+        "Gemini",
+        "Bitfinex",
+        "Binance",
+        "OKX",
+        "KuCoin",
+        "Gate",
+        "Bitget",
+        "MEXC"
+      ],
+      "successful_stream_sources": [
+        "Coinbase",
+        "Kraken",
+        "Bitstamp",
+        "Bitfinex",
+        "Binance",
+        "OKX",
+        "Gate",
+        "Bitget"
+      ],
+      "accepted_quotes": 4779,
+      "accepted_quotes_per_second": 28.11141333388583,
+      "quote_gap_ms": {
+        "p50": 8.094,
+        "p95": 133.326,
+        "max": 274.142
+      },
+      "display": {
+        "samples": 425,
+        "samples_with_new_accepted_quote": 425,
+        "samples_with_receipt_age_within_target": 425,
+        "samples_with_new_trade": 366,
+        "whole_dollar_changes": 391,
+        "sample_gap_ms": {
+          "p50": 399.982,
+          "p95": 400.909,
+          "max": 402.492
+        },
+        "quote_receipt_age_ms": {
+          "p50": 39.56,
+          "p95": 131.747,
+          "max": 237.101
+        },
+        "target_met": true
+      },
+      "providers": {
+        "Coinbase": {
+          "rest_attempts": 172,
+          "rest_success": 172,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 172
+          },
+          "rest_distinct_prices": 46,
+          "ws_connections": 1,
+          "ws_messages": 803,
+          "ws_quotes": 623,
+          "ws_errors": 0,
+          "rejected": 2,
+          "duplicates": 40,
+          "available": 180245.90625,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1012.3993340000015,
+          "last_request_at": 179245.90625,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 25.101,
+            "p95": 34.935,
+            "max": 154.783
+          }
+        },
+        "Kraken": {
+          "rest_attempts": 172,
+          "rest_success": 172,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 172
+          },
+          "rest_distinct_prices": 29,
+          "ws_connections": 1,
+          "ws_messages": 281,
+          "ws_quotes": 243,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 180346.229958,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1011.5237079999933,
+          "last_request_at": 179346.229958,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 32.416,
+            "p95": 130.125,
+            "max": 184.135
+          }
+        },
+        "Bitstamp": {
+          "rest_attempts": 172,
+          "rest_success": 172,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 172
+          },
+          "rest_distinct_prices": 20,
+          "ws_connections": 1,
+          "ws_messages": 113,
+          "ws_quotes": 112,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 29,
+          "available": 180446.411583,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1013.2538749999949,
+          "last_request_at": 179446.411583,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 16.621,
+            "p95": 24.033,
+            "max": 129.159
+          }
+        },
+        "Gemini": {
+          "rest_attempts": 172,
+          "rest_success": 172,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 172
+          },
+          "rest_distinct_prices": 4,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 180548.924708,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1010.7794580000045,
+          "last_request_at": 179548.924708,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 44.139,
+            "p95": 149.15,
+            "max": 1139.411
+          }
+        },
+        "Bitfinex": {
+          "rest_attempts": 172,
+          "rest_success": 172,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 172
+          },
+          "rest_distinct_prices": 13,
+          "ws_connections": 1,
+          "ws_messages": 215,
+          "ws_quotes": 100,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 180651.298,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1011.4715410000063,
+          "last_request_at": 179651.298,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 21.918,
+            "p95": 42.116,
+            "max": 137.412
+          }
+        },
+        "Binance": {
+          "rest_attempts": 172,
+          "rest_success": 172,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 172
+          },
+          "rest_distinct_prices": 38,
+          "ws_connections": 1,
+          "ws_messages": 1419,
+          "ws_quotes": 1419,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 180754.391333,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1012.7260419999984,
+          "last_request_at": 179754.391333,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 165.634,
+            "p95": 170.739,
+            "max": 773.982
+          }
+        },
+        "OKX": {
+          "rest_attempts": 172,
+          "rest_success": 172,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 172
+          },
+          "rest_distinct_prices": 31,
+          "ws_connections": 1,
+          "ws_messages": 303,
+          "ws_quotes": 294,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 1,
+          "available": 180855.455583,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1012.4108750000014,
+          "last_request_at": 179855.455583,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 178.899,
+            "p95": 195.126,
+            "max": 245.556
+          }
+        },
+        "KuCoin": {
+          "rest_attempts": 172,
+          "rest_success": 172,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 172
+          },
+          "rest_distinct_prices": 51,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 98,
+          "available": 180960.114667,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1009.6335419999959,
+          "last_request_at": 179960.114667,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 177.057,
+            "p95": 187.652,
+            "max": 268.523
+          }
+        },
+        "Gate": {
+          "rest_attempts": 170,
+          "rest_success": 170,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 170
+          },
+          "rest_distinct_prices": 25,
+          "ws_connections": 1,
+          "ws_messages": 178,
+          "ws_quotes": 169,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 179933.76125,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1013.3083750000078,
+          "last_request_at": 178933.76125,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 184.842,
+            "p95": 423.474,
+            "max": 1111.324
+          }
+        },
+        "Bitget": {
+          "rest_attempts": 171,
+          "rest_success": 171,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 171
+          },
+          "rest_distinct_prices": 24,
+          "ws_connections": 1,
+          "ws_messages": 176,
+          "ws_quotes": 319,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 5,
+          "available": 180037.03975,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 1004.8115830000006,
+          "last_request_at": 179037.03975,
+          "lastError": null,
+          "minimum_interval_ms": 1000,
+          "rest_latency_ms": {
+            "p50": 184.892,
+            "p95": 230.924,
+            "max": 360.736
+          }
+        },
+        "MEXC": {
+          "rest_attempts": 35,
+          "rest_success": 35,
+          "rest_errors": 0,
+          "http_statuses": {
+            "200": 35
+          },
+          "rest_distinct_prices": 14,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 184141.617208,
+          "busy": false,
+          "failures": 0,
+          "min_request_gap_ms": 5208.895542000013,
+          "last_request_at": 179141.617208,
+          "lastError": null,
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": 133.156,
+            "p95": 258.309,
+            "max": 373.008
+          }
+        },
+        "Bybit": {
+          "rest_attempts": 1,
+          "rest_success": 0,
+          "rest_errors": 1,
+          "http_statuses": {
+            "403": 1
+          },
+          "rest_distinct_prices": 0,
+          "ws_connections": 0,
+          "ws_messages": 0,
+          "ws_quotes": 0,
+          "ws_errors": 0,
+          "rejected": 0,
+          "duplicates": 0,
+          "available": 3601433.981208,
+          "busy": false,
+          "failures": 1,
+          "min_request_gap_ms": null,
+          "last_request_at": 1319.587042,
+          "lastError": "HTTP 403",
+          "minimum_interval_ms": 5000,
+          "rest_latency_ms": {
+            "p50": null,
+            "p95": null,
+            "max": null
+          }
+        }
+      },
+      "raw_logs_sha256": {
+        "events": "f89a93782644663e0c0b57e4adcc774809a446866051c98957aecd26279cccf2",
+        "samples": "a2b66547e4ce06a4f939b88d0f72f240dec98d2e4f086398df85cf334d699aba"
+      },
+      "rate_limit_http_responses": 0
+    }
+  ]
+}

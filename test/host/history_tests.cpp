@@ -13,9 +13,9 @@ btc::History full(uint8_t window,uint32_t epoch){
 void repairChecksum(std::vector<uint8_t>&file){btc::cachePut32(file.data()+28,btc::cacheCrc(btc::cacheCrc(UINT32_MAX,file.data(),28),file.data()+32,file.size()-32)^UINT32_MAX);}
 int main(){
   const uint32_t now=1800000000;
-  const uint32_t frequencies[]={500,2000,30000,300000,1800000},ranges[]={300,1800,3600,86400,604800};
+  const uint32_t frequencies[]={500,2000,30000,300000,3600000},ranges[]={300,1800,3600,86400,604800};
   for(unsigned w=0;w<5;++w){assert(config::kRefreshMs[w]==frequencies[w]&&config::kWindowSeconds[w]==ranges[w]);}
-  assert(config::kRefreshPin==34&&config::kTimelinePin==35);
+  assert(config::kRefreshPin==35&&config::kTimelinePin==34);
   btc::History histories[5];HistoryStore store;assert(store.begin(histories));
   for(uint8_t w=0;w<5;++w){histories[w]=full(w,now);assert(store.save(w,histories[w],now));assert(!btc::missingHistoryStart(histories[w],w,now));}
   // A new instance models loss of all RAM. Every visited dial position restores.

@@ -54,9 +54,9 @@ void settingsTests(){
   assert(display::startupPending()); // A live quote alone must not start the chart reveal.
   schedule(testMillis);assert(market::outstanding.kind==market::Kind::History);
   unsigned before=market::calls;
-  adc[34]=1800;adc[35]=503;readDials(testMillis);testMillis+=151;readDials(testMillis);
+  adc[35]=1800;adc[34]=503;readDials(testMillis);testMillis+=151;readDials(testMillis);
   assert(refreshDial.stable==4&&timelineDial.stable==1);schedule(testMillis);assert(market::calls==before);
-  Serial.input="dials\n";serialCommands(testMillis);assert(Serial.log.find("range JSEL2 GPIO35=503 mV")!=std::string::npos);
+  Serial.input="dials\n";serialCommands(testMillis);assert(Serial.log.find("Frequency JSEL2 GPIO35=1800 mV; range JSEL1 GPIO34=503 mV")!=std::string::npos);
   market::complete();processResult(testMillis);
   packets.clear();draw(testMillis);assert(display::startupAnimating()&&nextDrawAt==testMillis+config::kStartupFrameMs);
   testMillis+=273*config::kStartupCellMs;draw(testMillis);assert(display::startupAnimating());
@@ -83,8 +83,8 @@ void cacheRuntimeTests(){
   unsigned writes=fsMock().writes;saveHistory(testMillis);assert(fsMock().writes==writes);
   nextQuoteAt=testMillis+1800000;nextHistoryAt[4]=testMillis;unsigned calls=market::calls;schedule(testMillis);assert(market::calls==calls);
   // Switching away and back changes draw timing, without refetching a complete cache.
-  adc[35]=1336;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(timelineDial.stable==3);
-  adc[35]=1800;testMillis+=25;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(timelineDial.stable==4);
+  adc[34]=1336;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(timelineDial.stable==3);
+  adc[34]=1800;testMillis+=25;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(timelineDial.stable==4);
   nextQuoteAt=testMillis+1800000;fx.receivedAt=testMillis;schedule(testMillis);assert(market::calls==calls);
   // The actual main scheduler requests only the missing two days.
   testEpoch+=2*86400;testMillis+=6000;nextHistoryAt[4]=testMillis;schedule(testMillis);
@@ -116,7 +116,7 @@ void soak(){
   std::set<unsigned> sources;unsigned failures=0;
   for(uint32_t elapsed=0;elapsed<7200000;elapsed+=100){
     testMillis=start+elapsed;testEpoch=1791408754+elapsed/1000;
-    int position=(elapsed/60000)%5;adc[34]=config::kRefreshMv[position];adc[35]=config::kTimelineMv[(position+1)%5];
+    int position=(elapsed/60000)%5;adc[35]=config::kRefreshMv[position];adc[34]=config::kTimelineMv[(position+1)%5];
     if(market::sent){sources.insert(market::outstanding.source);bool fail=market::calls%17==0;if(fail)++failures;market::complete(!fail,fail?429:200);}
     loop();
     if(elapsed%60000==0){packets.clear();gpioEvents.clear();Serial.log.clear();}

@@ -8,15 +8,15 @@ constexpr uint8_t kNixieCs[6] = {16, 17, 21, 22, 25, 26};
 // Preserve the shift order proved by the working Rev20 demo.
 constexpr uint8_t kMaxShiftOrder[6] = {3, 4, 5, 2, 1, 0};
 // Rev20: SEL1_ADC -> U7.J2_5/IO34; SEL2_ADC -> U7.J2_6/IO35.
-// JSEL1 = frequency, JSEL2 = range.
-constexpr uint8_t kRefreshPin = 34, kTimelinePin = 35;
+// As assembled: JSEL1 = range, JSEL2 = frequency.
+constexpr uint8_t kRefreshPin = 35, kTimelinePin = 34;
 // First five contacts of the board's resistor ladder. Use `dials` over serial
 // to measure the assembled selectors; adjust EACH dial independently here.
 constexpr uint16_t kRefreshMv[5] = {0, 503, 926, 1336, 1800};
 constexpr uint16_t kTimelineMv[5] = {0, 503, 926, 1336, 1800};
 constexpr uint16_t kDialToleranceMv = 160;
 constexpr uint32_t kDebounceMs = 150;
-constexpr uint32_t kRefreshMs[5] = {500, 2000, 30000, 300000, 1800000};
+constexpr uint32_t kRefreshMs[5] = {500, 2000, 30000, 300000, 3600000};
 constexpr uint32_t kWindowSeconds[5] = {300, 1800, 3600, 86400, 604800};
 constexpr uint32_t kCandleSeconds[5] = {60, 60, 60, 300, 3600};
 constexpr const char* kWindowNames[5] = {"5 minutes", "30 minutes", "1 hour", "24 hours", "7 days"};

@@ -77,6 +77,7 @@ def main():
         text=(ROOT/"src/Provisioning.cpp").read_text();script=text.split("<script>",1)[1].split("</script>",1)[0]
         (build/"portal.js").write_text(script);run(["node","--check",build/"portal.js"])
         run(["node","test/host/portal_tests.cjs",build/"portal.js"])
+        run(["node","test/host/price_sim_tests.mjs"])
     print("PASS: all sanitized host suites and portal JavaScript behavior")
 
 

@@ -6,13 +6,13 @@ The clock obtains BTC/USD from eleven independent, free public exchange endpoint
 
 ## Controls
 
-| Position | Frequency: JSEL1 (GPIO34) | Range: JSEL2 (GPIO35) |
+| Position | Frequency: JSEL2 (GPIO35) | Range: JSEL1 (GPIO34) |
 | --- | --- | --- |
 | 1 | 0.5 seconds | 5 minutes |
 | 2 | 2 seconds | 30 minutes |
 | 3 | 30 seconds | 1 hour |
 | 4 | 5 minutes | 24 hours |
-| 5 | 30 minutes | 7 days |
+| 5 | 1 hour | 7 days |
 
 The Nixies show the latest accepted price rounded to whole USD. The graph samples real closed candles into 21 time buckets and overlays the live tick. Changes below a pixel do not cause display traffic. Each visited range is saved in onboard flash, restored at boot and immediately available on later dial changes. Current prices are refreshed separately from historical candles. The fastest setting is a polling target; HTTPS latency, outages and firmware installation can extend the interval.
 
@@ -62,7 +62,7 @@ Keep and back up `secrets/ota-signing-key.pem` privately. Only `data/cert/ota-pu
 To publish a future update from a clean `main` checkout after committing your code changes:
 
 ```sh
-python3 tools/publish_release.py --version 1.0.6
+python3 tools/publish_release.py --version 1.0.7
 ```
 
 That command builds, runs the host tests, signs locally, pushes the versioned source, publishes the firmware release, then pushes the signed rollout manifest to `main`. The signing key is never sent to GitHub. Price polling pauses during the shared worker's update download; the loop and rotary inputs continue running.
@@ -74,10 +74,18 @@ pio run
 python3 tools/run_tests.py
 ```
 
+The independent live-price simulation runs on the computer, without an ESP32 or npm dependencies. Use Node with built-in `WebSocket` support (tested on Node 25.9.0):
+
+```sh
+node tools/simulate_prices.mjs --mode stream --policy fast --seconds 180
+```
+
+It probes the eleven firmware REST providers and Bybit, subscribes to eight public trade streams, validates real quotes, and records every response and display sample. A three-minute run delivered 28.1 accepted quotes/s with a longest quote gap of 274 ms and a new quote at every 400 ms sample, without rate-limit responses. See the [benchmark, endpoint rules and reproduction commands](docs/PRICE_REFRESH_BENCHMARK.md). This transport runs only in the simulation; firmware 1.0.6 retains the existing single HTTPS worker. Its firmware changes swap the controls and replace the final 30-minute frequency with one hour.
+
 The host tests compile the actual provisioning, display, application-loop, HTTP worker, TLS bundle callback and OTA code with modeled hardware/network/flash and address/undefined-behavior sanitizers. They cover all eleven live quote fixtures, both history providers at five scales and their ESP32 memory budgets, truncated/stale HTTP responses, dial noise/debounce, rollover, currency conversion, stale data, Nixie packet bytes, setup text/scrolling and single-zero chase timing, LED chain ordering, Wi-Fi errors/reconnection/persistence, OTA signatures/corruption/interruption/flash failure, and boot rollback decisions. Startup tests check the physical SPI output at every fill and clear step, preservation of chart pixels, changes to the chart during the reveal, delayed frames, once-per-boot behavior and clock rollover. The portal's actual JavaScript runs against a DOM/network model to check selection, safe SSID rendering, scanning/retries, passwords, submission and connection status. TLS tests require exact trusted-root subjects and public keys, verify real ECDSA signatures and preserve certificate validation failures. The actual history-store code is tested for restoration of every range, two-day incremental backfill, internal gaps, duplicates, expired data, every truncated-write/byte-corruption offset, failed storage and generation rollover. Runtime tests verify instant range recall, no redundant downloads/writes and saved charts before SNTP. A two-hour simulated runtime crosses the `millis()` wrap and injects rate-limit failures. OpenSSL independently supplies the host crypto adapter; ESP32 builds use mbedTLS. CI repeats the build and host suites on `main` and pull requests.
 
 `src/CertificateBundle.cpp` adapts the Apache-licensed Arduino-ESP32 bundle verifier so a cross-signed root can terminate a chain when its complete subject and public key match the embedded Mozilla trust store. Certificate dates, hostnames and other verification failures remain enforced. Chart JSON pools are sized for the selected window and reserved before the HTTPS handshake to avoid heap fragmentation.
 
-Endpoint probes are low-volume public requests, not load tests. `test/live_probe_report.json` records verification time, status and response headers. `docs/SOURCES.md` records official quota and freshness documentation. Earlier firmware has been USB-flashed to the attached ESP32 with esptool hash verification; v1.0.5 device acceptance is tracked separately. ADC calibration, real Wi-Fi/TLS memory use, visible tube/LED appearance and actual power-loss/bootloader rollback still require the device acceptance checks in `docs/DEVICE_ACCEPTANCE.md`.
+`test/live_probe_report.json` records low-volume endpoint verification, status and response headers. `test/price_benchmark_report.json` records the bounded computer-side throughput runs; these are separate from device acceptance. `docs/SOURCES.md` records official quota and freshness documentation. Firmware 1.0.5 has been USB-flashed with esptool hash verification and confirmed Wi-Fi, SNTP, live quotes and saved history over serial. ADC calibration, real Wi-Fi/TLS memory use, visible tube/LED appearance and actual power-loss/bootloader rollback still require the device acceptance checks in `docs/DEVICE_ACCEPTANCE.md`.
 
 After publishing, `python3 tools/verify_deployment.py` independently verifies the public `main` manifest signature and downloaded release image, using the firmware's HTTP mode, redirect hosts and Mozilla certificate roots. `python3 tools/probe_sources.py --history` refreshes the public market fixtures with five-second spacing between requests to the same provider; the excluded Bybit endpoint remains a geographic-access diagnostic.
