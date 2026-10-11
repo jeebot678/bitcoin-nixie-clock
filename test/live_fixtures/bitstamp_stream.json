@@ -1,0 +1,16 @@
+{
+  "data": {
+    "id": 653102278,
+    "timestamp": "1791743247",
+    "amount": 0.006,
+    "amount_str": "0.00600000",
+    "price": 83773.06,
+    "price_str": "83773.06",
+    "type": 0,
+    "microtimestamp": "1791743247400000",
+    "buy_order_id": 2059912285155329,
+    "sell_order_id": 2059912263426048
+  },
+  "channel": "live_trades_btcusd",
+  "event": "trade"
+}

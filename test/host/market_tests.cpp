@@ -22,7 +22,7 @@ time_t testEpoch;
 time_t testTime(time_t* out){if(out)*out=testEpoch;return testEpoch;}
 unsigned otaCalls=0,pauseCalls=0,resumeCalls=0;bool streamPaused=true;
 namespace ota {bool checkAndInstall(){++otaCalls;return true;}}
-namespace live {bool pauseAndWait(uint32_t timeout){assert(timeout==15000);++pauseCalls;return streamPaused;}void resume(){++resumeCalls;}}
+namespace live {bool prepareHttp(size_t capacity,uint32_t timeout){assert(capacity>0&&timeout==30000);++pauseCalls;return streamPaused;}}
 #define time testTime
 #include "../../src/MarketClient.cpp"
 #undef time
@@ -59,10 +59,10 @@ int main(int argc,char** argv){assert(argc==4);std::string directory=argv[1];tes
   reply=good;reply.headers["Transfer-Encoding"]="chunked";httpResponses()[btc::kSources[0].url]=reply;fetch(request);assert(!response.ok);
   reply=good;reply.declaredSize=8193;httpResponses()[btc::kSources[0].url]=reply;fetch(request);assert(!response.ok);
   reply=good;reply.status=429;reply.headers["Retry-After"]="90";httpResponses()[btc::kSources[0].url]=reply;fetch(request);assert(!response.ok&&response.status==429&&response.retryAfterMs==90000);
-  // OTA must release the stream's TLS allocation before downloading. If the
-  // pause deadline expires, skip OTA and always release the pause request.
-  fetch({market::Kind::Ota,0,0,uint32_t(testEpoch)});assert(response.ok&&otaCalls==1&&pauseCalls==1&&resumeCalls==1);
-  streamPaused=false;fetch({market::Kind::Ota,0,0,uint32_t(testEpoch)});assert(!response.ok&&otaCalls==1&&pauseCalls==2&&resumeCalls==2);
+  // Manifest checks reserve HTTP memory without blindly pausing the primary.
+  unsigned reservations=pauseCalls;
+  fetch({market::Kind::Ota,0,0,uint32_t(testEpoch)});assert(response.ok&&otaCalls==1&&pauseCalls==reservations+1&&!resumeCalls);
+  streamPaused=false;fetch({market::Kind::Ota,0,0,uint32_t(testEpoch)});assert(!response.ok&&otaCalls==1&&pauseCalls==reservations+2);streamPaused=true;
   {btc::TlsLease streamHandshake;assert(streamHandshake.acquire());uint32_t waitingAt=testMillis;fetch(request);assert(!response.ok&&uint32_t(testMillis-waitingAt)>=15000);}
   httpResponses()[btc::kSources[0].url]=good;fetch(request);assert(response.ok); // Gate releases on every return path.
   WiFi.connection=0;fetch(request);assert(!response.ok);

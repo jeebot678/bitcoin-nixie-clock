@@ -1,0 +1,7 @@
+{
+  "event": "subscribed",
+  "channel": "trades",
+  "chanId": 250703,
+  "symbol": "tBTCUSD",
+  "pair": "BTCUSD"
+}

@@ -2,20 +2,20 @@
 
 Verified on 2026-10-10 using HTTP/1.0, identity encoding and the same Mozilla roots embedded in the firmware: all eleven default tickers returned HTTP 200 and parsed as valid prices. Kraken and Bitstamp returned valid history for all five windows and actual incremental requests for one closed hour and 48 closed hours. Bybit returned HTTP 403 from this network and is excluded. The exact responses, timings and headers are in `test/live_probe_report.json` and `test/live_fixtures/`.
 
-These are independent exchanges, so their last trade prices can differ. Rotation distributes a very small request load while respecting each provider's limits; it does not bypass a provider's quota or IP restrictions. REST uses a minimum five-second interval per provider (at most 12 requests/minute per provider), including shared Kraken/Bitstamp history traffic. REST, FX and history are serialized by one worker. From 1.0.7, one separate persistent USD stream supplies the latest accepted price, and the frequency dial controls an independent tube timer. A fresh stream suppresses redundant REST ticker requests; quiet/disconnected streams use REST fallback.
+These exchanges can report different last-trade prices. Firmware 1.0.9 caches accepted quotes per provider and prefers recent quotes that change whole-dollar digits. REST uses at least five seconds per provider, including shared history/FX traffic, and respects quotas and geographic restrictions. At 0.5 s, a cosmetic rounding effect bounded to $1 can keep digits moving when real quotes round alike; charts/history retain real values. See [exact refresh behavior](NIXIE_REFRESH.md).
 
-Version 1.0.8 corrects device TLS scheduling and coordinates new connections;
-the 1.0.7 rollout was withdrawn after hardware watchdog failures. Successful
-USB refresh measurements are separate from computer throughput experiments:
-see [device timing and chart buckets](NIXIE_REFRESH.md).
+## Device live streams
 
-## Device live stream
+Two independent verified TLS connections prefer Kraken and Coinbase, with Bitstamp and Bitfinex as fallback. Each worker owns its queue; a busy feed cannot overwrite another's waiting quote. One provider cannot be owned by both workers. The secondary releases memory during HTTP work, while a routine OTA check retains the primary. Retries back off 5–60 seconds, at least a minute for HTTP 429, and an hour for authorization/geographic errors.
 
-Kraken primary: `wss://ws.kraken.com/v2`, `ticker`, symbol `BTC/USD`, `event_trigger:bbo`, snapshot enabled. Parse `data[0].last` and ticker `timestamp`; bid/ask changes can trigger delivery while the last trade price stays unchanged. [Official ticker schema](https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/ticker). The public endpoint needs no key. Kraken documents roughly 150 connection attempts per rolling ten minutes/IP and recommends at least five seconds between reconnections after downtime. [Official connection rules](https://docs.kraken.com/exchange/guides/websockets/introduction).
+| Provider | Endpoint / public subscription | Rules and freshness |
+| --- | --- | --- |
+| Kraken | `wss://ws.kraken.com/v2`; `ticker`, `BTC/USD`, `event_trigger:bbo`, snapshot enabled | Last-trade price, UTC ticker timestamp. BBO updates can repeat a price. About 150 connection attempts/rolling 10 minutes/IP; reconnect no faster than five seconds after downtime. [Ticker](https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/ticker), [connection rules](https://docs.kraken.com/exchange/guides/websockets/introduction). |
+| Coinbase | `wss://ws-feed.exchange.coinbase.com`; `ticker` and `heartbeat`, `BTC-USD` | Ticker on matches, batching cascades; actual trade timestamp. Five-second `ticker_batch` is excluded. Client messages 10/s, burst 1,000. [Channels](https://docs.cdp.coinbase.com/exchange/websocket-feed/channels), [limits](https://docs.cdp.coinbase.com/exchange/websocket-feed/rate-limits). |
+| Bitstamp | `wss://ws.bitstamp.net`; `live_trades_btcusd` | Real trade price, microtimestamp and ID; honor reconnect events. No numeric public subscription quota established from retrieved docs; one subscription and conservative retries. [Official documentation](https://www.bitstamp.net/websocket/v2/). |
+| Bitfinex | `wss://api-pub.bitfinex.com/ws/2`; `trades`, `tBTCUSD` | 30 public subscriptions/connection. Bind the acknowledged BTC/USD channel, accept `te` with execution milliseconds, ignore `tu`, snapshots, heartbeats and repeated trade IDs. [Trades](https://docs.bitfinex.com/reference/ws-public-trades), [general rules](https://docs.bitfinex.com/docs/ws-general). |
 
-Coinbase fallback: `wss://ws-feed.exchange.coinbase.com`, `ticker` and `heartbeat` for `BTC-USD`. Parse ticker `price` and `time`; heartbeats do not supply prices. Use the per-match ticker, rather than the five-second `ticker_batch`. [Official channels](https://docs.cdp.coinbase.com/exchange/websocket-feed/channels). Client control messages are limited to ten/s, with a 1,000-message burst; this implementation sends one subscription and a protocol ping every twenty seconds. [Official limits](https://docs.cdp.coinbase.com/exchange/websocket-feed/rate-limits).
-
-Only one stream is connected at a time on the ESP32. Failover alternates providers, respecting individual 5–60 s backoff, at least a minute after HTTP 429, and an hour after authorization/geographic errors. It does not use the computer benchmark's eight simultaneous TLS streams. New exchange trades are event-driven and cannot be guaranteed at every display deadline. The Nixies sample the latest accepted value at the selected cadence; see [refresh behavior](NIXIE_REFRESH.md).
+All four were reached by the computer probe. Physical ESP32 reception is measured separately. Exchange events determine quote arrival; the display timer does not imply a new trade every 500 ms. Selection, expiry and cosmetic rendering are documented in [NIXIE_REFRESH.md](NIXIE_REFRESH.md).
 
 ## Public REST endpoints
 

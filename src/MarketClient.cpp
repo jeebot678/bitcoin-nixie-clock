@@ -47,20 +47,21 @@ void fetch(const market::Request& request) {
   response.ok=false; response.status=0; response.retryAfterMs=0;
   response.quote={}; response.history.count=0; response.request=request;
   if (WiFi.status()!=WL_CONNECTED || time(nullptr)<config::kMinimumEpoch) return;
+  bool history=request.kind==market::Kind::History;
+  if (request.source>=btc::kSourceCount || request.window>=5) return;
+  size_t capacity=history?btc::historyCapacity(request.source==2,request.window,request.epoch,request.start):8192;
+  if (!live::prepareHttp(request.kind==market::Kind::Ota?4096:capacity,30000)) return;
   btc::TlsLease handshake;
   uint32_t waitingAt=millis();
   while (!handshake.acquire() && uint32_t(millis()-waitingAt)<15000) delay(5);
   if (!handshake) return;
   if (request.kind==market::Kind::Ota) {
-    if (live::pauseAndWait(15000)) response.ok=ota::checkAndInstall();
-    live::resume();return;
+    response.ok=ota::checkAndInstall();return;
   }
   String url;
-  bool history=request.kind==market::Kind::History;
   // Reserve the contiguous JSON pool before TLS fragments the ESP32 heap.
   // Incremental chart requests reserve only the missing range plus overlap.
-  if (request.source >= btc::kSourceCount || request.window >= 5) return;
-  DynamicJsonDocument document(history ? btc::historyCapacity(request.source==2,request.window,request.epoch,request.start) : 8192);
+  DynamicJsonDocument document(capacity);
   if (!document.capacity()) {
     Serial.printf("Market JSON allocation failed: %u free; largest %u\n",ESP.getFreeHeap(),ESP.getMaxAllocHeap());
     return;

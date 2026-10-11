@@ -9,6 +9,7 @@
 #include "OtaManifest.h"
 #include "LedMatrixMap.h"
 #include "TlsGate.h"
+#include "QuoteBook.h"
 
 std::string readFile(const std::string& path) { std::ifstream file(path); assert(file.good()); std::ostringstream out;out<<file.rdbuf();return out.str(); }
 size_t slotsIn(JsonVariantConst value) {
@@ -40,6 +41,28 @@ void coreTests() {
   btc::PriceGuard guard;assert(!guard.accept(80000,0,0));assert(!guard.accept(80001,0,10));assert(guard.accept(80002,1,20));
   assert(!guard.accept(160000,2,100));assert(guard.accept(80003,3,200));assert(!guard.accept(100000,2,300));assert(guard.accept(100001,3,400));
   assert(!guard.accept(0,1,500));
+  btc::QuoteBook book;btc::DisplayQuote selected;
+  book.put(80000.1,0,100,1800000000);book.put(80007.2,1,100,1800000001);
+  for(unsigned i=0;i<100;++i)book.put(80007.2,1,101+i,1800000001);
+  assert(book.choose(250,80007.2,1,80007.2,false,selected)&&selected.source==0&&selected.price==80000.1&&selected.receivedAt==100);
+  assert(book.choose(500,80000.1,0,80007.2,false,selected)&&selected.source==1);
+  assert(book.choose(5100,80007.2,1,80007.2,false,selected)&&selected.source==0);
+  assert(!book.choose(5201,80000.1,0,80007.2,false,selected)); // Never recycle expired quotes.
+  book.clear();book.put(80000.1,0,100,1);book.put(80000.2,1,100,1);
+  assert(book.choose(101,80000.1,0,80000,false,selected)&&selected.source==1&&selected.price==80000.2); // No invented whole dollars.
+  assert(!book.choose(101,80000.1,0,160000,false,selected)); // Old cache cannot resurrect a confirmed large move.
+  book.clear();book.put(80001,5,100,1);assert(!book.choose(101,80000,0,80000,false,selected));
+  assert(book.choose(101,80000,0,80000,true,selected)); // FX expiry excludes USDT caches.
+  book.clear();book.put(80003,0,UINT32_MAX-100,1);assert(book.choose(200,80000,1,80000,false,selected));
+  book.put(NAN,1,200,1);book.put(1,255,200,1);assert(selected.price==80003);
+  bool cosmetic=false;assert(btc::displayDollars(80000.1,80000,true,cosmetic)==80001&&cosmetic);
+  assert(btc::displayDollars(80000.1,80001,true,cosmetic)==80000&&!cosmetic);
+  assert(btc::displayDollars(80000,80000,true,cosmetic)==80001&&cosmetic);
+  assert(btc::displayDollars(80000.9,80001,true,cosmetic)==80000&&cosmetic);
+  assert(btc::displayDollars(80000.1,80000,false,cosmetic)==80000&&!cosmetic);
+  assert(btc::displayDollars(999999.1,999999,true,cosmetic)==999999&&!cosmetic);
+  for(unsigned cents=0;cents<100;++cents){double raw=80000+cents/100.0;uint32_t last=80000;
+    for(unsigned frame=0;frame<100;++frame){uint32_t next=btc::displayDollars(raw,last,true,cosmetic);assert(next!=last&&std::abs(double(next)-raw)<=1);last=next;}}
   btc::History history;uint32_t now=1800000000;
   for(unsigned i=0;i<21;++i) assert(history.add(now-3600+i*170,80000+i*100));
   auto plot=btc::makePlot(history,now,3600,82200,now);assert(plot.valid);for(int i=0;i<21;++i)if(plot.valid&(1U<<i))assert(plot.rows[i]<=12);

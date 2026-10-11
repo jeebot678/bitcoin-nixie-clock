@@ -9,6 +9,7 @@
 #include "OtaConfig.h"
 #include "HistoryStore.h"
 #include "LivePrice.h"
+#include "QuoteBook.h"
 
 namespace {
 Provisioning wifi;
@@ -17,19 +18,25 @@ btc::Dial refreshDial(0),timelineDial;
 btc::Rotation rotation;
 btc::FxRate fx;
 btc::PriceGuard guard;
+btc::QuoteBook quotes;
 btc::History histories[5];
 HistoryStore historyStore;
 bool historyDirty[5] = {};
 uint32_t nextSaveAt[5] = {};
 market::Result result;
 bool networkReady=false,inflight=false,timeStarted=false;
+bool liveReady=false,streamWarmupStarted=false;
+uint32_t streamWarmupUntil=0;
 bool showingSetup=false;
 bool needConfirmation=true,logNixies=false;
 double shownPrice=0;
+uint8_t shownSource=0,lastAcceptedSource=0;
+uint32_t shownQuoteReceived=0;
+uint32_t shownDigits=0;
 uint32_t nextNixieAt=0,nixieFrames=0,lastNixieAt=0,acceptedQuotes=0;
 uint32_t nextQuoteAt=0,nextDialsAt=0,nextDrawAt=0,lastPriceEpoch=0,lastQuoteReceived=0;
 uint32_t nextHistoryAt[5]={},historyErrors[5]={};
-uint8_t historySource[5]={1,1,1,1,1};
+uint8_t historySource[5]={1,1,1,2,1}; // Bitstamp's day JSON uses less heap.
 uint32_t bootPressedAt=0,testEndsAt=0;
 bool bootHandled=false;
 String serialLine;
@@ -65,6 +72,7 @@ void diagnostics(uint32_t now) {
   Serial.printf("  Nixie frames=%lu shown=%.2f latestQuoteAge=%lu ms nextFrame=%ld ms; frequencyDial=%s position=%d; stream=%s quotes=%lu accepted=%lu streamStackMin=%lu B\n",
     (unsigned long)nixieFrames,shownPrice,(unsigned long)uint32_t(now-lastQuoteReceived),(long)std::max<int32_t>(0,int32_t(nextNixieAt-now)),
     refreshDial.initialized?"stable":"unconfirmed",refreshDial.stable+1,stream.connected?"connected":"offline",(unsigned long)stream.quotes,(unsigned long)acceptedQuotes,(unsigned long)stream.stackFreeBytes);
+  Serial.printf("  Live connections=%u; displayed source=%s quoteAge=%lu ms\n",stream.connections,btc::kSources[shownSource].name,(unsigned long)uint32_t(now-shownQuoteReceived));
 }
 void serialCommands(uint32_t now) {
   while (Serial.available()) {
@@ -91,33 +99,40 @@ void serialCommands(uint32_t now) {
   } else { bootPressedAt=0; bootHandled=false; }
 }
 void acceptQuote(const btc::Quote& quote,uint8_t source,uint32_t receivedAt,uint32_t epoch,uint32_t now) {
+  if (source>=btc::kSourceCount) return;
   double price;
   if (!fx.normalize(quote.price,btc::kSources[source].usdt,now,price)) {nextQuoteAt=now+500;return;}
   if (guard.accept(price,source,now)) {
     lastPriceEpoch=quote.timestamp?quote.timestamp:epoch;
     lastQuoteReceived=receivedAt;++acceptedQuotes;needConfirmation=false;
+    lastAcceptedSource=source;quotes.put(price,source,receivedAt,lastPriceEpoch);
     nextDrawAt=now;
   } else {needConfirmation=true;nextQuoteAt=now;}
 }
 void processLive(uint32_t now) {
   live::Tick tick;
-  if (live::receive(tick) && tick.source<2 && wifi.online() &&
+  for (unsigned i=0;i<2 && live::receive(tick);++i) {
+    now=millis();
+    if (tick.source<btc::kSourceCount && wifi.online() &&
       uint32_t(now-tick.receivedAt)<=5000 && btc::freshTimestamp(tick.quote.timestamp,uint32_t(time(nullptr))))
     acceptQuote(tick.quote,tick.source,tick.receivedAt,tick.quote.timestamp,now);
+  }
 }
 void refreshNixies(uint32_t now) {
-  if (!wifi.online()) {shownPrice=0;nextNixieAt=now;return;}
+  if (!wifi.online()) {quotes.clear();shownPrice=0;nextNixieAt=now;return;}
   if (!guard.price || uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(config::kRefreshMs[refreshDial.stable])) {
     display::blankPrice();shownPrice=0;return;
   }
   if (!shownPrice || btc::due(now,nextNixieAt)) {
     const bool firstFrame=!shownPrice;
     const uint32_t period=config::kRefreshMs[refreshDial.stable];
-    // Sample the latest accepted market value at the dial's cadence. Refresh
-    // every module even when rounding produces exactly the previous digits.
-    display::price(guard.price,true);shownPrice=guard.price;++nixieFrames;
-    if (logNixies) Serial.printf("Nixie frame at %lu ms: %.2f interval=%lu ms gap=%lu ms quoteAge=%lu ms\n",(unsigned long)now,shownPrice,
-      (unsigned long)config::kRefreshMs[refreshDial.stable],(unsigned long)uint32_t(now-lastNixieAt),(unsigned long)uint32_t(now-lastQuoteReceived));
+    btc::DisplayQuote selected{guard.price,lastQuoteReceived,lastPriceEpoch,lastAcceptedSource};
+    quotes.choose(now,firstFrame?0:shownDigits,shownSource,guard.price,fx.fresh(now),selected);
+    bool cosmetic=false;
+    shownDigits=btc::displayDollars(selected.price,shownDigits,!firstFrame && period==500 && uint32_t(now-selected.receivedAt)<=5000,cosmetic);
+    display::price(double(shownDigits),true);shownPrice=selected.price;shownSource=selected.source;shownQuoteReceived=selected.receivedAt;++nixieFrames;
+    if (logNixies) Serial.printf("Nixie frame at %lu ms: %.2f interval=%lu ms gap=%lu ms quoteAge=%lu ms source=%s digits=%lu cosmetic=%s\n",(unsigned long)now,shownPrice,
+      (unsigned long)config::kRefreshMs[refreshDial.stable],(unsigned long)uint32_t(now-lastNixieAt),(unsigned long)uint32_t(now-shownQuoteReceived),btc::kSources[shownSource].name,(unsigned long)shownDigits,cosmetic?"yes":"no");
     lastNixieAt=now;
     // Preserve the timer phase through normal loop jitter. If work delays a
     // frame, send the latest value once and skip expired deadlines.
@@ -126,6 +141,7 @@ void refreshNixies(uint32_t now) {
 }
 void processResult(uint32_t now) {
   if (!market::receive(result)) return;
+  now=millis();
   inflight=false;
   live::httpBusy(false);
   if (result.request.kind==market::Kind::Ota) { nextQuoteAt=now;return; }
@@ -174,6 +190,10 @@ void schedule(uint32_t now) {
   if (!networkReady || inflight || !wifi.online()) return;
   uint32_t epoch=uint32_t(time(nullptr));
   if (epoch<config::kMinimumEpoch) return;
+  // Let both USD streams establish before HTTP confirmation repeatedly takes
+  // the secondary's memory away. If streams fail, REST starts after 35 s.
+  if (!streamWarmupStarted) {streamWarmupStarted=true;streamWarmupUntil=now+35000;}
+  if (!guard.price && liveReady && !btc::due(now,streamWarmupUntil)) return;
   const uint8_t window=timelineDial.stable;
   if (ota::checkDue(now,wifi.online()) && market::send({market::Kind::Ota,0,window,epoch})) {
     ota::defer(now);inflight=true;live::httpBusy(true);return;
@@ -194,7 +214,7 @@ void schedule(uint32_t now) {
     }
   }
   // Stablecoin conversion is refreshed separately from the display frequency.
-  if ((!fx.fresh(now) || uint32_t(now-fx.receivedAt)>=config::kFxRefreshMs) && btc::due(now,rotation.states[1].availableAt)) {
+  if (!live::fresh(now) && (!fx.fresh(now) || uint32_t(now-fx.receivedAt)>=config::kFxRefreshMs) && btc::due(now,rotation.states[1].availableAt)) {
     if (dispatch(market::Kind::Fx,1,window,now,epoch)) return;
   }
   if (btc::due(now,nextQuoteAt) && (needConfirmation || !live::fresh(now))) {
@@ -260,14 +280,15 @@ void setup() {
   analogSetPinAttenuation(config::kRefreshPin,ADC_11db); analogSetPinAttenuation(config::kTimelinePin,ADC_11db);
   Serial.println("Bitcoin Clock live firmware. Type status or dials; hold BOOT for 5 seconds to set up Wi-Fi.");
   wifi.begin(); networkReady=market::begin(); ota::begin();
-  if (!live::begin()) Serial.println("Live stream worker unavailable; using REST fallback.");
+  liveReady=live::begin();
+  if (!liveReady) Serial.println("Live stream worker unavailable; using REST fallback.");
   if (!networkReady) Serial.println("HTTP worker allocation failed; reboot to retry.");
 }
 void loop() {
   uint32_t now=millis();
   wifi.loop(now); readDials(now); serialCommands(now);
   if (wifi.online()&&!timeStarted) { configTime(0,0,"time.cloudflare.com","pool.ntp.org","time.google.com"); timeStarted=true; }
-  processResult(now); processLive(now); refreshNixies(now); draw(now); saveHistory(now); schedule(now);
+  processResult(now); processLive(now);now=millis();refreshNixies(now);draw(now);saveHistory(now);schedule(now);
   ota::healthCheck(now,networkReady&&wifi.online()&&guard.price>0&&ESP.getFreeHeap()>30000);
   delay(2);
 }

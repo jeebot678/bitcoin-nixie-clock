@@ -15,6 +15,7 @@
 #include "MarketParsers.h"
 #include "OtaManifest.h"
 #include "OtaUpdate.h"
+#include "LivePrice.h"
 
 extern const uint8_t otaCaBundle[] asm("_binary_data_cert_x509_crt_bundle_bin_start");
 extern const uint8_t otaPublicKey[] asm("_binary_data_cert_ota_public_pem_start");
@@ -22,7 +23,7 @@ namespace {
 uint32_t nextCheck=60000;
 bool pendingBoot=false,confirmed=false;
 int openDownload(HTTPClient& http,WiFiClientSecure& tls,std::string url) {
-  tls.setCACertBundle(otaCaBundle); tls.setHandshakeTimeout(6);tls.setTimeout(6);
+  tls.setCACertBundle(otaCaBundle); tls.setHandshakeTimeout(20);tls.setTimeout(6);
   for (int redirects=0;redirects<5;++redirects) {
     if (!ota::allowedDownload(url)) return -1;
     http.setConnectTimeout(6000);http.setTimeout(6000);http.setReuse(false);http.useHTTP10(true);
@@ -128,9 +129,12 @@ bool checkAndInstall() {
   String attempted=prefs.getString("attempt","");uint32_t attemptedAt=prefs.getUInt("attempt-time",0),now=uint32_t(time(nullptr));
   // A crashed image that rolled back is retried at most once per day.
   if (attempted==manifest.version.c_str() && uint64_t(attemptedAt)+86400>now) { prefs.end();return true; }
+  // Routine manifest checks keep the primary price feed open. Only an
+  // authenticated new image needs both sockets' memory for installation.
+  if (!live::pauseAndWait(25000)) {prefs.end();live::resume();return false;}
   prefs.putString("attempt",manifest.version.c_str());prefs.putUInt("attempt-time",now);prefs.end();
   Serial.printf("OTA installing signed firmware %s (%lu bytes)\n",manifest.version.c_str(),(unsigned long)manifest.size);
-  if (!install(manifest)) return false;
+  if (!install(manifest)) {live::resume();return false;}
   Serial.println("OTA verified and installed; rebooting");delay(300);ESP.restart();return true;
 }
 }

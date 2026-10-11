@@ -79,7 +79,8 @@ def main():
         (build/"portal.js").write_text(script);run(["node","--check",build/"portal.js"])
         run(["node","test/host/portal_tests.cjs",build/"portal.js"])
         run(["node","test/host/price_sim_tests.mjs"])
-    print("PASS: all sanitized host suites and portal JavaScript behavior")
+    run([sys.executable,"test/host/refresh_report_tests.py"])
+    print("PASS: all sanitized host suites, portal JavaScript and physical-report behavior")
 
 
 if __name__=="__main__":

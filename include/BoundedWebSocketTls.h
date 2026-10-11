@@ -7,7 +7,7 @@
 // subclass; public structure layouts and all certificate checks stay intact.
 class BoundedWebSocketTls : public CooperativeTlsClient {
  public:
-  BoundedWebSocketTls() {setHandshakeTimeout(6);setTimeout(3);}
+  BoundedWebSocketTls() {setHandshakeTimeout(20);setTimeout(3);}
 };
 #undef WEBSOCKETS_NETWORK_SSL_CLASS
 #define WEBSOCKETS_NETWORK_SSL_CLASS BoundedWebSocketTls

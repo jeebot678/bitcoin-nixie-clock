@@ -1,7 +1,7 @@
 # Independent live-price benchmark
 
-This records the 1.0.6 computer experiments. Firmware 1.0.8 now uses one
-independent USD stream with failover and a separate Nixie display timer;
+This records the 1.0.6 computer experiments. Firmware 1.0.9 now uses two
+independent USD streams, source selection and a separate Nixie display timer;
 see [the refresh correction and device checks](NIXIE_REFRESH.md). The measured
 eight-stream computer throughput below is not an ESP32 performance claim.
 
@@ -130,5 +130,6 @@ FX, history and OTA requests share that worker, with a new TLS connection for
 each request. The baseline missed 500 ms without rate-limit responses. This
 supports connection setup and serialized work as bottlenecks; it does not
 identify the cause of an unobserved device failure. The eight simultaneous
-TLS streams in this computer experiment have not been ported to or validated
-on the ESP32.
+TLS streams in this computer experiment are not an eight-stream ESP32 claim.
+Firmware 1.0.9 independently implements two concurrent USD feeds with
+per-source selection; its device evidence is in [NIXIE_REFRESH.md](NIXIE_REFRESH.md).

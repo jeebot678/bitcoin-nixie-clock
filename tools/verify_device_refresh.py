@@ -17,14 +17,16 @@ import time
 import serial
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-FRAME = re.compile(r"Nixie frame at (\d+) ms: ([\d.]+) interval=(\d+) ms gap=(\d+) ms quoteAge=(\d+) ms")
+FRAME = re.compile(r"Nixie frame at (\d+) ms: ([\d.]+) interval=(\d+) ms gap=(\d+) ms quoteAge=(\d+) ms(?: source=(\S+) digits=(\d+))?(?: cosmetic=(yes|no))?")
 STATE = re.compile(r"stream=(connected|offline) quotes=(\d+) accepted=(\d+)")
 
 
-def summarize(text, duration, version, interval, minimum_frames, max_jitter=10):
+def summarize(text, duration, version, interval, minimum_frames, max_jitter=10,
+              max_quote_age=None, minimum_sources=0, minimum_motion=0):
     errors = []
-    frames = [dict(at=int(a), price=float(p), interval=int(i), gap=int(g), quote_age=int(q))
-              for a, p, i, g, q in FRAME.findall(text)]
+    frames = [dict(at=int(a), price=float(p), interval=int(i), gap=int(g), quote_age=int(q),
+                   source=s or None, digits=int(d) if d else int(float(p)+0.5),cosmetic=c=="yes")
+              for a, p, i, g, q, s, d, c in FRAME.findall(text)]
     counts = [(state, int(quotes), int(accepted)) for state, quotes, accepted in STATE.findall(text)]
     if f"Firmware={version} " not in text:
         errors.append("Requested firmware version was not observed")
@@ -45,6 +47,19 @@ def summarize(text, duration, version, interval, minimum_frames, max_jitter=10):
     gaps = [b["gap"] for a, b in zip(frames, frames[1:]) if a["interval"] == b["interval"] == interval]
     if gaps and max(gaps) > interval + max_jitter:
         errors.append(f"A display frame missed its deadline by more than {max_jitter} ms")
+    sources=sorted({f["source"] for f in frames if f["source"]})
+    changes=sum(a["digits"]!=b["digits"] for a,b in zip(frames,frames[1:]))
+    motion=changes/(len(frames)-1) if len(frames)>1 else 0
+    if max_quote_age is not None and any(f["quote_age"]>max_quote_age for f in frames):
+        errors.append(f"A displayed quote exceeded {max_quote_age} ms receipt age")
+    if len(sources)<minimum_sources:
+        errors.append(f"Only {len(sources)} displayed sources; need {minimum_sources}")
+    if motion<minimum_motion:
+        errors.append(f"Whole-dollar movement ratio {motion:.3f} is below {minimum_motion}")
+    # USB diagnostics round raw quotes to two decimals; allow that half cent.
+    maximum_error=max((abs(f["digits"]-f["price"]) for f in frames),default=0)
+    if maximum_error>1.005:
+        errors.append("Displayed integer exceeded $1 from the selected real quote")
     return {
         "checked_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "duration_seconds": duration, "firmware_version": version,
@@ -52,6 +67,12 @@ def summarize(text, duration, version, interval, minimum_frames, max_jitter=10):
         "allowed_jitter_ms": max_jitter,
         "gap_ms": {"min": min(gaps), "median": statistics.median(gaps), "max": max(gaps)} if gaps else None,
         "distinct_displayed_prices": len({frame["price"] for frame in frames}),
+        "distinct_displayed_whole_dollar_values":len({frame["digits"] for frame in frames}),
+        "displayed_sources":sources,"whole_dollar_changes":changes,"whole_dollar_motion_ratio":motion,
+        "maximum_allowed_quote_age_ms":max_quote_age,
+        "minimum_required_sources":minimum_sources,"minimum_required_motion_ratio":minimum_motion,
+        "cosmetic_motion_frames":sum(f["cosmetic"] for f in frames),
+        "maximum_display_rounding_error_usd":maximum_error,
         "max_frame_quote_age_ms": max((frame["quote_age"] for frame in frames), default=None),
         "stream_quote_counter": {"first": live_counts[0], "last": live_counts[-1]} if live_counts else None,
         "accepted_quote_counter": {"first": accepted[0], "last": accepted[-1]} if accepted else None,
@@ -73,8 +94,12 @@ def main():
     parser.add_argument("--version", required=True)
     parser.add_argument("--interval-ms", type=int, default=500)
     parser.add_argument("--duration", type=int, default=180)
+    parser.add_argument("--warmup",type=int,default=0,help="Observe/log startup before measuring steady operation")
     parser.add_argument("--minimum-frames", type=int, default=20)
     parser.add_argument("--max-jitter-ms", type=int, default=10)
+    parser.add_argument("--max-quote-age-ms",type=int)
+    parser.add_argument("--minimum-sources",type=int,default=0)
+    parser.add_argument("--minimum-motion-ratio",type=float,default=0)
     parser.add_argument("--output", type=pathlib.Path, default=ROOT / "test/.build/device-refresh")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
@@ -84,17 +109,19 @@ def main():
     port.open()
     start = time.monotonic()
     output = bytearray()
+    measurement=bytearray()
     pending = ""
     next_query = 1.0
     frames = 0
     try:
-        while time.monotonic() - start < args.duration:
+        while time.monotonic() - start < args.duration+args.warmup:
             if time.monotonic() - start >= next_query:
                 # Idempotent across a restart, which must still fail verification.
                 port.write(b"ticks on\nstatus\ndials\n")
                 next_query += 12
             data = port.read(4096)
             output.extend(data)
+            if time.monotonic()-start>=args.warmup:measurement.extend(data)
             pending += data.decode("utf-8", errors="replace")
             while "\n" in pending:
                 line, pending = pending.split("\n", 1)
@@ -108,8 +135,12 @@ def main():
         port.write(b"ticks off\n")
         port.close()
         (args.output / "serial.log").write_bytes(output)
-    report = summarize(output.decode("utf-8", errors="replace"), args.duration,
-                       args.version, args.interval_ms, args.minimum_frames, args.max_jitter_ms)
+    report = summarize(measurement.decode("utf-8", errors="replace"), args.duration,
+                       args.version, args.interval_ms, args.minimum_frames, args.max_jitter_ms,
+                       args.max_quote_age_ms,args.minimum_sources,args.minimum_motion_ratio)
+    report["startup_warmup_seconds"]=args.warmup
+    if any(fault in output.decode("utf-8",errors="replace") for fault in ("Guru Meditation","abort()","Backtrace:","task_wdt:")) and "A device fault was observed" not in report["errors"]:
+        report["errors"].append("A device fault was observed during warm-up");report["pass"]=False
     binary = ROOT / ".pio/build/esp32-devkitc-32e/firmware.bin"
     if binary.exists():
         # This is the locally built image; the firmware version is checked above.

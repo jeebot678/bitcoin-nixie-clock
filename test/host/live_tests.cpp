@@ -2,12 +2,12 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <set>
 #include <time.h>
 #include "Arduino.h"
 #include "WiFi.h"
 #include "LivePrice.h"
 #include "BoundedWebSocketTls.h"
-
 struct Queue {std::vector<uint8_t> bytes;bool ready=false;explicit Queue(size_t size):bytes(size){}};
 using QueueHandle_t=Queue*;
 constexpr int pdTRUE=1,pdPASS=1;
@@ -16,7 +16,7 @@ QueueHandle_t xQueueCreate(int count,size_t size){assert(count==1);if(failQueue)
 void vQueueDelete(QueueHandle_t queue){delete queue;--queues;}
 int xQueueOverwrite(QueueHandle_t queue,const void* data){memcpy(queue->bytes.data(),data,queue->bytes.size());queue->ready=true;return pdTRUE;}
 int xQueueReceive(QueueHandle_t queue,void* data,int){if(!queue->ready)return 0;memcpy(data,queue->bytes.data(),queue->bytes.size());queue->ready=false;return pdTRUE;}
-int xTaskCreatePinnedToCore(void(*)(void*),const char*,unsigned stack,void*,unsigned priority,void*,int core){assert(stack==16384&&priority==1&&core==0);return failTask?0:pdPASS;}
+int xTaskCreatePinnedToCore(void(*)(void*),const char*,unsigned stack,void* argument,unsigned priority,void*,int core){assert(stack==10240&&priority==0&&core==0&&argument);return failTask?0:pdPASS;}
 SerialMock Serial;EspMock ESP;WifiMock WiFi;uint32_t testMillis=100;
 std::map<int,int>pins,modes,adc;std::vector<GpioEvent>gpioEvents;
 const uint8_t caBundle[] asm("_binary_data_cert_x509_crt_bundle_bin_start")={0};
@@ -25,44 +25,66 @@ time_t testTime(time_t* output){if(output)*output=testEpoch;return testEpoch;}
 #define time testTime
 #include "../../src/LivePrice.cpp"
 #undef time
-
 std::string readFile(const std::string& path){std::ifstream file(path);assert(file.good());std::ostringstream out;out<<file.rdbuf();return out.str();}
+void steps(){for(auto& slot:slots)slot.step();}
 int main(int argc,char** argv){
   assert(argc==2);std::string directory=argv[1];
-  BoundedWebSocketTls bounded;assert(bounded.handshakeSeconds==6&&bounded.timeoutSeconds==3&&!bounded.verified);bounded.setCACertBundle(caBundle);assert(bounded.verified);
+  BoundedWebSocketTls bounded;assert(bounded.handshakeSeconds==20&&bounded.timeoutSeconds==3&&!bounded.verified);bounded.setCACertBundle(caBundle);assert(bounded.verified);
   uint32_t idleAt=testMillis;uint8_t byte;assert(bounded.read()<0&&testMillis==idleAt+1);
-  assert(bounded.read(&byte,0)==0&&testMillis==idleAt+1);
-  bounded.data={42,43};assert(bounded.read()==42&&bounded.read(&byte,1)==1&&byte==43&&testMillis==idleAt+1);
-  failQueue=true;assert(!live::begin()&&!queues);failQueue=false;failTask=true;assert(!live::begin()&&!queues);failTask=false;assert(live::begin()&&queues==1);
-  step();assert(!socket&&live::status().paused);WiFi.connection=WL_CONNECTED;step();assert(!socket); // No TLS before SNTP.
-  testEpoch=btc::isoTimestamp("2026-10-11T05:34:22Z");
-  assert(live::pauseAndWait(0));step();assert(!socket&&live::status().paused);live::resume();
-  live::httpBusy(true);step();assert(!socket);live::httpBusy(false);
-  {btc::TlsLease httpHandshake;assert(httpHandshake.acquire());step();assert(socket&&!live::status().connected&&socket->sent.empty());}
-  step();assert(socket&&liveSockets()==1&&socket->ca==caBundle&&socket->protocol.empty()&&socket->reconnect==5000&&socket->ping==20000);
-  assert(socket->host=="ws.kraken.com"&&socket->url=="/v2"&&socket->sent.size()==1&&socket->sent[0].find("bbo")!=std::string::npos);
-  assert(live::status().connected&&!live::fresh(testMillis));
+  assert(bounded.read(&byte,0)==0&&testMillis==idleAt+1);bounded.data={42,43};assert(bounded.read()==42&&bounded.read(&byte,1)==1&&byte==43);
+  failQueue=true;assert(!live::begin()&&!queues);failQueue=false;failTask=true;assert(!live::begin()&&!queues);failTask=false;assert(live::begin()&&queues==2);
+  steps();assert(!liveSockets()&&live::status().paused);WiFi.connection=WL_CONNECTED;steps();assert(!liveSockets());
+  testEpoch=btc::isoTimestamp("2026-10-11T05:34:22Z");assert(live::pauseAndWait(0));steps();assert(!liveSockets());live::resume();
+  live::httpBusy(true);steps();assert(!liveSockets());live::httpBusy(false);
+  {btc::TlsLease httpHandshake;assert(httpHandshake.acquire());steps();assert(liveSockets()==2&&!live::status().connected&&slots[0].socket->sent.empty());}
+  steps();assert(live::status().connections==2&&!live::fresh(testMillis));
+  auto& primary=slots[0];auto& secondary=slots[1];assert(primary.source==1&&secondary.source==0);
+  assert(primary.socket->host=="ws.kraken.com"&&primary.socket->url=="/v2"&&primary.socket->sent[0].find("bbo")!=std::string::npos);
+  for(auto& slot:slots)assert(slot.socket->ca==caBundle&&slot.socket->protocol.empty()&&slot.socket->reconnect==5000&&slot.socket->ping==20000);
   auto kraken=readFile(directory+"/kraken_stream.json"),coinbase=readFile(directory+"/coinbase_stream.json");
-  socket->emit(WStype_TEXT,kraken);assert(live::fresh(testMillis)&&live::status().quotes==1);
-  live::Tick tick;assert(live::receive(tick)&&tick.source==1&&tick.quote.price==83006.3&&tick.quote.timestamp>0&&!live::receive(tick));
-  socket->emit(WStype_TEXT,"{\"channel\":\"heartbeat\"}");socket->emit(WStype_TEXT,"{\"success\":true}");socket->emit(WStype_TEXT,std::string(4097,'x'));
-  socket->emit(WStype_TEXT,"{\"channel\":\"ticker\",\"type\":\"update\",\"data\":[{\"symbol\":\"ETH/USD\",\"last\":4000,\"timestamp\":\"2026-10-11T05:34:22Z\"}]}");
-  socket->emit(WStype_TEXT,"{\"channel\":\"ticker\",\"type\":\"update\",\"data\":[{\"symbol\":\"BTC/USD\",\"last\":80000,\"timestamp\":\"2025-10-11T05:34:22Z\"}]}");
-  assert(live::status().quotes==1&&!live::receive(tick));testMillis+=1500;assert(!live::fresh(testMillis));
-  socket->emit(WStype_TEXT,kraken);socket->emit(WStype_TEXT,kraken);assert(live::receive(tick)&&!live::receive(tick)&&live::status().quotes==3); // Bounded newest-value queue, not an unbounded backlog.
-  socket->emit(WStype_DISCONNECTED,"HTTP 403");step();assert(!socket&&!live::status().connected&&cooldown[1].availableAt==testMillis+3600000);
-  step();assert(socket&&source==0&&socket->host=="ws-feed.exchange.coinbase.com"&&liveSockets()==1);
-  socket->emit(WStype_TEXT,coinbase);assert(live::receive(tick)&&tick.source==0&&tick.quote.price==83007);
-  socket->emit(WStype_DISCONNECTED,"WebSocket handshake failed - HTTP 429");step();assert(!socket&&cooldown[0].availableAt==testMillis+60000);
-  testMillis+=59999;step();assert(!socket);++testMillis;step();assert(socket&&source==0);
-  assert(!live::pauseAndWait(0));step();assert(live::pauseAndWait(0)&&!socket&&!liveSockets());live::resume();step();assert(socket);
-  WiFi.connection=0;step();assert(!socket&&live::status().paused);WiFi.connection=WL_CONNECTED;step();assert(socket);
-  // Lost heartbeat triggers failover without blocking the main loop.
-  testMillis+=35001;step();assert(!socket);assert(!live::status().connected);
-  for(auto&state:cooldown){state.availableAt=testMillis;state.failures=0;}step();assert(socket);
-  socket->emit(WStype_TEXT,"{\"success\":false,\"error\":\"subscription rejected\"}");step();assert(!socket);
-  for(auto&state:cooldown){state.availableAt=testMillis;state.failures=0;}testMillis=UINT32_MAX-500;for(auto&state:cooldown)state.availableAt=testMillis;step();assert(socket);
-  testMillis=501;socket->emit(WStype_TEXT,source?kraken:coinbase);assert(live::fresh(testMillis));
-  closeSocket();vQueueDelete(ticks);ticks=nullptr;assert(!liveSockets()&&!queues);
-  std::cout<<"PASS: real streaming worker; captured USD payloads, CA bundle, bounded queue, malformed/stale data, heartbeat/ACK handling, separate task, HTTP 403/429 backoff, provider failover, Wi-Fi/SNTP gating, OTA pause and rollover\n";
+  secondary.socket->emit(WStype_TEXT,coinbase);
+  for(unsigned i=0;i<100;++i)primary.socket->emit(WStype_TEXT,kraken);
+  live::Tick tick;std::set<unsigned> seen;
+  while(live::receive(tick)){seen.insert(tick.source);assert(tick.quote.price>83000&&tick.quote.timestamp>0);}
+  assert(seen.size()==2&&live::status().quotes==101&&live::fresh(testMillis)); // A busy feed cannot erase the other slot.
+  primary.socket->emit(WStype_TEXT,"{\"channel\":\"heartbeat\"}");primary.socket->emit(WStype_TEXT,std::string(4097,'x'));
+  primary.socket->emit(WStype_TEXT,"{\"channel\":\"ticker\",\"type\":\"update\",\"data\":[{\"symbol\":\"ETH/USD\",\"last\":4000,\"timestamp\":\"2026-10-11T05:34:22Z\"}]}");
+  assert(!live::receive(tick));testMillis+=5000;assert(!live::fresh(testMillis));
+  // Reserve only secondary memory; primary receives throughout routine HTTP/OTA.
+  live::httpBusy(true);steps();assert(primary.connected&&!secondary.socket&&secondary.paused);
+  assert(live::prepareHttp(8192,0));primary.socket->emit(WStype_TEXT,kraken);assert(live::receive(tick)&&tick.source==1);
+  ESP.freeHeap=60000;assert(!live::prepareHttp(8192,0));steps();assert(!liveSockets()&&primary.paused);
+  ESP.freeHeap=150000;assert(live::prepareHttp(8192,0));live::httpBusy(false);steps();assert(live::status().connections==2);
+  primary.socket->emit(WStype_DISCONNECTED,"HTTP 403");primary.step();assert(!primary.socket&&primary.cooldown[1].availableAt==testMillis+3600000);
+  primary.step();assert(primary.source==2&&primary.socket->host=="ws.bitstamp.net"); // Coinbase belongs to the other worker.
+  std::string stamp="{\"event\":\"trade\",\"channel\":\"live_trades_btcusd\",\"data\":{\"price\":83008,\"id\":42,\"microtimestamp\":\""+std::to_string(uint64_t(testEpoch)*1000000)+"\"}}";
+  primary.socket->emit(WStype_TEXT,stamp);assert(live::receive(tick)&&tick.source==2&&tick.quote.price==83008);
+  primary.socket->emit(WStype_TEXT,stamp);assert(!live::receive(tick));
+  primary.socket->emit(WStype_TEXT,"{\"event\":\"bts:request_reconnect\"}");primary.step();assert(!primary.socket);primary.step();assert(primary.source==4);
+  std::string trade="[77,\"te\",[42,"+std::to_string(uint64_t(testEpoch)*1000)+",0.01,83009]]";
+  primary.socket->emit(WStype_TEXT,trade);assert(!live::receive(tick)); // No trusted symbol/channel binding yet.
+  primary.socket->emit(WStype_TEXT,"{\"event\":\"subscribed\",\"channel\":\"trades\",\"symbol\":\"tETHUSD\",\"chanId\":77}");
+  primary.socket->emit(WStype_TEXT,trade);assert(!live::receive(tick));
+  primary.socket->emit(WStype_TEXT,"{\"event\":\"subscribed\",\"channel\":\"trades\",\"symbol\":\"tBTCUSD\",\"chanId\":77}");
+  primary.socket->emit(WStype_TEXT,trade);assert(live::receive(tick)&&tick.source==4&&tick.quote.price==83009);
+  primary.socket->emit(WStype_TEXT,trade);primary.socket->emit(WStype_TEXT,"[77,\"tu\",[43,1791696862000,0.01,83010]]");assert(!live::receive(tick));
+  primary.socket->emit(WStype_DISCONNECTED,"HTTP 429");primary.step();assert(primary.cooldown[4].availableAt==testMillis+60000);
+  assert(!live::pauseAndWait(0));steps();assert(live::pauseAndWait(0)&&!liveSockets());live::resume();
+  WiFi.connection=0;steps();assert(live::status().paused&&!liveSockets());WiFi.connection=WL_CONNECTED;
+  testMillis=UINT32_MAX-500;for(auto& slot:slots)for(auto& state:slot.cooldown)state.availableAt=testMillis;
+  steps();testMillis=501;for(auto& slot:slots)if(slot.source==1)slot.socket->emit(WStype_TEXT,kraken);
+  assert(live::fresh(testMillis));
+  testMillis+=35001;steps();assert(!live::status().connected);
+  // Independently captured public trade payloads validate schema/timestamps.
+  for(uint8_t provider:{uint8_t(2),uint8_t(4)}){
+    StaticJsonDocument<2048> captured;assert(!deserializeJson(captured,readFile(directory+(provider==2?"/bitstamp_stream.json":"/bitfinex_stream.json"))));
+    uint32_t capturedChannel=provider==4?captured[0].as<uint32_t>():0;
+    double timestamp=0;assert(btc::number(provider==2?captured["data"]["microtimestamp"].as<JsonVariantConst>():captured[2][1].as<JsonVariantConst>(),timestamp));
+    uint32_t epoch=uint32_t(timestamp/(provider==2?1000000:1000));btc::Quote quote;
+    assert(btc::parseStreamQuote(provider,captured.as<JsonVariantConst>(),epoch,quote,capturedChannel));
+    assert(!btc::parseStreamQuote(provider,captured.as<JsonVariantConst>(),epoch+121,quote,capturedChannel));
+    if(provider==4)assert(!btc::parseStreamQuote(provider,captured.as<JsonVariantConst>(),epoch,quote,capturedChannel+1));
+  }
+  for(auto& slot:slots){slot.close();vQueueDelete(slot.ticks);slot.ticks=nullptr;}assert(!queues&&!liveSockets());
+  std::cout<<"PASS: dual live workers, independent latest-value queues, USD parsers, channel binding/deduplication, HTTP memory reservation, uninterrupted primary, failover/backoff, Wi-Fi/SNTP, OTA pause and rollover\n";
 }

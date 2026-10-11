@@ -26,7 +26,7 @@ class String {
 inline String operator+(const String&a,const String&b){return a.value+b.value;}inline bool operator==(const String&a,const String&b){return a.value==b.value;}inline bool operator!=(const String&a,const String&b){return !(a==b);}
 struct SerialMock{std::string input,log;void setTxBufferSize(size_t){}void begin(int){}int available(){return int(input.size());}int read(){char c=input[0];input.erase(0,1);return c;}void println(const char*s){log+=s;log+='\n';}void printf(const char*format,...){char b[2048];va_list args;va_start(args,format);vsnprintf(b,sizeof(b),format,args);va_end(args);log+=b;}};
 extern SerialMock Serial;
-struct EspMock {uint64_t getEfuseMac()const{return 0x123456789ABC;}unsigned getFreeHeap()const{return 150000;}unsigned getMaxAllocHeap()const{return 100000;}void restart(){++restarts;}int restarts=0;};
+struct EspMock {uint64_t getEfuseMac()const{return 0x123456789ABC;}unsigned getFreeHeap()const{return freeHeap;}unsigned getMaxAllocHeap()const{return largest;}void restart(){++restarts;}int restarts=0;unsigned freeHeap=150000,largest=100000;};
 extern EspMock ESP;
 extern uint32_t testMillis;
 extern std::map<int,int> pins,modes,adc;

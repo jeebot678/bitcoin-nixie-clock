@@ -1,22 +1,51 @@
 {
-  "checked_at_utc": "2026-10-11T05:35:20.662Z",
-  "duration_ms": 60049.825625000005,
+  "checked_at_utc": "2026-10-11T18:28:16.443Z",
+  "duration_ms": 60042.082,
   "feeds": {
     "kraken": {
-      "quotes": 77,
-      "distinct_prices": 2,
-      "max_gap_ms": 5768.080333000002,
-      "last_at": 53907.326709,
-      "timestamps": 77,
+      "quotes": 287,
+      "distinct_prices": 8,
+      "max_gap_ms": 2392,
+      "last_at": 57786,
+      "timestamps": 287,
       "errors": []
     },
     "coinbase": {
-      "quotes": 61,
-      "distinct_prices": 2,
-      "max_gap_ms": 4623.1147089999995,
-      "last_at": 59990.277334000006,
-      "timestamps": 61,
+      "quotes": 164,
+      "distinct_prices": 20,
+      "max_gap_ms": 3664,
+      "last_at": 59784,
+      "timestamps": 164,
+      "errors": []
+    },
+    "bitstamp": {
+      "quotes": 8,
+      "distinct_prices": 3,
+      "max_gap_ms": 14256,
+      "last_at": 44554,
+      "timestamps": 8,
+      "errors": []
+    },
+    "bitfinex": {
+      "quotes": 10,
+      "distinct_prices": 6,
+      "max_gap_ms": 21072,
+      "last_at": 56033,
+      "timestamps": 10,
       "errors": []
     }
-  }
+  },
+  "selector": "actual firmware QuoteBook and PriceGuard, compiled C++",
+  "warmup_ms": 10000,
+  "interval_ms": 500,
+  "frames": 100,
+  "displayed_sources": [
+    1,
+    0,
+    2,
+    4
+  ],
+  "whole_dollar_changes": 99,
+  "whole_dollar_motion_ratio": 1,
+  "max_selected_quote_age_ms": 4110
 }

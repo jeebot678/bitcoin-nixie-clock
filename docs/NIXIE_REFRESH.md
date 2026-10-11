@@ -1,73 +1,76 @@
-# Nixie refresh and chart timing in 1.0.8
+# Nixie refresh and chart timing in 1.0.9
 
-The frequency selector now controls a separate tube timer. At 0.5 s, 2 s,
-30 s, 5 min or 1 h, the main loop samples the newest independently accepted
-market price and sends all six tube modules their normal `0xAA` brightness
-packets. No blank/blink animation is added. Whole-dollar rounding can leave
-the visible digits unchanged even though a new frame was sent. Changing the
-frequency schedules an immediate frame and starts the new interval; changing
-the chart range does not change that interval.
+The frequency selector controls a separate tube timer: 0.5 s, 2 s, 30 s,
+5 min or 1 h. Every deadline sends all six modules their normal `0xAA`
+brightness packets. Changing frequency starts an immediate frame; changing
+range leaves the tube interval alone. Range is JSEL1/GPIO34; frequency is
+JSEL2/GPIO35. An unread detent defaults to 0.5 s and is explicitly reported
+as unconfirmed; this does not certify ADC calibration.
 
-Earlier firmware displayed quotes on arrival and suppressed unchanged digit
-packets. Quotes, FX, history and OTA also shared one serialized HTTP worker.
-Consequently neither network completion times nor tube traffic followed a
-separate display cadence. An unconfirmed selector silently defaulted to the
-30-second position. The corrected frequency selector defaults to 0.5 seconds
-until a valid debounced detent is read, and `status` labels that condition
-`frequencyDial=unconfirmed`. This fallback is not evidence that its wiring or
-calibration is correct. Range remains JSEL1/GPIO34; frequency is JSEL2/GPIO35.
+## Real quotes and visible motion
 
-## Market reception
+The main loop caches one accepted USD quote per exchange. At a deadline it
+prefers a recent quote whose rounded dollars differ from the displayed digits,
+rotating through providers instead of letting a busy feed overwrite the rest.
+Quotes received within 1.5 seconds are preferred; alternatives expire after
+5 seconds. Expired USDT conversion excludes USDT cache entries. Cached prices
+outside 5% of the current confirmed market value cannot resurrect an old
+price after a large move. Source receipt times are never rewritten by display
+selection, and startup/large moves still require independent confirmation.
 
-One certificate-verified TLS stream runs in its own FreeRTOS worker, using
-Kraken BTC/USD ticker updates with the `bbo` trigger and Coinbase BTC-USD ticker
-as failover. The displayed value is the exchange's last trade price, not the
-bid/ask midpoint. A fixed, one-element queue overwrites older waiting ticks
-with the latest value; heartbeat/acknowledgment traffic never becomes a price.
-Payloads require the exact symbol, finite positive last price and a fresh
-exchange timestamp. Startup and large outliers still require independent
-provider confirmation.
+At **0.5 s only**, when genuine eligible quotes round to the same displayed
+dollar, a cosmetic rendering effect uses the adjacent integer in the direction
+of the raw price. Its error is at most **$1 from the selected real quote**.
+An exact integer can use the next dollar. The next frame normally returns to
+the actual rounded dollar. This is visual motion, not an exchange trade or a
+fabricated input quote. Diagnostics retain the raw quote, actual displayed
+digits and `cosmetic=yes/no`. Slower frequency positions use ordinary nearest
+whole-dollar rounding. Cosmetic motion stops if the selected quote's receipt
+age exceeds 5 seconds; ordinary outage blanking still applies. The chart and
+flash history use real prices and timestamps, never cosmetic display values.
 
-The eleven REST providers remain available for confirmation and fallback. A
-fresh stream suppresses redundant ticker polls; a quiet/disconnected stream
-allows the ordinary dial-scheduled REST requests. Provider cooldowns and error
-backoff remain enforced. Historical candles remain on the HTTP worker and do
-not prevent incoming stream ticks or scheduled tube writes. If no fresh market
-data exists, refreshes use the last accepted value until the existing outage
-timeout blanks the tubes. No fabricated price movement is generated.
+## Network workers and memory
 
-A computer-side 60-second check on 2026-10-11 confirmed both proposed USD
-streams and captured their actual payloads for host regression tests. Kraken
-delivered 77 ticker messages; Coinbase delivered 61. Both had only two distinct
-prices, and their longest message gaps were 5.77 s and 4.62 s. This illustrates
-why a 500 ms **display** timer cannot imply a different market price or a new
-trade every 500 ms. This probe verifies schema/availability, not ESP32 timing.
-Run `node tools/probe_device_feeds.mjs` to repeat it; the report goes to
-`test/.build/device-feeds/report.json`.
+Two independent TLS workers prefer Kraken BTC/USD `ticker` with the `bbo`
+trigger and Coinbase BTC-USD `ticker`. Bitstamp BTC/USD trades and Bitfinex
+`tBTCUSD` trade executions are fallback providers. Only one worker can own a
+provider. Each has its own bounded latest-tick queue, so a burst on one cannot
+remove a waiting quote from another. Exact symbols, timestamps, positive
+finite values, Bitfinex subscription channel IDs and trade duplicates are
+validated. A ticker heartbeat/acknowledgment never becomes a price.
 
-Physical testing of 1.0.7 exposed a watchdog restart during concurrent TLS
-work, so its OTA rollout was withdrawn to 1.0.6. Version 1.0.8 coordinates
-connection opening with a shared lease held through the WebSocket upgrade.
-Established stream reception continues during HTTP work. The HTTP worker
-shares the idle task's priority, allowing expensive TLS calculations to run
-without starving the idle watchdog. Its handshake deadline is 20 seconds;
-the live stream retains its separate worker and a six-second TLS deadline.
-TLS reads explicitly yield while waiting for missing bytes, including Arduino
-2.x's otherwise busy-polling `Stream::timedRead`. Both workers have 16 KiB
-stacks; `status` reports the stream's measured minimum remaining stack space
-in bytes. No watchdog or certificate checks are disabled.
+At startup the two USD streams get up to 35 seconds to establish and confirm
+each other before HTTP fallback can reclaim secondary memory. Confirmation
+can finish sooner. The eleven REST providers remain available for independent
+confirmation and fallback, at their existing conservative quotas. A live receipt within five
+seconds suppresses redundant ticker/FX requests; USD streams do not need
+USDT conversion. History, FX and OTA share the HTTP worker. Before HTTP work,
+the secondary closes to release memory. The primary remains open unless a
+large JSON pool actually needs its allocation as well. The 24-hour range
+prefers Bitstamp's smaller JSON pool. No socket is touched from another worker.
+The secondary resumes after the request completes.
 
-A UART transmit buffer queues full status reports so verbose USB diagnostics
-do not block the display loop while bytes drain at 115200 baud.
+A routine OTA manifest check retains the primary feed. Both streams pause
+only after a newer signed manifest passes validation and the updater actually
+needs to download/install its image. An unsuccessful pause does not mark the
+version as attempted; download failure resumes reception.
 
-The pinned WebSockets library uses its bounded handshake timeout through a
-small constructor adapter, scoped to its client translation unit by a
-PlatformIO build middleware. HTTP read/connect timeouts remain bounded. The
-certificate index is retained and protected across simultaneous connections;
-closing a REST connection cannot free the live stream's trust store. Certificate
-signatures, dates and hostnames remain validated. Before OTA, the stream closes
-to release TLS memory; reception resumes after the check/download. Tube timing
-continues while OTA is in progress, subject to ordinary loop/flash latency.
+New TLS handshakes share a lease through the WebSocket upgrade. Handshake
+crypto and HTTP run at IDLE0's priority to keep the watchdog healthy;
+established streams use priority 1 for responsive reads. TLS handshakes have a
+20-second deadline. The stream workers each have 10 KiB stacks and HTTP has
+16 KiB. Cooperative reads yield while waiting for bytes. The shared Mozilla
+trust index is protected across connections; certificate signatures, dates
+and hostnames remain enforced. No watchdog/certificate checks are disabled.
+A 2 KiB UART transmit buffer prevents status reports from blocking tube timing.
+
+A 60-second computer probe on 2026-10-11 received valid quotes from all four
+USD streams. The actual C++ QuoteBook/PriceGuard code selected 100 post-warmup
+frames at 500 ms, with 99/99 whole-dollar transitions changing **without the
+cosmetic fallback**. Selected receipt age reached 4,110 ms. This validates
+source availability/selection, not ESP32 timing. Repeat with
+`node tools/probe_device_feeds.mjs`; see the separate
+[computer feed report](../test/device_feed_probe_report.json).
 
 ## Matrix time mapping
 
@@ -95,48 +98,42 @@ weekly graph can therefore hold its pixels while the Nixies keep refreshing.
 
 ## Verification
 
-Sanitized host tests exercise the actual application and physical SPI packet
-encoder at every frequency. They assert the newest accepted value is sampled
-at the deadline, no early update leaks through, unchanged digits still send six
-packets, a blocked history/TLS request does not stop the timer, dial changes
-apply immediately, stale prices blank, and delayed loops/`millis()` rollover
-preserve cadence without invented catch-up frames. Stream tests use captured
-payloads and cover TLS configuration, bounded queues, malformed/stale/wrong
-symbols, acknowledgments, heartbeat loss, provider failover, HTTP 403/429
-cooldowns, Wi-Fi/SNTP gating, task-allocation failure and OTA pause. A concurrent
-TLS regression verifies another connection's detach/reinitialization cannot
-invalidate an active verifier.
+Sanitized tests compile the actual runtime, SPI encoder, live workers, HTTP,
+OTA and cache code. They cover all five frequencies, correct six-module
+packets, bounded cosmetic rounding, unmodified market/chart values, source
+rotation, per-provider cache expiry, independent queues, symbol/channel
+binding, duplicate/stale messages, memory reservations, failure/backoff,
+Wi-Fi/SNTP gating, OTA manifest versus installation pauses and millis rollover.
+The physical-report tests reject perfect timers with stale quotes, unmoving
+digits, missing sources, excess cosmetic error or a device fault.
 
-Chart tests cover the first and last second in every one of the 21 buckets
-at all five ranges, expiry/future exclusion, all 13 rows' bounds and price
-ordering, and newer-candle/older-trade selection.
+All 21 chronological chart buckets at all five ranges, newest timestamp
+selection, cached reboot restore and two-day incremental repair are exercised.
+A two-hour modeled runtime crosses millis rollover with rate-limit failures.
+The actual TLS callback has concurrent trust-lifetime/signature tests.
 
-Use serial `ticks` to toggle frame logging, or `ticks on` / `ticks off` for
-idempotent control. Each line includes its monotonic
-time, selected interval, actual frame gap and quote age. `status` includes the
-frame count, displayed sampled value, selector confirmation, stream state and
-quote counters. The final image's three-minute USB check observed 358 frames
-with gaps of 497–503 ms (median 500 ms), 48 distinct sampled prices, advancing
-Kraken quotes, three completed history requests, nine cache saves and a
-successful OTA manifest check without a watchdog restart. A failed history
-request recovered through Bitstamp; reception resumed after the OTA check.
-The measurement and the exact flashed image's SHA-256 are recorded in
-[`test/device_refresh_report.json`](../test/device_refresh_report.json).
+`ticks on` logs raw quote, actual digit value, source, cosmetic flag, interval,
+frame gap and selected quote receipt age. `status` reports connected stream
+count, advancing accepted quotes, heap and minimum remaining stream stack.
+The final physical result and exact flashed image hash are recorded in
+[the USB refresh report](../test/device_refresh_report.json).
 
-Repeat the hardware measurement with the assembled device's frequency dial
-at 0.5 s; the tool reads diagnostics without changing either selector:
+Repeat with the assembled device at 0.5 s:
 
 ```sh
 ~/.platformio/penv/bin/python tools/verify_device_refresh.py \
-  --port YOUR_ESP32_PORT --version 1.0.8 --duration 180
+  --port YOUR_ESP32_PORT --version 1.0.9 --warmup 60 --duration 180 \
+  --max-quote-age-ms 5000 --minimum-sources 2 --minimum-motion-ratio 0.99
 ```
 
-The verifier requires advancing connected-stream and accepted-price counters,
-the requested interval, at least 20 frames and no recorded device fault. It
-rejects a frame delayed over 10 ms beyond its selected period and writes an
-aggregate JSON report plus an ignored raw serial log. It does not establish a
-new trade every 500 ms, visible tube behavior, every physical dial detent,
-full-size 24-hour TLS memory use or power-loss rollback. Those remain assembled
-device acceptance checks.
+The 60-second startup phase is logged but excluded from steady measurements;
+Wi-Fi, SNTP, TLS and independent-price confirmation can take time on a cold
+boot. Device faults in either phase fail verification. The strict run requires
+advancing counters, two actual displayed providers, the selected cadence,
+quotes no more than five seconds old, at least 99% changing dollar transitions
+and no frame more than 10 ms late. Cosmetic rendering is separately counted,
+not reported as a new trade. All physical dial detents, visible tube/LED output,
+full-size 24-hour concurrent TLS memory and power-loss/bootloader rollback
+remain assembled-device acceptance checks.
 
-Official protocol and connection limits are linked in [SOURCES.md](SOURCES.md).
+Official endpoints and connection limits are linked in [SOURCES.md](SOURCES.md).

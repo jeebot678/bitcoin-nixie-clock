@@ -11,6 +11,8 @@
 SerialMock Serial;EspMock ESP;WifiMock WiFi;UpdateMock Update;uint32_t testMillis=100;
 std::map<int,int>pins,modes,adc;std::vector<GpioEvent>gpioEvents;
 int bootState=ESP_OTA_IMG_VALID,bootConfirms=0,bootRollbacks=0;
+unsigned pauses=0,resumes=0;bool canPause=true;
+namespace live {bool pauseAndWait(uint32_t timeout){assert(timeout==25000);++pauses;return canPause;}void resume(){++resumes;}}
 std::string readFile(const std::string&path){std::ifstream f(path,std::ios::binary);assert(f.good());std::ostringstream s;s<<f.rdbuf();return s.str();}
 #include "../../src/OtaUpdate.cpp"
 #include "key_fixture.h"
@@ -36,6 +38,7 @@ int main(int argc,char**argv){assert(argc==2);std::string folder=argv[1];std::st
   manifestResponse.body.assign(json.begin(),json.end());httpResponses()[manifestUrl]=manifestResponse;
   firmware.headers.clear();httpResponses()[m.url]=firmware;prefMock()={};Update={};ESP.restarts=0;
   assert(ota::newer(m.version.c_str(),ota_config::kVersion));
+  canPause=false;assert(!ota::checkAndInstall()&&!Update.activated&&resumes==1&&prefMock().strings["btc-ota:attempt"].isEmpty());canPause=true;
   assert(ota::checkAndInstall()&&Update.activated&&ESP.restarts==1);
   assert(prefMock().strings["btc-ota:attempt"]==m.version.c_str());
   Update={};httpUrls().clear();assert(ota::checkAndInstall()&&!Update.activated&&ESP.restarts==1&&httpUrls().size()==1);
@@ -44,7 +47,7 @@ int main(int argc,char**argv){assert(argc==2);std::string folder=argv[1];std::st
   prefs.putString("highest",m.version.c_str());Update={};httpUrls().clear();
   assert(ota::checkAndInstall()&&!Update.activated&&ESP.restarts==2&&httpUrls().size()==1);
   std::string currentJson=readFile(folder+"/current-manifest.json");manifestResponse.body.assign(currentJson.begin(),currentJson.end());httpResponses()[manifestUrl]=manifestResponse;
-  prefMock()={};httpUrls().clear();assert(ota::checkAndInstall()&&!Update.activated&&httpUrls().size()==1);
+  unsigned priorPauses=pauses;prefMock()={};httpUrls().clear();assert(ota::checkAndInstall()&&!Update.activated&&httpUrls().size()==1&&pauses==priorPauses);
   ota::begin();assert(!ota::checkDue(59999,true)&&ota::checkDue(90000,true)&&!ota::checkDue(90000,false));
   uint32_t nearWrap=UINT32_MAX-100000;ota::defer(nearWrap);
   assert(!ota::checkDue(nearWrap+ota_config::kCheckIntervalMs-1,true));assert(ota::checkDue(nearWrap+ota_config::kCheckIntervalMs+900000,true));
