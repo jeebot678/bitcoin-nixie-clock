@@ -1,37 +1,51 @@
 {
-  "checked_at_utc": "2026-10-11T18:02:56.379345+00:00",
+  "checked_at_utc": "2026-10-11T18:59:13.895563+00:00",
   "duration_seconds": 180,
-  "firmware_version": "1.0.8",
+  "firmware_version": "1.0.9",
   "interval_ms": 500,
-  "frames": 358,
-  "measured_intervals": 357,
+  "frames": 360,
+  "measured_intervals": 359,
   "allowed_jitter_ms": 10,
   "gap_ms": {
-    "min": 497,
+    "min": 495,
     "median": 500,
-    "max": 503
+    "max": 504
   },
-  "distinct_displayed_prices": 48,
-  "max_frame_quote_age_ms": 14036,
+  "distinct_displayed_prices": 62,
+  "distinct_displayed_whole_dollar_values": 29,
+  "displayed_sources": [
+    "Coinbase",
+    "Kraken"
+  ],
+  "whole_dollar_changes": 359,
+  "whole_dollar_motion_ratio": 1.0,
+  "maximum_allowed_quote_age_ms": 5000,
+  "minimum_required_sources": 2,
+  "minimum_required_motion_ratio": 0.99,
+  "cosmetic_motion_frames": 50,
+  "maximum_display_rounding_error_usd": 1.0,
+  "max_frame_quote_age_ms": 4906,
   "stream_quote_counter": {
-    "first": 112,
-    "last": 2075
+    "first": 1003,
+    "last": 2394
   },
   "accepted_quote_counter": {
-    "first": 113,
-    "last": 2066
+    "first": 934,
+    "last": 2325
   },
   "history_received": 3,
   "history_saved": 9,
-  "ota_check_completed": true,
+  "ota_check_completed": false,
   "frequency_selector_stable": true,
   "observed_ranges": [
     "5 minutes"
   ],
-  "minimum_reported_heap_bytes": 58708,
+  "minimum_reported_heap_bytes": 50836,
   "minimum_reported_largest_allocation_bytes": 45044,
-  "stream_stack_remaining_bytes": 11160,
+  "stream_stack_remaining_bytes": 4992,
   "pass": true,
   "errors": [],
-  "local_firmware_sha256": "fbef63e921d394436e0272296bfa5d2635e4e174d22fd5b7b35373ecfa188f6d"
+  "startup_warmup_seconds": 60,
+  "ota_check_completed_during_entire_observation": true,
+  "local_firmware_sha256": "a30be80b9caf016227995a80087c8463f259299eac91bfcfd3b568269c13d404"
 }

@@ -3,7 +3,8 @@
 The frequency selector controls a separate tube timer: 0.5 s, 2 s, 30 s,
 5 min or 1 h. Every deadline sends all six modules their normal `0xAA`
 brightness packets. Changing frequency starts an immediate frame; changing
-range leaves the tube interval alone. Range is JSEL1/GPIO34; frequency is
+range leaves the tube interval alone. Confirming the initial default detent
+also retains the existing deadline phase. Range is JSEL1/GPIO34; frequency is
 JSEL2/GPIO35. An unread detent defaults to 0.5 s and is explicitly reported
 as unconfirmed; this does not certify ADC calibration.
 
@@ -115,7 +116,13 @@ The actual TLS callback has concurrent trust-lifetime/signature tests.
 `ticks on` logs raw quote, actual digit value, source, cosmetic flag, interval,
 frame gap and selected quote receipt age. `status` reports connected stream
 count, advancing accepted quotes, heap and minimum remaining stream stack.
-The final physical result and exact flashed image hash are recorded in
+The final three-minute USB measurement observed 360 frames, 495–504 ms gaps
+(median 500 ms), 359/359 changing whole-dollar transitions and both Coinbase
+and Kraken selections. Fifty frames used the cosmetic fallback, with a $1
+maximum rendering error. Selected receipt age reached 4,906 ms. Three history
+requests and nine cache saves completed during measurement, with no device
+fault. The signed OTA manifest check completed during the logged warm-up.
+The result and exact flashed image hash are recorded in
 [the USB refresh report](../test/device_refresh_report.json).
 
 Repeat with the assembled device at 0.5 s:
@@ -123,7 +130,8 @@ Repeat with the assembled device at 0.5 s:
 ```sh
 ~/.platformio/penv/bin/python tools/verify_device_refresh.py \
   --port YOUR_ESP32_PORT --version 1.0.9 --warmup 60 --duration 180 \
-  --max-quote-age-ms 5000 --minimum-sources 2 --minimum-motion-ratio 0.99
+  --minimum-frames 340 --max-quote-age-ms 5000 --minimum-sources 2 \
+  --minimum-motion-ratio 0.99
 ```
 
 The 60-second startup phase is logged but excluded from steady measurements;
@@ -131,7 +139,7 @@ Wi-Fi, SNTP, TLS and independent-price confirmation can take time on a cold
 boot. Device faults in either phase fail verification. The strict run requires
 advancing counters, two actual displayed providers, the selected cadence,
 quotes no more than five seconds old, at least 99% changing dollar transitions
-and no frame more than 10 ms late. Cosmetic rendering is separately counted,
+and no frame more than 10 ms early or late. Cosmetic rendering is separately counted,
 not reported as a new trade. All physical dial detents, visible tube/LED output,
 full-size 24-hour concurrent TLS memory and power-loss/bootloader rollback
 remain assembled-device acceptance checks.
