@@ -62,9 +62,9 @@ void diagnostics(uint32_t now) {
   for (size_t i=0;i<btc::kSourceCount;++i)
     Serial.printf("  %s failures=%u cooldown=%ld ms\n",btc::kSources[i].name,rotation.states[i].failures,(long)std::max<int32_t>(0,int32_t(rotation.states[i].availableAt-now)));
   auto stream=live::status();
-  Serial.printf("  Nixie frames=%lu shown=%.2f latestQuoteAge=%lu ms nextFrame=%ld ms; frequencyDial=%s position=%d; stream=%s quotes=%lu accepted=%lu\n",
+  Serial.printf("  Nixie frames=%lu shown=%.2f latestQuoteAge=%lu ms nextFrame=%ld ms; frequencyDial=%s position=%d; stream=%s quotes=%lu accepted=%lu streamStackMin=%lu B\n",
     (unsigned long)nixieFrames,shownPrice,(unsigned long)uint32_t(now-lastQuoteReceived),(long)std::max<int32_t>(0,int32_t(nextNixieAt-now)),
-    refreshDial.initialized?"stable":"unconfirmed",refreshDial.stable+1,stream.connected?"connected":"offline",(unsigned long)stream.quotes,(unsigned long)acceptedQuotes);
+    refreshDial.initialized?"stable":"unconfirmed",refreshDial.stable+1,stream.connected?"connected":"offline",(unsigned long)stream.quotes,(unsigned long)acceptedQuotes,(unsigned long)stream.stackFreeBytes);
 }
 void serialCommands(uint32_t now) {
   while (Serial.available()) {
@@ -78,7 +78,10 @@ void serialCommands(uint32_t now) {
     else if (serialLine=="wifi-reset") wifi.forget();
     else if (serialLine=="selftest") testEndsAt=now+4500;
     else if (serialLine=="reboot") ESP.restart();
-    else if (serialLine=="ticks") {logNixies=!logNixies;Serial.println(logNixies?"Nixie frame logging on":"Nixie frame logging off");}
+    else if (serialLine=="ticks" || serialLine=="ticks on" || serialLine=="ticks off") {
+      logNixies=serialLine=="ticks"?!logNixies:serialLine=="ticks on";
+      Serial.println(logNixies?"Nixie frame logging on":"Nixie frame logging off");
+    }
     else if (!serialLine.isEmpty()) Serial.println("Commands: status, dials, ticks, setup, wifi-reset, selftest, reboot");
     serialLine="";
   }
@@ -246,6 +249,9 @@ void saveHistory(uint32_t now) {
 }
 }
 void setup() {
+  // Queue a complete diagnostic report instead of waiting for each byte to
+  // drain over USB; status logging must not hold up the display timer.
+  Serial.setTxBufferSize(2048);
   Serial.begin(115200); serialLine.reserve(64);
   display::begin();
   historyStore.begin(histories);

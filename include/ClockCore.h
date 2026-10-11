@@ -112,9 +112,14 @@ inline Plot makePlot(const History& history, uint32_t now, uint32_t window, doub
   if (!window || now < window) return plot;
   const uint32_t start = now - window;
   double prices[21] = {};
+  uint32_t timestamps[21] = {};
   auto add = [&](uint32_t timestamp, double price) {
     if (timestamp < start || timestamp > now || !validPrice(price)) return;
     size_t column = std::min<size_t>(20, uint64_t(timestamp - start) * 21 / window);
+    // An exchange's last trade can predate the newest closed candle. Select
+    // by actual UTC time, so an older live quote cannot replace a newer point.
+    if (timestamp < timestamps[column]) return;
+    timestamps[column] = timestamp;
     prices[column] = price; plot.valid |= 1U << column;
   };
   for (size_t i = 0; i < history.count; ++i) add(history.samples[i].timestamp, history.samples[i].price);

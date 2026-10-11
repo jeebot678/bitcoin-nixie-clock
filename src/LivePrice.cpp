@@ -7,17 +7,20 @@
 #include <memory>
 #include <time.h>
 #include "LivePrice.h"
+#include "TlsGate.h"
 
 extern const uint8_t caBundle[] asm("_binary_data_cert_x509_crt_bundle_bin_start");
 namespace {
 QueueHandle_t ticks=nullptr;
 std::atomic<bool> pauseRequested{false}, paused{true}, connected{false}, busy{false};
 std::atomic<uint32_t> quoteCount{0}, receivedAt{0};
+std::atomic<uint32_t> stackFreeBytes{0};
 class StreamSocket : public WebSocketsClient {
  public:
   int httpStatus() const { return _client.cCode; }
 };
 std::unique_ptr<StreamSocket> socket;
+btc::TlsLease openingHandshake;
 btc::SourceState cooldown[2];
 uint8_t source=1,nextSource=1;
 bool failed=false,closing=false;
@@ -27,6 +30,7 @@ StaticJsonDocument<2048> document;
 
 void closeSocket() {
   closing=true;socket.reset();closing=false;connected=false;
+  openingHandshake.release();
 }
 void event(WStype_t type,uint8_t* payload,size_t length) {
   if (closing) return;
@@ -79,11 +83,19 @@ void step() {
     for (uint8_t i=0;i<2;++i) {uint8_t candidate=(nextSource+i)%2;if(btc::due(now,cooldown[candidate].availableAt)){eligible=candidate;break;}}
     if (eligible<0) return;
     source=uint8_t(eligible);failed=false;failureStatus=0;openedAt=lastMessageAt=lastValidQuoteAt=now;
+    Serial.printf("Stream starting: %s, heap=%u largest=%u\n",btc::kSources[source].name,ESP.getFreeHeap(),ESP.getMaxAllocHeap());
     socket.reset(new StreamSocket());socket->onEvent(event);
     socket->beginSslWithBundle(source==1?"ws.kraken.com":"ws-feed.exchange.coinbase.com",443,source==1?"/v2":"/",caBundle,"");
     socket->setReconnectInterval(5000);socket->enableHeartbeat(20000,5000,2);
   }
-  socket->loop();now=millis();
+  if (!connected) {
+    bool started=bool(openingHandshake);
+    if (!openingHandshake.acquire()) return;
+    if (!started) openedAt=lastMessageAt=lastValidQuoteAt=now;
+    socket->loop();
+    if (connected) openingHandshake.release();
+  } else socket->loop();
+  now=millis();
   if (failed || uint32_t(now-lastMessageAt)>35000 || uint32_t(now-lastValidQuoteAt)>120000 || (!connected && uint32_t(now-openedAt)>15000)) {
     int code=failureStatus?failureStatus:socket->httpStatus();
     auto& state=cooldown[source];state.failures=std::min<uint8_t>(state.failures+1,5);
@@ -95,17 +107,22 @@ void step() {
     closeSocket();
   }
 }
-void worker(void*) {for(;;){step();delay(5);}}
+void worker(void*) {for(;;){step();
+#ifdef ARDUINO
+  stackFreeBytes=uxTaskGetStackHighWaterMark(nullptr);
+#endif
+  delay(5);}}
 }
 namespace live {
 bool begin() {
   ticks=xQueueCreate(1,sizeof(Tick));
   if (!ticks) return false;
-  if (xTaskCreatePinnedToCore(worker,"btc-stream",8192,nullptr,1,nullptr,0)==pdPASS) return true;
+  // Cooperative TLS reads yield during waits; keep crypto work responsive.
+  if (xTaskCreatePinnedToCore(worker,"btc-stream",16384,nullptr,1,nullptr,0)==pdPASS) return true;
   vQueueDelete(ticks);ticks=nullptr;return false;
 }
 bool receive(Tick& tick) {return ticks && xQueueReceive(ticks,&tick,0)==pdTRUE;}
-Status status() {Status state;state.connected=connected;state.paused=paused;state.quotes=quoteCount;state.receivedAt=receivedAt;return state;}
+Status status() {Status state;state.connected=connected;state.paused=paused;state.quotes=quoteCount;state.receivedAt=receivedAt;state.stackFreeBytes=stackFreeBytes;return state;}
 bool fresh(uint32_t now) {return connected && quoteCount && uint32_t(now-receivedAt.load())<1500;}
 bool pauseAndWait(uint32_t timeoutMs) {
   pauseRequested=true;

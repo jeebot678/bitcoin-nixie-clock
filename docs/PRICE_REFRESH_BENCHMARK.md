@@ -1,6 +1,6 @@
 # Independent live-price benchmark
 
-This records the 1.0.6 computer experiments. Firmware 1.0.7 now adds one
+This records the 1.0.6 computer experiments. Firmware 1.0.8 now uses one
 independent USD stream with failover and a separate Nixie display timer;
 see [the refresh correction and device checks](NIXIE_REFRESH.md). The measured
 eight-stream computer throughput below is not an ESP32 performance claim.

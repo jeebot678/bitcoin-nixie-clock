@@ -4,6 +4,11 @@ Verified on 2026-10-10 using HTTP/1.0, identity encoding and the same Mozilla ro
 
 These are independent exchanges, so their last trade prices can differ. Rotation distributes a very small request load while respecting each provider's limits; it does not bypass a provider's quota or IP restrictions. REST uses a minimum five-second interval per provider (at most 12 requests/minute per provider), including shared Kraken/Bitstamp history traffic. REST, FX and history are serialized by one worker. From 1.0.7, one separate persistent USD stream supplies the latest accepted price, and the frequency dial controls an independent tube timer. A fresh stream suppresses redundant REST ticker requests; quiet/disconnected streams use REST fallback.
 
+Version 1.0.8 corrects device TLS scheduling and coordinates new connections;
+the 1.0.7 rollout was withdrawn after hardware watchdog failures. Successful
+USB refresh measurements are separate from computer throughput experiments:
+see [device timing and chart buckets](NIXIE_REFRESH.md).
+
 ## Device live stream
 
 Kraken primary: `wss://ws.kraken.com/v2`, `ticker`, symbol `BTC/USD`, `event_trigger:bbo`, snapshot enabled. Parse `data[0].last` and ticker `timestamp`; bid/ask changes can trigger delivery while the last trade price stays unchanged. [Official ticker schema](https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/ticker). The public endpoint needs no key. Kraken documents roughly 150 connection attempts per rolling ten minutes/IP and recommends at least five seconds between reconnections after downtime. [Official connection rules](https://docs.kraken.com/exchange/guides/websockets/introduction).

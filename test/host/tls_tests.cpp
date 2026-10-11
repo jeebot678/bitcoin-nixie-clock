@@ -19,6 +19,7 @@ int main() {
   bundle.insert(bundle.end(),subject.begin(),subject.end());bundle.insert(bundle.end(),spki.begin(),spki.end());
   mbedtls_ssl_config conf;assert(arduino_esp_crt_bundle_attach(&conf)==ESP_ERR_INVALID_STATE);
   arduino_esp_crt_bundle_set(bundle.data());assert(arduino_esp_crt_bundle_attach(&conf)==ESP_OK&&conf.verify&&conf.ca);
+  assert(conf.curves&&conf.curves[0]==MBEDTLS_ECP_DP_CURVE25519&&conf.curves[1]==MBEDTLS_ECP_DP_SECP256R1&&conf.curves[2]==MBEDTLS_ECP_DP_SECP384R1&&conf.curves[3]==MBEDTLS_ECP_DP_NONE);
   mbedtls_x509_crt crossSigned;crossSigned.subject_raw=buf(subject);crossSigned.pk_raw=buf(spki);crossSigned.ca_istrue=1;
   Bytes unknown{1,2,3};crossSigned.issuer_raw=buf(unknown);
   uint32_t flags=MBEDTLS_X509_BADCERT_NOT_TRUSTED;assert(conf.verify(nullptr,&crossSigned,2,&flags)==0&&!flags);

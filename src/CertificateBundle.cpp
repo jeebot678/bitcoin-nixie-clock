@@ -43,6 +43,12 @@ static crt_bundle_t s_crt_bundle;
 static std::mutex s_bundle_mutex;
 static const uint8_t* s_bundle_data = nullptr;
 static bool s_dummy_initialized = false;
+// Prefer efficient modern key exchanges on this small MCU. Keep P-384 for
+// servers/certificates that need it; avoid costly P-521/Brainpool handshakes.
+static const mbedtls_ecp_group_id s_tls_curves[] = {
+    MBEDTLS_ECP_DP_CURVE25519, MBEDTLS_ECP_DP_SECP256R1,
+    MBEDTLS_ECP_DP_SECP384R1, MBEDTLS_ECP_DP_NONE
+};
 
 static int esp_crt_verify_callback(void *buf, mbedtls_x509_crt *crt, int data, uint32_t *flags);
 static int esp_crt_check_signature(mbedtls_x509_crt *child, const uint8_t *pub_key_buf, size_t pub_key_len);
@@ -192,6 +198,7 @@ esp_err_t arduino_esp_crt_bundle_attach(void *conf)
          * cacert_ptr passes non-NULL check during handshake
          */
         mbedtls_ssl_config *ssl_conf = (mbedtls_ssl_config *)conf;
+        mbedtls_ssl_conf_curves(ssl_conf, s_tls_curves);
         if (!s_dummy_initialized) {
             mbedtls_x509_crt_init(&s_dummy_crt);
             s_dummy_initialized = true;

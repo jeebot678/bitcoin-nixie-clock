@@ -3,7 +3,7 @@
 
 namespace live {
 struct Tick { btc::Quote quote; uint32_t receivedAt=0; uint8_t source=0; };
-struct Status { bool connected=false, paused=true; uint32_t quotes=0, receivedAt=0; };
+struct Status { bool connected=false, paused=true; uint32_t quotes=0, receivedAt=0, stackFreeBytes=0; };
 bool begin();
 bool receive(Tick& tick);
 Status status();

@@ -4,6 +4,7 @@
 #include <Update.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include "CooperativeTlsClient.h"
 #include <esp_ota_ops.h>
 #include <esp_system.h>
 #include <mbedtls/base64.h>
@@ -48,7 +49,7 @@ bool verify(const ota::Manifest& manifest) {
   mbedtls_pk_free(&key);return !error;
 }
 bool readManifest(ota::Manifest& manifest,uint32_t slotSize) {
-  WiFiClientSecure tls;HTTPClient http;
+  CooperativeTlsClient tls;HTTPClient http;
   std::string url=std::string("https://raw.githubusercontent.com/")+ota_config::kRepository+"/"+ota_config::kBranch+"/ota/manifest.json";
   int status=openDownload(http,tls,url);
   bool ok=false;
@@ -64,7 +65,7 @@ bool readManifest(ota::Manifest& manifest,uint32_t slotSize) {
   return ok;
 }
 bool install(const ota::Manifest& manifest) {
-  WiFiClientSecure tls;HTTPClient http;
+  CooperativeTlsClient tls;HTTPClient http;
   int status=openDownload(http,tls,manifest.url);
   if (status!=200 || http.getSize()!=int(manifest.size) || !http.header("Transfer-Encoding").isEmpty() || (!http.header("Content-Encoding").isEmpty() && http.header("Content-Encoding")!="identity") || !Update.begin(manifest.size,U_FLASH)) {
     http.end();tls.stop();Serial.println("OTA download/header/partition rejected");return false;

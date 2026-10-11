@@ -33,7 +33,9 @@ inline int mbedtls_pk_verify_ext(int,void*,mbedtls_pk_context* pk,int md,const u
   EVP_PKEY_CTX_free(ctx);return ok?0:-1;
 }
 using VerifyCallback=int(*)(void*,mbedtls_x509_crt*,int,uint32_t*);
-struct mbedtls_ssl_config { VerifyCallback verify=nullptr;mbedtls_x509_crt* ca=nullptr; };
+enum mbedtls_ecp_group_id {MBEDTLS_ECP_DP_NONE,MBEDTLS_ECP_DP_CURVE25519,MBEDTLS_ECP_DP_SECP256R1,MBEDTLS_ECP_DP_SECP384R1};
+struct mbedtls_ssl_config { VerifyCallback verify=nullptr;mbedtls_x509_crt* ca=nullptr;const mbedtls_ecp_group_id* curves=nullptr; };
+inline void mbedtls_ssl_conf_curves(mbedtls_ssl_config* conf,const mbedtls_ecp_group_id* curves) {conf->curves=curves;}
 inline void mbedtls_ssl_conf_ca_chain(mbedtls_ssl_config* conf,mbedtls_x509_crt* ca,void*) {conf->ca=ca;}
 inline void mbedtls_ssl_conf_verify(mbedtls_ssl_config* conf,VerifyCallback verify,void*) {conf->verify=verify;}
 extern "C" {

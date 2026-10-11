@@ -8,6 +8,7 @@
 #include "WifiCredentials.h"
 #include "OtaManifest.h"
 #include "LedMatrixMap.h"
+#include "TlsGate.h"
 
 std::string readFile(const std::string& path) { std::ifstream file(path); assert(file.good()); std::ostringstream out;out<<file.rdbuf();return out.str(); }
 size_t slotsIn(JsonVariantConst value) {
@@ -44,6 +45,41 @@ void coreTests() {
   auto plot=btc::makePlot(history,now,3600,82200,now);assert(plot.valid);for(int i=0;i<21;++i)if(plot.valid&(1U<<i))assert(plot.rows[i]<=12);
   btc::History empty;auto sparse=btc::makePlot(empty,now,604800,80000,now);assert(sparse.valid==(1U<<20));assert(!btc::makePlot(empty,now,604800,80000,now-604801).valid);
   auto unchanged=btc::makePlot(empty,now,604800,80000.01,now);assert(unchanged.valid==sparse.valid&&unchanged.rows[20]==sparse.rows[20]);
+  // Every selected range divides into exactly 21 chronological buckets, with
+  // the latest sample in each bucket determining its one price pixel.
+  for (uint32_t window:config::kWindowSeconds) {
+    uint32_t start=now-window;
+    for (unsigned column=0;column<21;++column) {
+      uint32_t first=(uint64_t(column)*window+20)/21;
+      uint32_t last=column==20?window:(uint64_t(column+1)*window+20)/21-1;
+      for (uint32_t offset:{first,last}) {
+        auto cell=btc::makePlot(empty,now,window,80000,start+offset);
+        assert(cell.valid==(1U<<column)&&cell.rows[column]==6);
+      }
+    }
+    assert(!btc::makePlot(empty,now,window,80000,start-1).valid);
+    assert(!btc::makePlot(empty,now,window,80000,now+1).valid);
+    btc::History increasing;
+    for (unsigned column=0;column<21;++column) {
+      uint32_t timestamp=start+(uint64_t(column)*window+20)/21;
+      assert(increasing.add(timestamp,80000+column*100));
+    }
+    auto full=btc::makePlot(increasing,now,window,0,0);
+    assert(full.valid==((1U<<21)-1));
+    for (unsigned column=0;column<21;++column) {
+      assert(full.rows[column]<=12);
+      if (column) assert(full.rows[column]<=full.rows[column-1]);
+    }
+    auto latest=btc::makePlot(increasing,now,window,70000,now);
+    assert(latest.rows[20]>full.rows[20]);
+    btc::History completed;
+    assert(completed.add(now,82000));
+    auto current=btc::makePlot(completed,now,window,0,0);
+    auto older=btc::makePlot(completed,now,window,70000,now-1);
+    assert(older.valid==current.valid&&older.rows[20]==current.rows[20]);
+  }
+  {btc::TlsLease owner,contender;assert(owner.acquire()&&owner.acquire()&&!contender.acquire());}
+  {btc::TlsLease next;assert(next.acquire());}
   assert(!history.add(now-4000,10));assert(!history.add(now,0));
   assert(btc::validCredentials("home","password123"));assert(btc::validCredentials("open",""));assert(!btc::validCredentials("","password123"));assert(!btc::validCredentials("home","short"));
   std::string hex(64,'a');assert(btc::validCredentials("home",hex.c_str()));hex[2]='g';assert(!btc::validCredentials("home",hex.c_str()));

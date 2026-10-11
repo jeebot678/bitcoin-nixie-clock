@@ -6,6 +6,8 @@
 #include "MarketClient.h"
 #include "OtaUpdate.h"
 #include "LivePrice.h"
+#include "TlsGate.h"
+#include "CooperativeTlsClient.h"
 
 extern const uint8_t caBundle[] asm("_binary_data_cert_x509_crt_bundle_bin_start");
 namespace {
@@ -45,6 +47,10 @@ void fetch(const market::Request& request) {
   response.ok=false; response.status=0; response.retryAfterMs=0;
   response.quote={}; response.history.count=0; response.request=request;
   if (WiFi.status()!=WL_CONNECTED || time(nullptr)<config::kMinimumEpoch) return;
+  btc::TlsLease handshake;
+  uint32_t waitingAt=millis();
+  while (!handshake.acquire() && uint32_t(millis()-waitingAt)<15000) delay(5);
+  if (!handshake) return;
   if (request.kind==market::Kind::Ota) {
     if (live::pauseAndWait(15000)) response.ok=ota::checkAndInstall();
     live::resume();return;
@@ -68,8 +74,8 @@ void fetch(const market::Request& request) {
     else
       url="https://www.bitstamp.net/api/v2/ohlc/btcusd/?step="+String(interval)+"&limit="+String((request.epoch/interval*interval-start)/interval)+"&end="+String(request.epoch/interval*interval-1)+"&exclude_current_candle=true";
   }
-  WiFiClientSecure tls;
-  tls.setCACertBundle(caBundle); tls.setHandshakeTimeout(6); tls.setTimeout(6);
+  CooperativeTlsClient tls;
+  tls.setCACertBundle(caBundle); tls.setHandshakeTimeout(20); tls.setTimeout(6);
   HTTPClient http;
   http.setConnectTimeout(6000); http.setTimeout(6000);
   http.setReuse(false); http.useHTTP10(true); // Raw stream has no chunk framing.
@@ -116,6 +122,7 @@ void worker(void*) {
   market::Request request;
   for (;;) if (xQueueReceive(requests,&request,portMAX_DELAY)==pdTRUE) {
     fetch(request); response.receivedAt=millis();
+    delay(2);
     xQueueSend(results,&response,portMAX_DELAY);
   }
 }
@@ -124,7 +131,10 @@ namespace market {
 bool begin() {
   requests=xQueueCreate(1,sizeof(Request)); results=xQueueCreate(1,sizeof(Result));
   if (!requests || !results) return false;
-  return xTaskCreatePinnedToCore(worker,"btc-http",12288,nullptr,1,nullptr,0)==pdPASS;
+  // TLS certificate/key calculations can run continuously for several seconds.
+  // Share the idle task's priority so those calculations cannot starve IDLE0
+  // or restart the device while the independent stream/display keep running.
+  return xTaskCreatePinnedToCore(worker,"btc-http",16384,nullptr,0,nullptr,0)==pdPASS;
 }
 bool send(const Request& request) { return requests && xQueueSend(requests,&request,0)==pdTRUE; }
 bool receive(Result& result) { return results && xQueueReceive(results,&result,0)==pdTRUE; }

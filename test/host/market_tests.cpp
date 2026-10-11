@@ -63,6 +63,8 @@ int main(int argc,char** argv){assert(argc==4);std::string directory=argv[1];tes
   // pause deadline expires, skip OTA and always release the pause request.
   fetch({market::Kind::Ota,0,0,uint32_t(testEpoch)});assert(response.ok&&otaCalls==1&&pauseCalls==1&&resumeCalls==1);
   streamPaused=false;fetch({market::Kind::Ota,0,0,uint32_t(testEpoch)});assert(!response.ok&&otaCalls==1&&pauseCalls==2&&resumeCalls==2);
+  {btc::TlsLease streamHandshake;assert(streamHandshake.acquire());uint32_t waitingAt=testMillis;fetch(request);assert(!response.ok&&uint32_t(testMillis-waitingAt)>=15000);}
+  httpResponses()[btc::kSources[0].url]=good;fetch(request);assert(response.ok); // Gate releases on every return path.
   WiFi.connection=0;fetch(request);assert(!response.ok);
   std::cout<<"PASS: actual HTTP worker; all 11 quote and 10 history fixtures, truncation, cache freshness, framing, size bounds, rate limits and Wi-Fi loss\n";
 }

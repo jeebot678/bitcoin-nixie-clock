@@ -64,6 +64,8 @@ void settingsTests(){
   adc[35]=1800;adc[34]=503;readDials(testMillis);testMillis+=151;readDials(testMillis);
   assert(refreshDial.stable==4&&timelineDial.stable==1);schedule(testMillis);assert(market::calls==before);
   Serial.input="dials\n";serialCommands(testMillis);assert(Serial.log.find("Frequency JSEL2 GPIO35=1800 mV; range JSEL1 GPIO34=503 mV")!=std::string::npos);
+  Serial.input="ticks on\nticks on\n";serialCommands(testMillis);assert(logNixies);
+  Serial.input="ticks off\nticks off\n";serialCommands(testMillis);assert(!logNixies);
   market::complete();processResult(testMillis);
   packets.clear();draw(testMillis);assert(display::startupAnimating()&&nextDrawAt==testMillis+config::kStartupFrameMs);
   testMillis+=273*config::kStartupCellMs;draw(testMillis);assert(display::startupAnimating());
