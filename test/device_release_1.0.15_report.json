@@ -1,0 +1,101 @@
+{
+  "checked_at_utc": "2026-10-12T06:53:07.008740+00:00",
+  "firmware_version": "1.0.15",
+  "firmware_source_commit": "4cb54e86b62d683cce6ddea4ffa9964611f30bdd",
+  "source_ci": {
+    "run": 38214054469,
+    "conclusion": "success"
+  },
+  "rollout_commit": "aa4abf496752a83801734a193fec7a969c459165",
+  "rollout_ci": {
+    "run": 38214305030,
+    "conclusion": "success"
+  },
+  "firmware_size_bytes": 1221824,
+  "firmware_sha256": "8b11781b99db4706f89bffdcdcc12e3f30f40a86367095d5dcc79836217b67ac",
+  "pcb_attached": false,
+  "original_failure": {
+    "firmware": "1.0.11",
+    "mbedtls_error": -32512,
+    "description": "TLS allocation failed in live HTTPS/secondary stream and signed OTA manifest requests"
+  },
+  "ota": {
+    "measurement": "actual_esp32_usb_serial_and_lan",
+    "from_version": "1.0.14 USB recovery build",
+    "to_version": "1.0.15 signed GitHub release",
+    "transport": "Wi-Fi HTTPS from main rollout manifest; no USB write used for the upgrade",
+    "full_download_observed": true,
+    "signature_and_hash_verification_completed": true,
+    "rebooted_new_version": true,
+    "boot_confirmed_flag": true,
+    "running_signed_manifest_check_completed": true,
+    "physical_power_loss_rollback_tested": false
+  },
+  "restored_caches": {
+    "5 minutes": {
+      "candles": 5,
+      "saved_epoch": 1791778855
+    },
+    "30 minutes": {
+      "candles": 5,
+      "saved_epoch": 1791778855
+    },
+    "1 hour": {
+      "candles": 5,
+      "saved_epoch": 1791778855
+    },
+    "24 hours": {
+      "candles": 288,
+      "saved_epoch": 1791773328
+    },
+    "7 days": {
+      "candles": 168,
+      "saved_epoch": 1791785918
+    }
+  },
+  "wifi_credentials_retained": true,
+  "first_price_frame_after_ota_boot_ms": 19691,
+  "live_cadence": {
+    "checked_at_utc": "2026-10-12T06:51:39.545259+00:00",
+    "firmware_version": "1.0.15",
+    "measurement": "actual_esp32_lan_firmware_commands",
+    "pcb_attached": false,
+    "visible_tube_output_verified": false,
+    "temporary_cadence_test_seconds": 30,
+    "interval_ms": 500,
+    "observed_frames": 60,
+    "min_frame_gap_ms": 497,
+    "max_frame_gap_ms": 503,
+    "displayed_sources": [
+      "Bitstamp",
+      "Kraken"
+    ],
+    "whole_dollar_changes": 59,
+    "stream_quotes_before": 428,
+    "stream_quotes_after": 714,
+    "accepted_quotes_before": 430,
+    "accepted_quotes_after": 716,
+    "max_latest_quote_age_ms": 2520,
+    "maximum_cosmetic_error_usd": 1,
+    "physical_frequency_setting_unchanged": true,
+    "automatic_restore_verified": true,
+    "http_stack_remaining": 4132,
+    "pass": true
+  },
+  "observed_recovery": {
+    "coinbase_handshake_transport_failure": true,
+    "automatic_bitstamp_fallback_connected": true,
+    "fatal_device_faults": false,
+    "tls_memory_allocation_errors": false
+  },
+  "evidence_sha256": {
+    "firmware-1.0.11-serial.log": "85f618f0dc9ff4d1c42826c220c3c07782305b72041f26919098bfbe34eb0db3",
+    "ota-1.0.14-to-1.0.15-network.jsonl": "bd10e9e35e7d45ebb6106aa6a2a68d6b993590a39642ba488bbc75bdabe5e64e",
+    "firmware-1.0.15-cadence-network.jsonl": "6cb24d6ca628f6b8c82365f8fd5d51e8b6b413bd9b9bd435f460d50281a08be6"
+  },
+  "remaining_physical_checks": [
+    "Both dials in assembled PCB at all five settings",
+    "Visible Nixie and matrix output"
+  ],
+  "pass": true
+}
