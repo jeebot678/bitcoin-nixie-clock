@@ -6,6 +6,7 @@
 
 enum WStype_t {WStype_ERROR,WStype_DISCONNECTED,WStype_CONNECTED,WStype_TEXT,WStype_BIN,WStype_PING,WStype_PONG};
 inline unsigned& liveSockets(){static unsigned count=0;return count;}
+inline std::function<void()>& connectedHook(){static std::function<void()> callback;return callback;}
 class WebSocketsClient {
  protected:
   struct Client {int cCode=0;} _client;
@@ -20,6 +21,6 @@ class WebSocketsClient {
   void setReconnectInterval(uint32_t interval){reconnect=interval;}
   void enableHeartbeat(uint32_t interval,uint32_t timeout,unsigned failures){ping=interval;pong=timeout;misses=failures;}
   bool sendTXT(const char* payload){sent.emplace_back(payload);return true;}
-  void loop(){if(pending){pending=false;_client.cCode=101;emit(WStype_CONNECTED,"");}}
+  void loop(){if(pending){pending=false;_client.cCode=101;emit(WStype_CONNECTED,"");if(connectedHook())connectedHook()();}}
   void emit(WStype_t type,const std::string& payload){std::vector<uint8_t> buffer(payload.begin(),payload.end());buffer.push_back(0);callback(type,buffer.data(),payload.size());}
 };

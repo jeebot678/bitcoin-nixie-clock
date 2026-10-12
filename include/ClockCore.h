@@ -120,7 +120,11 @@ class PriceGuard {
   uint32_t pendingAt_ = 0;
 };
 constexpr size_t kMaxCandles = 300; // Largest range: 24 h of five-minute candles.
-struct Sample { uint32_t timestamp; double price; };
+// Preserve the full 64-bit quoted price while removing four padding bytes
+// per candle. GCC/Clang generate safe unaligned loads; cache encoding stays
+// explicit and compatible with existing 12-byte records on flash.
+struct __attribute__((packed)) Sample { uint32_t timestamp; double price; };
+static_assert(sizeof(Sample)==12,"Compact full-precision candle storage required");
 struct History {
   Sample samples[kMaxCandles] = {};
   uint16_t count = 0;

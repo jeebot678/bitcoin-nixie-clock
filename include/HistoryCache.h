@@ -68,7 +68,7 @@ inline uint32_t cacheCrc(uint32_t crc, const uint8_t* data, size_t size) {
 inline void cacheSampleBytes(const Sample& sample, uint8_t bytes[kCacheSampleSize]) {
   static_assert(sizeof(double) == sizeof(uint64_t), "64-bit prices required");
   cachePut32(bytes, sample.timestamp);
-  uint64_t price; memcpy(&price, &sample.price, sizeof(price));
+  double value=sample.price;uint64_t price;memcpy(&price,&value,sizeof(price));
   for (unsigned i = 0; i < 8; ++i) bytes[4 + i] = uint8_t(price >> (8 * i));
 }
 inline bool validCacheSample(const Sample& sample, uint8_t window, uint32_t epoch, uint32_t previous) {
@@ -113,7 +113,7 @@ bool readHistoryCache(Reader& reader, uint8_t window, CacheMetadata& metadata, H
     crc = cacheCrc(crc, bytes, sizeof(bytes));
     Sample sample = {cacheGet32(bytes), 0}; uint64_t price = 0;
     for (unsigned j = 0; j < 8; ++j) price |= uint64_t(bytes[4 + j]) << (8 * j);
-    memcpy(&sample.price, &price, sizeof(price));
+    double value;memcpy(&value,&price,sizeof(price));sample.price=value;
     if (!validCacheSample(sample, window, epoch, previous)) return false;
     previous = sample.timestamp;
     if (history) history->samples[i] = sample;

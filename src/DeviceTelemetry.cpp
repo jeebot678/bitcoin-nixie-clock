@@ -17,12 +17,12 @@ WebServer telemetryWeb(8080);
 char controlToken[33]={};
 bool listening=false,mdns=false;
 uint32_t stackRemaining=0;
-StaticJsonDocument<JSON_OBJECT_SIZE(43)+2*JSON_OBJECT_SIZE(7)+2*JSON_ARRAY_SIZE(5)+JSON_OBJECT_SIZE(7)+280> telemetryJson;
+StaticJsonDocument<JSON_OBJECT_SIZE(47)+2*JSON_OBJECT_SIZE(7)+2*JSON_ARRAY_SIZE(5)+JSON_OBJECT_SIZE(7)+280> telemetryJson;
 const char kTelemetryPage[] PROGMEM=R"HTML(<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bitcoin Clock diagnostics</title>
 <style>body{font:16px system-ui;background:#15191c;color:#eee;max-width:760px;margin:30px auto;padding:0 18px}table{width:100%;border-collapse:collapse}td,th{padding:10px;text-align:left;border-bottom:1px solid #555}button{padding:12px;margin:6px 4px 6px 0;font:inherit}pre{white-space:pre-wrap}#message{min-height:24px}</style>
 <h1>Clock diagnostics</h1><p>Rotate one switch at a time. A held/default setting with an invalid input can explain a frozen display. Voltages are measured at the ESP32 inputs.</p>
 <table><thead><tr><th>Control</th><th>Input</th><th>Selected setting</th><th>Reading</th></tr></thead><tbody id="dials"></tbody></table>
-<p id="status">Connecting…</p><button data-action="readings">Show voltages on matrix</button><button data-action="chart">Restore chart</button><button data-action="tubes">Test tubes for 5 seconds</button><button data-action="ota">Check for update now</button><p id="message" role="status"></p><pre id="details"></pre>
+<p id="status">Connecting…</p><button data-action="readings">Show voltages on matrix</button><button data-action="chart">Restore chart</button><button data-action="tubes">Test tubes for 5 seconds</button><button data-action="cadence">Test live price at 500 ms for 30 seconds</button><button data-action="ota">Check for update now</button><p id="message" role="status"></p><pre id="details"></pre>
 <script>let token=null;const labels={frequency:['0.5 s','2 s','30 s','5 min','1 h'],range:['5 min','30 min','1 h','24 h','7 d']};
 async function request(path,options={}){const r=await fetch(path,{cache:'no-store',...options});const data=await r.json();if(!r.ok)throw new Error(data.message||'Request failed');return data;}
 async function refresh(){try{const s=await request('/telemetry'),rows=[];for(const kind of ['frequency','range']){const d=s.dials[kind],tr=document.createElement('tr');for(const text of [kind==='frequency'?'Frequency · JSEL2/GPIO35':'Range · JSEL1/GPIO34',d.mv+' mV / ADC '+d.raw,labels[kind][d.selected]+(d.initialized?'':' (default)'),d.decoded<0?'Invalid input; previous setting held':!d.initialized||d.decoded!==d.selected?'Changing / awaiting debounce':'Stable · position '+(d.selected+1)]){const td=document.createElement('td');td.textContent=text;tr.append(td);}rows.push(tr);}document.getElementById('dials').replaceChildren(...rows);document.getElementById('status').textContent='Firmware '+s.firmware+' · '+s.streams+' streams · '+s.accepted_quotes+' accepted quotes · '+s.nixie_frames+' tube commands';document.getElementById('details').textContent=JSON.stringify(s,null,2);}catch(e){document.getElementById('status').textContent='Disconnected / restarting: '+e.message;}setTimeout(refresh,500);}
@@ -40,10 +40,12 @@ void state() {
   telemetryJson["uptime_ms"]=s.uptime;telemetryJson["snapshot_age_ms"]=uint32_t(millis()-s.uptime);
   telemetryJson["wifi"]=s.online;telemetryJson["clock_synced"]=s.clock;telemetryJson["ip"]=WiFi.localIP().toString();
   telemetryJson["heap"]=s.heap;telemetryJson["largest_allocation"]=s.largest;telemetryJson["telemetry_stack_remaining"]=stackRemaining;
+  telemetryJson["data_heap"]=s.dataHeap;telemetryJson["data_largest_allocation"]=s.dataBlock;telemetryJson["http_stack_remaining"]=s.httpStack;
   JsonObject dials=telemetryJson.createNestedObject("dials");
   writeDial(dials.createNestedObject("frequency"),s.frequency,config::kRefreshMv,config::kRefreshPin);
   writeDial(dials.createNestedObject("range"),s.range,config::kTimelineMv,config::kTimelinePin);
   telemetryJson["refresh_ms"]=s.interval;telemetryJson["range_seconds"]=s.window;
+  telemetryJson["cadence_test"]=s.cadenceTest;
   telemetryJson["streams"]=s.connections;telemetryJson["stream_quotes"]=s.quotes;telemetryJson["accepted_quotes"]=s.accepted;
   telemetryJson["quote_age_ms"]=s.accepted?s.quoteAge:UINT32_MAX;telemetryJson["confirmed"]=s.confirmed;
   telemetryJson["market_price"]=s.marketPrice;telemetryJson["display_quote"]=s.displayPrice;telemetryJson["display_digits"]=s.digits;
@@ -74,6 +76,7 @@ void control() {
   else if(action=="tubes")command=telemetry::Command::Tubes;
   else if(action=="readings")command=telemetry::Command::Readings;
   else if(action=="chart")command=telemetry::Command::Chart;
+  else if(action=="cadence")command=telemetry::Command::Cadence;
   else {telemetryWeb.send(400,"application/json","{\"message\":\"Unknown command.\"}");return;}
   if (xQueueSend(commands,&command,0)!=pdTRUE) {telemetryWeb.send(503,"application/json","{\"message\":\"Command queue busy; try again.\"}");return;}
   telemetryWeb.send(202,"application/json",action=="ota"?"{\"message\":\"OTA check queued; signed newer firmware will install automatically.\"}":"{\"message\":\"Command queued.\"}");

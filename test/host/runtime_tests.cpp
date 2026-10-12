@@ -20,7 +20,8 @@ time_t testTime(time_t* output){if(output)*output=testEpoch;return testEpoch;}
 namespace market {
 Request outstanding;Result queued;bool sent=false,ready=false;unsigned calls=0;
 bool begin(){return true;}bool send(const Request&r){assert(!sent);outstanding=r;sent=true;++calls;return true;}
-bool receive(Result&r){if(!ready)return false;r=queued;ready=sent=false;return true;}
+bool receive(ResultLease&r){if(!ready)return false;r.value_=&queued;ready=false;return true;}
+ResultLease::~ResultLease(){if(value_)sent=false;}uint32_t stackRemaining(){return 4096;}
 void complete(bool ok=true,int status=200){queued={};queued.request=outstanding;queued.ok=ok;queued.status=status;queued.receivedAt=testMillis;queued.epoch=uint32_t(testEpoch);queued.quote.price=83300.0;queued.quote.usdtUsd=1;queued.quote.timestamp=uint32_t(testEpoch);
   if(outstanding.kind==Kind::History){uint32_t step=config::kCandleSeconds[outstanding.window];for(uint32_t close=outstanding.start+step;close<=outstanding.epoch;close+=step)assert(queued.history.add(close,83300));}
   ready=true;}
@@ -52,8 +53,8 @@ void settingsTests(){
   assert(wifi.setupState()==btc::WifiSetupState::Connecting);testMillis+=25;packets.clear();draw(testMillis);
   unsigned nixies=0;for(const auto&p:packets)if(p.bus==VSPI)++nixies;assert(nixies==0&&packets.size()==8);
   WiFi.connection=WL_CONNECTED;
-  wifi.loop(testMillis);schedule(testMillis);assert(!market::sent&&streamWarmupStarted);
-  testMillis+=4999;schedule(testMillis);assert(!market::sent);
+  wifi.loop(testMillis);schedule(testMillis);assert(market::sent&&streamWarmupStarted&&market::outstanding.kind==market::Kind::Quote);
+  unsigned firstCalls=market::calls;testMillis+=4999;schedule(testMillis);assert(market::calls==firstCalls);
   testMillis+=1;schedule(testMillis);assert(market::sent&&market::outstanding.kind==market::Kind::Quote&&!btc::kSources[market::outstanding.source].usdt);
   assert(wifi.setupState()==btc::WifiSetupState::Connected);testMillis+=25;packets.clear();draw(testMillis);
   assert(display::startupPending());
@@ -275,6 +276,32 @@ void tubeDiagnosticTests(){
   packets.clear();refreshNixies(testMillis);assertPriceFrame(83300);assert(!tubeTestEndsAt);
   std::cout<<"PASS: explicit five-second tube diagnostic advances every cathode on all six CS lines at 500 ms without prices, then restores the live/startup display\n";
 }
+void temporaryCadenceTests(){
+  // A bare ESP32 has no selector attached. Exercise the real price path with
+  // an explicit, bounded override while preserving both mechanical settings.
+  for(uint32_t start:{testMillis+6000,UINT32_MAX-14999}){
+    testMillis=start;refreshDial.stable=4;timelineDial.stable=3;
+    guard=btc::PriceGuard{};guard.accept(83300,0,start);guard.accept(83300,1,start);
+    quotes.clear();shownPrice=0;lastQuoteReceived=start;
+    Serial.input="cadence-test\n";serialCommands(start);
+    assert(cadenceTestActive&&refreshPeriod()==500&&refreshDial.stable==4);
+    uint32_t frames=nixieFrames;
+    for(unsigned tick=0;tick<60;++tick){
+      testMillis=start+tick*500;lastQuoteReceived=testMillis;
+      packets.clear();refreshNixies(testMillis);assert(packets.size()==6);
+      assert(nixieFrames==frames+tick+1&&nextNixieAt==testMillis+500);
+      nextTelemetryAt=testMillis;publishTelemetry(testMillis);
+      assert(telemetry::last.cadenceTest&&telemetry::last.interval==500&&telemetry::last.frequency.selected==4);
+      testMillis+=499;packets.clear();refreshNixies(testMillis);assert(packets.empty());
+    }
+    testMillis=start+30000;lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);
+    assert(!cadenceTestActive&&refreshPeriod()==3600000&&packets.size()==6&&nextNixieAt==testMillis+3600000);
+    assert(refreshDial.stable==4&&timelineDial.stable==3);
+  }
+  telemetry::queued.push_back(telemetry::Command::Cadence);remoteCommands(testMillis);assert(cadenceTestActive);
+  telemetry::queued.push_back(telemetry::Command::Chart);remoteCommands(testMillis);assert(!cadenceTestActive&&refreshPeriod()==3600000);
+  std::cout<<"PASS: bounded live-price 500 ms diagnostic writes six modules on every deadline, exposes override, retains dials, expires/cancels and handles millis rollover\n";
+}
 void assembledDialTests(){
   // Independent medians from the fresh range-first / frequency-second sweep.
   const uint16_t frequency[5]={1774,1328,915,490,142},range[5]={1775,1328,909,493,142};
@@ -324,4 +351,4 @@ void wirelessRuntimeTests(){
   WiFi.connection=WL_CONNECTED;wifi.loop(testMillis);testMillis+=8001;wifi.loop(testMillis);assert(wifi.online()&&!wifi.portalActive());
   std::cout<<"PASS: actual dial sampling/snapshots, queued signed OTA checks bypassing schedule without interrupting in-flight HTTP, wireless matrix/tube controls and BOOT diagnostics gestures\n";
 }
-int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();assembledDialTests();wirelessRuntimeTests();soak();}
+int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();wirelessRuntimeTests();soak();}

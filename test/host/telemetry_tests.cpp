@@ -25,6 +25,7 @@ int main(){
   snapshot.range.mv=926;snapshot.range.raw=1200;snapshot.range.decoded=snapshot.range.selected=2;snapshot.range.initialized=true;
   snapshot.interval=3600000;snapshot.window=3600;snapshot.frames=8;snapshot.accepted=99;snapshot.quoteAge=20;
   snapshot.marketPrice=83300.12;snapshot.digits=83300;snapshot.connections=2;snapshot.bootConfirmed=true;
+  snapshot.dataHeap=43000;snapshot.dataBlock=18000;snapshot.httpStack=4096;snapshot.cadenceTest=true;
   snapshot.ota.stage=ota::Stage::RetryLimited;snapshot.ota.httpStatus=200;snapshot.ota.checkedAt=55;
   snapshot.ota.total=123456;snapshot.ota.received=1234;snapshot.ota.retryAfter=86399;
   strcpy(snapshot.ota.candidate,"65535.65535.65535");
@@ -39,6 +40,8 @@ int main(){
   assert(response["ota"]["state"]=="retry-limited"&&response["ota"]["http_status"]==200&&response["ota"]["checked_at_ms"]==55);
   assert(response["ota"]["candidate_version"]=="65535.65535.65535"&&response["ota"]["total_bytes"]==123456);
   assert(response["ota"]["received_bytes"]==1234&&response["ota"]["retry_after_seconds"]==86399);
+  assert(response["data_heap"]==43000&&response["data_largest_allocation"]==18000&&response["http_stack_remaining"]==4096);
+  assert(response["cadence_test"]==true);
   assert(telemetryWeb.body.value.find("token")==std::string::npos&&telemetryWeb.body.value.find("password")==std::string::npos&&telemetryWeb.body.value.find("ssid")==std::string::npos);
   telemetryWeb.request("/",HTTP_GET);assert(telemetryWeb.statusCode==200&&telemetryWeb.body.value.find("Check for update now")!=std::string::npos);
   telemetryWeb.request("/control-token",HTTP_GET);assert(!deserializeJson(response,telemetryWeb.body.c_str()));std::string token=response["token"].as<const char*>();assert(token.size()==32);
@@ -48,6 +51,8 @@ int main(){
   for(const char* action:{"ota","tubes","readings","chart"}){telemetryWeb.request("/control",HTTP_POST,{{"action",action},{"token",token}},{{"Origin","http://192.168.1.90:8080"}});assert(telemetryWeb.statusCode==202);}
   telemetryWeb.request("/control",HTTP_POST,{{"action","ota"},{"token",token}});assert(telemetryWeb.statusCode==503);
   telemetry::Command command;for(auto expected:{telemetry::Command::Ota,telemetry::Command::Tubes,telemetry::Command::Readings,telemetry::Command::Chart}){assert(telemetry::receive(command)&&command==expected);}assert(!telemetry::receive(command));
+  telemetryWeb.request("/control",HTTP_POST,{{"action","cadence"},{"token",token}});assert(telemetryWeb.statusCode==202);
+  assert(telemetry::receive(command)&&command==telemetry::Command::Cadence&&!telemetry::receive(command));
   snapshot.portal=true;telemetry::publish(snapshot);step();assert(!listening&&!MDNS.running);
   snapshot.portal=false;MDNS.fail=true;telemetry::publish(snapshot);step();assert(listening&&!mdns); // Direct IP still works if multicast fails.
   WiFi.connection=0;step();assert(!listening);

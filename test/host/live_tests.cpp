@@ -16,7 +16,7 @@ QueueHandle_t xQueueCreate(int count,size_t size){assert(count==1);if(failQueue)
 void vQueueDelete(QueueHandle_t queue){delete queue;--queues;}
 int xQueueOverwrite(QueueHandle_t queue,const void* data){memcpy(queue->bytes.data(),data,queue->bytes.size());queue->ready=true;return pdTRUE;}
 int xQueueReceive(QueueHandle_t queue,void* data,int){if(!queue->ready)return 0;memcpy(data,queue->bytes.data(),queue->bytes.size());queue->ready=false;return pdTRUE;}
-int xTaskCreatePinnedToCore(void(*)(void*),const char*,unsigned stack,void* argument,unsigned priority,void*,int core){assert(stack==10240&&priority==0&&core==0&&argument);return failTask?0:pdPASS;}
+int xTaskCreatePinnedToCore(void(*)(void*),const char*,unsigned stack,void* argument,unsigned priority,void*,int core){assert(stack==9216&&priority==0&&core==0&&argument);return failTask?0:pdPASS;}
 SerialMock Serial;EspMock ESP;WifiMock WiFi;uint32_t testMillis=100;
 std::map<int,int>pins,modes,adc;std::vector<GpioEvent>gpioEvents;
 const uint8_t caBundle[] asm("_binary_data_cert_x509_crt_bundle_bin_start")={0};
@@ -29,6 +29,12 @@ std::string readFile(const std::string& path){std::ifstream file(path);assert(fi
 void steps(){for(auto& slot:slots)slot.step();}
 int main(int argc,char** argv){
   assert(argc==2);std::string directory=argv[1];
+  // TLS uses two separate record buffers. Fragmented RAM with no combined
+  // 36 KiB block is usable; one large block alone does not prove both fit.
+  testHeapBlocks()={20000,20000,28200};assert(network_memory::fits(8192));
+  assert(testAllocations().empty()&&heap_caps_get_free_size(3)==68200);
+  testHeapBlocks()={20000,10000,10000,28200};assert(!network_memory::fits(8192));
+  assert(testAllocations().empty()&&heap_caps_get_free_size(3)==68200);testHeapBlocks().clear();
   BoundedWebSocketTls bounded;assert(bounded.handshakeSeconds==20&&bounded.timeoutSeconds==3&&!bounded.verified);bounded.setCACertBundle(caBundle);assert(bounded.verified);
   uint32_t idleAt=testMillis;uint8_t byte;assert(bounded.read()<0&&testMillis==idleAt+1);
   assert(bounded.read(&byte,0)==0&&testMillis==idleAt+1);bounded.data={42,43};assert(bounded.read()==42&&bounded.read(&byte,1)==1&&byte==43);
@@ -37,6 +43,12 @@ int main(int argc,char** argv){
   testEpoch=btc::isoTimestamp("2026-10-11T05:34:22Z");assert(live::pauseAndWait(0));steps();assert(!liveSockets());live::resume();
   live::httpBusy(true);steps();assert(!liveSockets());live::httpBusy(false);
   {btc::TlsLease httpHandshake;assert(httpHandshake.acquire());steps();assert(liveSockets()==2&&!live::status().connected&&slots[0].socket->sent.empty());}
+  // Both sockets passed the initial check while another task held TLS. The
+  // first connection then consumes data RAM; the second must recheck under
+  // the gate instead of attempting SSL with its now-obsolete budget.
+  connectedHook()=[](){testDataHeap()=43000;testDataBlock()=18000;};
+  steps();assert(live::status().connections==1&&!slots[1].handshake);
+  connectedHook()={};testDataHeap()=testDataBlock()=UINT32_MAX;
   steps();assert(live::status().connections==2&&!live::fresh(testMillis));
   auto& primary=slots[0];auto& secondary=slots[1];assert(primary.source==1&&secondary.source==0);
   assert(primary.socket->host=="ws.kraken.com"&&primary.socket->url=="/v2"&&primary.socket->sent[0].find("bbo")!=std::string::npos);
@@ -53,7 +65,11 @@ int main(int argc,char** argv){
   // Reserve only secondary memory; primary receives throughout routine HTTP/OTA.
   live::httpBusy(true);steps();assert(primary.connected&&!secondary.socket&&secondary.paused);
   assert(live::prepareHttp(8192,0));primary.socket->emit(WStype_TEXT,kraken);assert(live::receive(tick)&&tick.source==1);
-  ESP.freeHeap=60000;assert(!live::prepareHttp(8192,0));steps();assert(!liveSockets()&&primary.paused);
+  // Reported on the real ESP32: ~89 KiB total / 45 KiB largest included IRAM,
+  // while the byte-accessible pool could not allocate another TLS session.
+  ESP.freeHeap=89000;ESP.largest=45044;testDataHeap()=43000;testDataBlock()=18000;
+  assert(!live::prepareHttp(8192,0));steps();assert(!liveSockets()&&primary.paused);
+  testDataHeap()=testDataBlock()=UINT32_MAX;ESP.largest=100000;
   ESP.freeHeap=150000;assert(live::prepareHttp(8192,0));live::httpBusy(false);steps();assert(live::status().connections==2);
   primary.socket->emit(WStype_DISCONNECTED,"HTTP 403");primary.step();assert(!primary.socket&&primary.cooldown[1].availableAt==testMillis+3600000);
   primary.step();assert(primary.source==2&&primary.socket->host=="ws.bitstamp.net"); // Coinbase belongs to the other worker.

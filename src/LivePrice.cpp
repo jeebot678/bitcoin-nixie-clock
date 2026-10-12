@@ -8,6 +8,7 @@
 #include <time.h>
 #include "LivePrice.h"
 #include "TlsGate.h"
+#include "NetworkMemory.h"
 
 extern const uint8_t caBundle[] asm("_binary_data_cert_x509_crt_bundle_bin_start");
 namespace {
@@ -88,7 +89,7 @@ struct Slot {
       close();paused=true;return;
     }
     if (!socket) {
-      if (busy || ESP.getMaxAllocHeap()<45000 || ESP.getFreeHeap()<85000) return;
+      if (busy || !network_memory::available()) return;
       int eligible=-1;
       for (unsigned i=0;i<4;++i) {
         unsigned position=(nextProvider+i)%4;uint8_t candidate=providers[position],empty=0;
@@ -98,7 +99,7 @@ struct Slot {
       if (eligible<0) return;
       nextProvider=unsigned(eligible);source=providers[nextProvider];
       failed=false;failureStatus=0;channel=0;lastTrade=0;openedAt=lastMessageAt=lastValidQuoteAt=now;
-      Serial.printf("Stream %u starting: %s, heap=%u largest=%u\n",index,btc::kSources[source].name,ESP.getFreeHeap(),ESP.getMaxAllocHeap());
+      Serial.printf("Stream %u starting: %s, dataHeap=%lu dataBlock=%lu\n",index,btc::kSources[source].name,(unsigned long)network_memory::freeBytes(),(unsigned long)network_memory::largestBlock());
       socket.reset(new StreamSocket());socket->onEvent([this](WStype_t type,uint8_t* data,size_t size){event(type,data,size);});
       const char* host=source==1?"ws.kraken.com":source==0?"ws-feed.exchange.coinbase.com":source==2?"ws.bitstamp.net":"api-pub.bitfinex.com";
       const char* path=source==1?"/v2":source==4?"/ws/2":"/";
@@ -108,6 +109,9 @@ struct Slot {
     if (!connected) {
       bool started=bool(handshake);
       if (!handshake.acquire()) return;
+      // Another connection can consume the budget while this slot waits for
+      // the TLS gate. Recheck AFTER acquiring it, before any SSL allocation.
+      if (!started && !network_memory::fits()) {handshake.release();return;}
       if (!started) openedAt=lastMessageAt=lastValidQuoteAt=now;
       socket->loop();if (connected) handshake.release();
     } else socket->loop();
@@ -151,7 +155,8 @@ bool begin() {
     if (!slot.ticks) continue;
     // A separate worker lets established feeds receive while another opens.
     // Crypto shares IDLE0's priority; it cannot starve the watchdog's idle task.
-    if (xTaskCreatePinnedToCore(worker,i?"btc-stream-1":"btc-stream-0",10240,&slot,0,nullptr,0)==pdPASS) ++started;
+    // Measured peak usage is about 5.2 KiB; 9 KiB retains >3 KiB headroom.
+    if (xTaskCreatePinnedToCore(worker,i?"btc-stream-1":"btc-stream-0",9216,&slot,0,nullptr,0)==pdPASS) ++started;
     else {vQueueDelete(slot.ticks);slot.ticks=nullptr;}
   }
   return started>0;
@@ -186,15 +191,16 @@ bool pauseAndWait(uint32_t timeoutMs) {
 }
 void resume() {pauseRequested=false;}
 void httpBusy(bool value) {if (!value) primaryReserved=false;busy=value;}
-bool prepareHttp(size_t jsonBytes,uint32_t timeoutMs) {
+bool prepareHttp(size_t jsonBytes,uint32_t timeoutMs,bool probe) {
   busy=true;uint32_t start=millis();
   while (!slots[1].paused && uint32_t(millis()-start)<timeoutMs) delay(5);
   if (!slots[1].paused) return false;
-  if (ESP.getFreeHeap()<70000+jsonBytes || ESP.getMaxAllocHeap()<jsonBytes) {
+  auto fits=[&](){return probe?network_memory::fits(jsonBytes):network_memory::available(jsonBytes);};
+  if (!fits()) {
     primaryReserved=true;
     while (!slots[0].paused && uint32_t(millis()-start)<timeoutMs) delay(5);
     if (!slots[0].paused) return false;
   }
-  return ESP.getFreeHeap()>=70000+jsonBytes && ESP.getMaxAllocHeap()>=jsonBytes;
+  return fits();
 }
 }

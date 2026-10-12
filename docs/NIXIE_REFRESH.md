@@ -62,10 +62,10 @@ validated. A ticker heartbeat/acknowledgment never becomes a price.
 During Wi-Fi connection, clock sync and first-price loading, a zero continues
 moving across the tubes at 100 ms per position. The first validated price
 replaces this animation on the same main-loop pass, even if a slow dial has a
-later deadline. If no stream quote arrives, direct USD HTTP fallback starts
-after 5 seconds from clock synchronization, without a preceding FX request.
-This is a fallback dispatch deadline, not a promise of a network reply within
-five seconds; Wi-Fi, SNTP and certificate verification still take time.
+later deadline. Direct USD HTTP fallback starts as soon as clock synchronization completes,
+before starting streams and without a preceding FX request. Stream startup
+waits for that response, so competing handshakes cannot consume the first
+price request's RAM. Wi-Fi, SNTP and certificate verification still take time.
 
 After a first quote is shown, independent stream startup has a bounded grace
 until 35 seconds from clock sync; confirmation/history HTTP cannot continually
@@ -76,23 +76,33 @@ confirmation and fallback, at their existing conservative quotas. A live receipt
 seconds suppresses redundant ticker/FX requests; USD streams do not need
 USDT conversion. History, FX and OTA share the HTTP worker. Before HTTP work,
 the secondary closes to release memory. The primary remains open unless a
-large JSON pool actually needs its allocation as well. The 24-hour range
+TLS/JSON reservation cannot fit in byte-addressable data RAM. The 24-hour range
 prefers Bitstamp's smaller JSON pool. No socket is touched from another worker.
 The secondary resumes after the request completes.
 
-A routine OTA manifest check retains the primary feed. Both streams pause
-only after a newer signed manifest passes validation and the updater actually
-needs to download/install its image. An unsuccessful pause does not mark the
+A routine OTA manifest check retains the primary feed when data RAM permits.
+A constrained reservation temporarily pauses it; both streams pause after a
+newer signed manifest passes validation for image download/install. An unsuccessful pause does not mark the
 version as attempted; download failure resumes reception.
 
 New TLS handshakes share a lease through the WebSocket upgrade. Handshake
 crypto and HTTP run at IDLE0's priority to keep the watchdog healthy;
 established streams use priority 1 for responsive reads. TLS handshakes have a
-20-second deadline. The stream workers each have 10 KiB stacks and HTTP has
-16 KiB. Cooperative reads yield while waiting for bytes. The shared Mozilla
+20-second deadline. The stream workers each have 9 KiB stacks and HTTP has
+14 KiB, with remaining stack exposed in diagnostics. Cooperative reads yield while waiting for bytes. The shared Mozilla
 trust index is protected across connections; certificate signatures, dates
 and hostnames remain enforced. No watchdog/certificate checks are disabled.
 A 2 KiB UART transmit buffer prevents status reports from blocking tube timing.
+
+Firmware 1.0.15 measures `MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT` RAM;
+the aggregate ESP heap also counts instruction RAM unavailable to TLS byte
+buffers. New handshakes recheck memory under the shared TLS lease, probing
+two separate 18 KiB record allocations after the proposed JSON allocation.
+Each probe releases its allocations before opening a connection. This also
+accepts a fragmented heap that fits two buffers but has no combined 36 KiB
+block. Full-precision history samples occupy 12 bytes instead of 16. The HTTP
+worker lends its immutable result until the main loop acknowledges it, removing
+duplicate history buffers. The persisted cache format remains unchanged.
 
 A 60-second computer probe on 2026-10-11 received valid quotes from all four
 USD streams. The actual C++ QuoteBook/PriceGuard code selected 100 post-warmup
@@ -158,7 +168,7 @@ Repeat with the assembled device at 0.5 s:
 
 ```sh
 ~/.platformio/penv/bin/python tools/verify_device_refresh.py \
-  --port YOUR_ESP32_PORT --version 1.0.10 --warmup 60 --duration 180 \
+  --port YOUR_ESP32_PORT --version 1.0.15 --warmup 60 --duration 180 \
   --minimum-frames 340 --max-quote-age-ms 5000 --minimum-sources 2 \
   --minimum-motion-ratio 0.99
 ```
@@ -185,3 +195,9 @@ eXixe has no MISO/readback, so neither a host mock nor UART logs acknowledge
 that a module received the data or that a cathode actually lit.
 
 Official endpoints and connection limits are linked in [SOURCES.md](SOURCES.md).
+
+For an ESP32 temporarily removed from the PCB, `cadence-test` (serial or
+wireless) runs the normal live-price display path at 500 ms for 30 seconds.
+Telemetry marks `cadence_test=true`, while the physical selected dial setting
+remains unchanged. It automatically restores that setting; `chart` cancels it
+early. This measures firmware output timing without implying the tubes lit.

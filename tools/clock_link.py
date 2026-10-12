@@ -212,7 +212,7 @@ def main():
             command.add_argument("--duration", type=float, default=0)
     sub.add_parser("status")
     marker = sub.add_parser("mark");marker.add_argument("label")
-    sub.add_parser("tube-test");sub.add_parser("readings");sub.add_parser("chart")
+    sub.add_parser("tube-test");sub.add_parser("cadence-test");sub.add_parser("readings");sub.add_parser("chart")
     ota = sub.add_parser("ota");ota.add_argument("--expect");ota.add_argument("--wait", type=float, default=0)
     args = parser.parse_args();args.output = args.output.resolve()
     if args.operation=="ota" and args.wait and not args.expect:parser.error("--wait requires --expect VERSION")
@@ -226,7 +226,7 @@ def main():
     if args.operation in ("status", "mark"):
         snapshot = clock.snapshot();args.output.mkdir(parents=True, exist_ok=True)
         print(json.dumps(record(args.output, snapshot, getattr(args, "label", None)), indent=2));return
-    action = "tubes" if args.operation == "tube-test" else args.operation
+    action = {"tube-test":"tubes","cadence-test":"cadence"}.get(args.operation,args.operation)
     try:
         print(json.dumps(clock.command(action)), flush=True)
     except (OSError, ValueError, RuntimeError):

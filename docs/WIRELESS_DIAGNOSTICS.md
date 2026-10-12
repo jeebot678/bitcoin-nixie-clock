@@ -15,7 +15,9 @@ or calling the updater on the display's core. The main loop publishes every
 millivolt readings and raw ADC counts, decoded and selected contacts, defaults,
 expected voltage centers, frequency/range, market/stream counters, quote age,
 commanded digits, price-frame counters/gaps, heap, HTTP/OTA state and boot-health
-confirmation. Since 1.0.13, the nested `ota` object reports the last check time,
+confirmation. Version 1.0.15 also reports byte-addressable `data_heap`,
+`data_largest_allocation`, and `http_stack_remaining`; aggregate heap includes
+instruction RAM that cannot hold TLS byte buffers. Since 1.0.13, the nested `ota` object reports the last check time,
 check/install stage, HTTP status, candidate version, bytes received/total and
 remaining retry delay. It distinguishes rejected manifests/downloads, failed
 transfers, current/already-installed images and the post-activation retry limit. It distinguishes price, startup, blanking and tube-test modes.
@@ -47,6 +49,7 @@ python3 tools/clock_link.py status
 python3 tools/clock_link.py mark frequency-position-1
 python3 tools/clock_link.py readings
 python3 tools/clock_link.py tube-test
+python3 tools/clock_link.py cadence-test
 python3 tools/clock_link.py chart
 ```
 
@@ -72,7 +75,7 @@ both switches run from POS5 to POS1. See [the mapping](PCB_PIN_MAP.md).
 ## Triggering an update
 
 ```sh
-python3 tools/clock_link.py ota --expect 1.0.14 --wait 240
+python3 tools/clock_link.py ota --expect 1.0.15 --wait 240
 ```
 
 First publish and verify the signed newer release and `main` manifest. The tool
@@ -90,7 +93,12 @@ health-confirmed old version's check at most once every 30 seconds to recover
 from cached manifests and transient errors. It does not interrupt ongoing
 HTTP work or repeat checks during the expected new version's boot validation.
 
-The browser provides the same voltage, chart, tube-test and update controls.
+`cadence-test` temporarily runs the normal live-price path at 500 ms for
+30 seconds, including when no switches are attached. `cadence_test=true`
+identifies the override; selected dial readings remain unchanged. It restores
+the frequency dial automatically, and `chart` cancels it immediately.
+
+The browser provides the same voltage, chart, tube-test, cadence and update controls.
 POSTs require the token and reject unrelated browser origins. GETs need no
 token. A first installation from 1.0.10 or earlier uses the existing boot-time
 OTA check: power-cycle with BOOT released after publishing the new manifest.

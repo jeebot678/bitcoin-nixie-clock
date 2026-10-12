@@ -11,6 +11,7 @@
 #include "LivePrice.h"
 #include "QuoteBook.h"
 #include "DeviceTelemetry.h"
+#include "NetworkMemory.h"
 
 namespace {
 Provisioning wifi;
@@ -24,7 +25,6 @@ btc::History histories[5];
 HistoryStore historyStore;
 bool historyDirty[5] = {};
 uint32_t nextSaveAt[5] = {};
-market::Result result;
 bool networkReady=false,inflight=false,timeStarted=false;
 bool liveReady=false,streamWarmupStarted=false;
 uint32_t streamWarmupUntil=0,firstQuoteFallbackAt=0;
@@ -45,8 +45,13 @@ uint32_t nextQuoteAt=0,nextDialsAt=0,nextDrawAt=0,lastPriceEpoch=0,lastQuoteRece
 uint32_t nextHistoryAt[5]={},historyErrors[5]={};
 uint8_t historySource[5]={1,1,1,2,1}; // Bitstamp's day JSON uses less heap.
 uint32_t bootPressedAt=0,testEndsAt=0,tubeTestEndsAt=0;
+uint32_t cadenceTestEndsAt=0;
+bool cadenceTestActive=false;
 bool bootHandled=false;
 String serialLine;
+
+uint32_t refreshPeriod(){return cadenceTestActive?500:config::kRefreshMs[refreshDial.stable];}
+void startCadenceTest(uint32_t now){cadenceTestActive=true;cadenceTestEndsAt=now+30000;nextNixieAt=now;}
 
 uint32_t millivolts(uint8_t pin) {
   uint32_t readings[7];
@@ -83,8 +88,9 @@ void remoteCommands(uint32_t now) {
     switch(command){
       case telemetry::Command::Ota:forceOtaPending=true;break;
       case telemetry::Command::Tubes:tubeTestEndsAt=now+5000;break;
+      case telemetry::Command::Cadence:startCadenceTest(now);break;
       case telemetry::Command::Readings:matrixDiagnostics=true;diagnosticPage=1;nextDrawAt=now;break;
-      case telemetry::Command::Chart:matrixDiagnostics=false;tubeTestEndsAt=0;nextDrawAt=now;break;
+      case telemetry::Command::Chart:matrixDiagnostics=false;tubeTestEndsAt=0;cadenceTestActive=false;nextNixieAt=now;nextDrawAt=now;break;
     }
   }
 }
@@ -92,12 +98,13 @@ void publishTelemetry(uint32_t now) {
   if(!btc::due(now,nextTelemetryAt))return;
   nextTelemetryAt=now+250;
   telemetry::Snapshot s;s.uptime=now;s.heap=ESP.getFreeHeap();s.largest=ESP.getMaxAllocHeap();
+  s.dataHeap=network_memory::freeBytes();s.dataBlock=network_memory::largestBlock();s.httpStack=market::stackRemaining();
   s.online=wifi.online();s.portal=wifi.portalActive();s.clock=time(nullptr)>=config::kMinimumEpoch;
   s.frequency.mv=frequencyMv;s.frequency.raw=frequencyRaw;s.frequency.decoded=frequencyDecoded;
   s.frequency.selected=refreshDial.stable;s.frequency.initialized=refreshDial.initialized;
   s.range.mv=rangeMv;s.range.raw=rangeRaw;s.range.decoded=rangeDecoded;
   s.range.selected=timelineDial.stable;s.range.initialized=timelineDial.initialized;
-  s.interval=config::kRefreshMs[refreshDial.stable];s.window=config::kWindowSeconds[timelineDial.stable];
+  s.interval=refreshPeriod();s.cadenceTest=cadenceTestActive;s.window=config::kWindowSeconds[timelineDial.stable];
   auto liveState=live::status();s.connections=liveState.connections;s.quotes=liveState.quotes;
   s.accepted=acceptedQuotes;s.frames=nixieFrames;s.quoteAge=now-lastQuoteReceived;s.frameAge=now-lastNixieAt;
   s.frameGap=lastFrameGap;s.nextFrame=uint32_t(std::max<int32_t>(0,int32_t(nextNixieAt-now)));
@@ -136,6 +143,7 @@ void serialCommands(uint32_t now) {
     else if (serialLine=="wifi-reset") wifi.forget();
     else if (serialLine=="selftest") testEndsAt=now+4500;
     else if (serialLine=="ota-check") forceOtaPending=true;
+    else if (serialLine=="cadence-test") {startCadenceTest(now);Serial.println("Live-price cadence test: 500 ms for 30 seconds, then the frequency dial resumes.");}
     else if (serialLine=="readings") {matrixDiagnostics=!matrixDiagnostics;diagnosticPage=1;nextDrawAt=now;}
     else if (serialLine=="tube-test") {
       tubeTestEndsAt=now+5000;
@@ -146,7 +154,7 @@ void serialCommands(uint32_t now) {
       logNixies=serialLine=="ticks"?!logNixies:serialLine=="ticks on";
       Serial.println(logNixies?"Nixie frame logging on":"Nixie frame logging off");
     }
-    else if (!serialLine.isEmpty()) Serial.println("Commands: status, dials, ticks, tube-test, readings, ota-check, setup, wifi-reset, selftest, reboot");
+    else if (!serialLine.isEmpty()) Serial.println("Commands: status, dials, ticks, tube-test, cadence-test, readings, ota-check, setup, wifi-reset, selftest, reboot");
     serialLine="";
   }
   if (digitalRead(0)==LOW) {
@@ -183,6 +191,7 @@ void processLive(uint32_t now) {
   }
 }
 void refreshNixies(uint32_t now) {
+  if(cadenceTestActive&&btc::due(now,cadenceTestEndsAt)){cadenceTestActive=false;nextNixieAt=now;}
   if (tubeTestEndsAt && !btc::due(now,tubeTestEndsAt)) {
     display::testDigits(uint8_t((5000-uint32_t(tubeTestEndsAt-now))/500));
     shownPrice=0;nextNixieAt=now;return;
@@ -190,12 +199,12 @@ void refreshNixies(uint32_t now) {
   tubeTestEndsAt=0;
   if (!wifi.online()) {quotes.clear();shownPrice=0;nextNixieAt=now;return;}
   if (!guard.price) {display::setupZero(now);shownPrice=0;return;}
-  if (uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(config::kRefreshMs[refreshDial.stable])) {
+  if (uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(refreshPeriod())) {
     display::blankPrice();shownPrice=0;return;
   }
   if (!shownPrice || btc::due(now,nextNixieAt)) {
     const bool firstFrame=!shownPrice;
-    const uint32_t period=config::kRefreshMs[refreshDial.stable];
+    const uint32_t period=refreshPeriod();
     btc::DisplayQuote selected{guard.price,lastQuoteReceived,lastPriceEpoch,lastAcceptedSource};
     quotes.choose(now,firstFrame?0:shownDigits,shownSource,guard.price,fx.fresh(now),selected);
     bool cosmetic=false;
@@ -208,7 +217,7 @@ void refreshNixies(uint32_t now) {
     if(lastFramePeriod!=period||firstFrame){minimumFrameGap=maximumFrameGap=0;lastFramePeriod=period;}
     else {if(!minimumFrameGap||lastFrameGap<minimumFrameGap)minimumFrameGap=lastFrameGap;if(lastFrameGap>maximumFrameGap)maximumFrameGap=lastFrameGap;}
     if (logNixies || nixieFrames==1) Serial.printf("Nixie frame at %lu ms: %.2f interval=%lu ms gap=%lu ms quoteAge=%lu ms source=%s digits=%lu cosmetic=%s\n",(unsigned long)now,shownPrice,
-      (unsigned long)config::kRefreshMs[refreshDial.stable],(unsigned long)uint32_t(now-lastNixieAt),(unsigned long)uint32_t(now-shownQuoteReceived),btc::kSources[shownSource].name,(unsigned long)shownDigits,cosmetic?"yes":"no");
+      (unsigned long)period,(unsigned long)uint32_t(now-lastNixieAt),(unsigned long)uint32_t(now-shownQuoteReceived),btc::kSources[shownSource].name,(unsigned long)shownDigits,cosmetic?"yes":"no");
     lastNixieAt=now;
     // Preserve the timer phase through normal loop jitter. If work delays a
     // frame, send the latest value once and skip expired deadlines.
@@ -216,7 +225,9 @@ void refreshNixies(uint32_t now) {
   }
 }
 void processResult(uint32_t now) {
-  if (!market::receive(result)) return;
+  market::ResultLease lease;
+  if (!market::receive(lease)) return;
+  const market::Result& result=lease.get();
   now=millis();
   inflight=false;
   live::httpBusy(false);
@@ -267,11 +278,12 @@ void schedule(uint32_t now) {
   uint32_t epoch=uint32_t(time(nullptr));
   if (epoch<config::kMinimumEpoch) return;
   // A first stream quote lights the tubes immediately. Try a direct USD HTTP
-  // ticker after 5 s if none arrived; FX must not block the first USD price.
+  // ticker immediately before starting streams; FX must not block the first
+  // USD price. A competing stream handshake must not strand initial display.
   // After one feed starts, give the second time to establish without history
   // or confirmation HTTP repeatedly reclaiming its TLS allocation.
   if (!streamWarmupStarted) {
-    streamWarmupStarted=true;streamWarmupUntil=now+35000;firstQuoteFallbackAt=now+5000;
+    streamWarmupStarted=true;streamWarmupUntil=now+35000;firstQuoteFallbackAt=now;
   }
   const uint8_t window=timelineDial.stable;
   if(forceOtaPending&&ota::bootConfirmed()&&market::send({market::Kind::Ota,0,window,epoch})){
@@ -392,6 +404,9 @@ void setup() {
   Serial.println("Bitcoin Clock live firmware. Type status or dials; hold BOOT for 5 seconds to set up Wi-Fi.");
   wifi.begin(); networkReady=market::begin(); ota::begin();
   liveReady=live::begin();
+  // Let the first USD HTTP request use the full TLS pool. processResult
+  // releases this hold on either success or failure, then streams take over.
+  if(networkReady)live::httpBusy(true);
   if(!telemetry::begin())Serial.println("Wi-Fi telemetry worker unavailable.");
   if (!liveReady) Serial.println("Live stream worker unavailable; using REST fallback.");
   if (!networkReady) Serial.println("HTTP worker allocation failed; reboot to retry.");

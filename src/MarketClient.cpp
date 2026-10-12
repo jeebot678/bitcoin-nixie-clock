@@ -8,11 +8,13 @@
 #include "LivePrice.h"
 #include "TlsGate.h"
 #include "CooperativeTlsClient.h"
+#include <atomic>
 
 extern const uint8_t caBundle[] asm("_binary_data_cert_x509_crt_bundle_bin_start");
 namespace {
-QueueHandle_t requests = nullptr, results = nullptr;
-// The worker owns this buffer. Queue copies keep main/worker ownership separate.
+QueueHandle_t requests=nullptr,results=nullptr,acknowledgments=nullptr;
+std::atomic<uint32_t> stackFree{0};
+// The worker waits for the main loop's response lease before reusing this.
 market::Result response;
 class BoundedReader {
  public:
@@ -55,6 +57,8 @@ void fetch(const market::Request& request) {
   uint32_t waitingAt=millis();
   while (!handshake.acquire() && uint32_t(millis()-waitingAt)<15000) delay(5);
   if (!handshake) return;
+  // A stream handshake can finish and consume RAM after the first reservation.
+  if (!live::prepareHttp(request.kind==market::Kind::Ota?4096:capacity,30000,true)) return;
   if (request.kind==market::Kind::Ota) {
     response.ok=ota::checkAndInstall();return;
   }
@@ -124,19 +128,30 @@ void worker(void*) {
   for (;;) if (xQueueReceive(requests,&request,portMAX_DELAY)==pdTRUE) {
     fetch(request); response.receivedAt=millis();
     delay(2);
-    xQueueSend(results,&response,portMAX_DELAY);
+    const market::Result* reply=&response;
+    xQueueSend(results,&reply,portMAX_DELAY);
+    bool consumed=false;xQueueReceive(acknowledgments,&consumed,portMAX_DELAY);
+#ifdef ARDUINO
+    stackFree=uxTaskGetStackHighWaterMark(nullptr);
+#endif
   }
 }
 }
 namespace market {
 bool begin() {
-  requests=xQueueCreate(1,sizeof(Request)); results=xQueueCreate(1,sizeof(Result));
-  if (!requests || !results) return false;
+  requests=xQueueCreate(1,sizeof(Request));results=xQueueCreate(1,sizeof(const Result*));acknowledgments=xQueueCreate(1,sizeof(bool));
+  auto cleanup=[](){if(requests)vQueueDelete(requests);if(results)vQueueDelete(results);if(acknowledgments)vQueueDelete(acknowledgments);requests=results=acknowledgments=nullptr;};
+  if (!requests || !results || !acknowledgments) {cleanup();return false;}
   // TLS certificate/key calculations can run continuously for several seconds.
   // Share the idle task's priority so those calculations cannot starve IDLE0
   // or restart the device while the independent stream/display keep running.
-  return xTaskCreatePinnedToCore(worker,"btc-http",16384,nullptr,0,nullptr,0)==pdPASS;
+  // Device measurements left >6 KiB of the old 16 KiB stack unused even for
+  // manifest verification. Keep a 4 KiB margin with a 14 KiB worker.
+  if(xTaskCreatePinnedToCore(worker,"btc-http",14336,nullptr,0,nullptr,0)!=pdPASS){cleanup();return false;}
+  return true;
 }
 bool send(const Request& request) { return requests && xQueueSend(requests,&request,0)==pdTRUE; }
-bool receive(Result& result) { return results && xQueueReceive(results,&result,0)==pdTRUE; }
+bool receive(ResultLease& result){return !result.value_&&results&&xQueueReceive(results,&result.value_,0)==pdTRUE;}
+ResultLease::~ResultLease(){if(value_&&acknowledgments){bool consumed=true;xQueueSend(acknowledgments,&consumed,0);}}
+uint32_t stackRemaining(){return stackFree.load();}
 }

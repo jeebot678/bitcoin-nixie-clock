@@ -20,5 +20,19 @@ struct Result {
 };
 bool begin();
 bool send(const Request& request);
-bool receive(Result& result);
+// One worker-owned response stays immutable until this lease is destroyed.
+// Queue a pointer instead of duplicating its 4.8 KiB history on both cores.
+class ResultLease {
+ public:
+  ResultLease()=default;
+  ~ResultLease();
+  ResultLease(const ResultLease&)=delete;
+  ResultLease& operator=(const ResultLease&)=delete;
+  const Result& get()const{return *value_;}
+ private:
+  const Result* value_=nullptr;
+  friend bool receive(ResultLease& result);
+};
+bool receive(ResultLease& result);
+uint32_t stackRemaining();
 }

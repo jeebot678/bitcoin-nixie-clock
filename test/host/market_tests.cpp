@@ -8,13 +8,16 @@
 #include "HTTPClient.h"
 #include "MarketClient.h"
 #include "OtaUpdate.h"
+#include "TlsGate.h"
 
-using QueueHandle_t=void*;
+struct Queue{size_t capacity,size;std::vector<std::vector<uint8_t>> messages;Queue(size_t n,size_t s):capacity(n),size(s){}};
+using QueueHandle_t=Queue*;
 constexpr int pdTRUE=1,pdPASS=1,portMAX_DELAY=0;
-inline QueueHandle_t xQueueCreate(int,size_t){return nullptr;}
-inline int xQueueReceive(QueueHandle_t,void*,int){return 0;}
-inline int xQueueSend(QueueHandle_t,const void*,int){return 0;}
-inline int xTaskCreatePinnedToCore(void(*)(void*),const char*,int,void*,int,void*,int){return 0;}
+inline QueueHandle_t xQueueCreate(int n,size_t size){return new Queue(n,size);}
+inline void vQueueDelete(QueueHandle_t q){delete q;}
+inline int xQueueReceive(QueueHandle_t q,void* data,int){if(q->messages.empty())return 0;memcpy(data,q->messages.front().data(),q->size);q->messages.erase(q->messages.begin());return pdTRUE;}
+inline int xQueueSend(QueueHandle_t q,const void* data,int){if(q->messages.size()==q->capacity)return 0;const auto* bytes=static_cast<const uint8_t*>(data);q->messages.emplace_back(bytes,bytes+q->size);return pdTRUE;}
+inline int xTaskCreatePinnedToCore(void(*)(void*),const char*,int stack,void*,int priority,void*,int core){assert(stack==14336&&priority==0&&core==0);return pdPASS;}
 SerialMock Serial;EspMock ESP;WifiMock WiFi;uint32_t testMillis=100;
 std::map<int,int> pins,modes,adc;std::vector<GpioEvent> gpioEvents;
 const uint8_t caBundle[] asm("_binary_data_cert_x509_crt_bundle_bin_start")={0};
@@ -22,7 +25,7 @@ time_t testEpoch;
 time_t testTime(time_t* out){if(out)*out=testEpoch;return testEpoch;}
 unsigned otaCalls=0,pauseCalls=0,resumeCalls=0;bool streamPaused=true;
 namespace ota {bool checkAndInstall(){++otaCalls;return true;}}
-namespace live {bool prepareHttp(size_t capacity,uint32_t timeout){assert(capacity>0&&timeout==30000);++pauseCalls;return streamPaused;}}
+namespace live {bool prepareHttp(size_t capacity,uint32_t timeout,bool probe){assert(capacity>0&&timeout==30000);if(probe)assert(bool(btc::tlsHandshakeGate().load()));++pauseCalls;return streamPaused;}}
 #define time testTime
 #include "../../src/MarketClient.cpp"
 #undef time
@@ -61,10 +64,19 @@ int main(int argc,char** argv){assert(argc==4);std::string directory=argv[1];tes
   reply=good;reply.status=429;reply.headers["Retry-After"]="90";httpResponses()[btc::kSources[0].url]=reply;fetch(request);assert(!response.ok&&response.status==429&&response.retryAfterMs==90000);
   // Manifest checks reserve HTTP memory without blindly pausing the primary.
   unsigned reservations=pauseCalls;
-  fetch({market::Kind::Ota,0,0,uint32_t(testEpoch)});assert(response.ok&&otaCalls==1&&pauseCalls==reservations+1&&!resumeCalls);
-  streamPaused=false;fetch({market::Kind::Ota,0,0,uint32_t(testEpoch)});assert(!response.ok&&otaCalls==1&&pauseCalls==reservations+2);streamPaused=true;
+  fetch({market::Kind::Ota,0,0,uint32_t(testEpoch)});assert(response.ok&&otaCalls==1&&pauseCalls==reservations+2&&!resumeCalls);
+  streamPaused=false;fetch({market::Kind::Ota,0,0,uint32_t(testEpoch)});assert(!response.ok&&otaCalls==1&&pauseCalls==reservations+3);streamPaused=true;
   {btc::TlsLease streamHandshake;assert(streamHandshake.acquire());uint32_t waitingAt=testMillis;fetch(request);assert(!response.ok&&uint32_t(testMillis-waitingAt)>=15000);}
   httpResponses()[btc::kSources[0].url]=good;fetch(request);assert(response.ok); // Gate releases on every return path.
+  // The result queue stores one pointer; the worker's buffer cannot be reused
+  // until the main loop returns its unique response lease (including early returns).
+  assert(market::begin()&&results->size==sizeof(const market::Result*));
+  const market::Result* pointer=&response;assert(xQueueSend(results,&pointer,0)==pdTRUE);
+  {market::ResultLease lease;assert(market::receive(lease)&&&lease.get()==&response);
+    assert(!market::receive(lease)&&acknowledgments->messages.empty());}
+  bool consumed=false;assert(xQueueReceive(acknowledgments,&consumed,0)==pdTRUE&&consumed);
+  {market::ResultLease empty;assert(!market::receive(empty));}assert(acknowledgments->messages.empty());
+  vQueueDelete(requests);vQueueDelete(results);vQueueDelete(acknowledgments);requests=results=acknowledgments=nullptr;
   WiFi.connection=0;fetch(request);assert(!response.ok);
   std::cout<<"PASS: actual HTTP worker; all 11 quote and 10 history fixtures, truncation, cache freshness, framing, size bounds, rate limits and Wi-Fi loss\n";
 }
