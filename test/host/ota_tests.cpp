@@ -33,26 +33,43 @@ int main(int argc,char**argv){assert(argc==2);std::string folder=argv[1];std::st
   firmware.headers["Transfer-Encoding"]="chunked";httpResponses()[m.url]=firmware;Update={};assert(!install(m)&&!Update.activated);
   HttpResponse manifestResponse;manifestResponse.body.assign(json.begin(),json.end());std::string manifestUrl=std::string("https://raw.githubusercontent.com/")+ota_config::kRepository+"/main/ota/manifest.json";httpResponses()[manifestUrl]=manifestResponse;
   ota::Manifest parsed;assert(readManifest(parsed,0x1E0000));manifestResponse.body[0]='[';httpResponses()[manifestUrl]=manifestResponse;assert(!readManifest(parsed,0x1E0000));
+  assert(ota::status().stage==ota::Stage::ManifestRejected&&ota::status().httpStatus==200);
   // Exercise the actual public-check/install path, including persisted retry
   // suppression, downgrade protection and a correctly signed current version.
   manifestResponse.body.assign(json.begin(),json.end());httpResponses()[manifestUrl]=manifestResponse;
   firmware.headers.clear();httpResponses()[m.url]=firmware;prefMock()={};Update={};ESP.restarts=0;
   assert(ota::newer(m.version.c_str(),ota_config::kVersion));
   canPause=false;assert(!ota::checkAndInstall()&&!Update.activated&&resumes==1&&prefMock().strings["btc-ota:attempt"].isEmpty());canPause=true;
+  assert(ota::status().stage==ota::Stage::PauseFailed);
+  // A failed transport or flash write never activated an image, so an
+  // immediate remote retry must remain possible for this same signed version.
+  HttpResponse unavailable=firmware;unavailable.status=503;httpResponses()[m.url]=unavailable;
+  assert(!ota::checkAndInstall()&&!Update.activated&&prefMock().strings["btc-ota:attempt"].isEmpty());
+  auto failure=ota::status();assert(failure.stage==ota::Stage::DownloadRejected&&failure.httpStatus==503&&failure.total==m.size);
+  assert(std::string(failure.candidate)==m.version&&failure.checkedAt>0&&failure.received==0);
+  httpResponses()[m.url]=firmware;Update.failWrite=true;
+  assert(!ota::checkAndInstall()&&!Update.activated&&prefMock().strings["btc-ota:attempt"].isEmpty());
+  assert(ota::status().stage==ota::Stage::DownloadFailed&&ota::status().httpStatus==200);
+  assert(failure.stage==ota::Stage::DownloadRejected); // Caller owns its copy.
+  Update={};
   assert(ota::checkAndInstall()&&Update.activated&&ESP.restarts==1);
+  assert(ota::status().stage==ota::Stage::Installed&&ota::status().received==m.size);
   assert(prefMock().strings["btc-ota:attempt"]==m.version.c_str());
   Update={};httpUrls().clear();assert(ota::checkAndInstall()&&!Update.activated&&ESP.restarts==1&&httpUrls().size()==1);
+  assert(ota::status().stage==ota::Stage::RetryLimited&&ota::status().retryAfter>0&&ota::status().retryAfter<=86400);
   Preferences prefs;prefs.begin("btc-ota",false);prefs.putUInt("attempt-time",uint32_t(time(nullptr))-86401);
   assert(ota::checkAndInstall()&&Update.activated&&ESP.restarts==2);
   prefs.putString("highest",m.version.c_str());Update={};httpUrls().clear();
   assert(ota::checkAndInstall()&&!Update.activated&&ESP.restarts==2&&httpUrls().size()==1);
+  assert(ota::status().stage==ota::Stage::AlreadyInstalled);
   std::string currentJson=readFile(folder+"/current-manifest.json");manifestResponse.body.assign(currentJson.begin(),currentJson.end());httpResponses()[manifestUrl]=manifestResponse;
   unsigned priorPauses=pauses;prefMock()={};httpUrls().clear();assert(ota::checkAndInstall()&&!Update.activated&&httpUrls().size()==1&&pauses==priorPauses);
+  assert(ota::status().stage==ota::Stage::Current);
   ota::begin();assert(!ota::checkDue(59999,true)&&ota::checkDue(90000,true)&&!ota::checkDue(90000,false));
   uint32_t nearWrap=UINT32_MAX-100000;ota::defer(nearWrap);
   assert(!ota::checkDue(nearWrap+ota_config::kCheckIntervalMs-1,true));assert(ota::checkDue(nearWrap+ota_config::kCheckIntervalMs+900000,true));
   bootState=ESP_OTA_IMG_PENDING_VERIFY;ota::begin();ota::healthCheck(29999,true);assert(!bootConfirms);ota::healthCheck(30000,true);assert(bootConfirms==1);ota::healthCheck(90000,false);assert(!bootRollbacks);
   assert(prefMock().strings["btc-ota:highest"]==ota_config::kVersion);
   bootState=ESP_OTA_IMG_PENDING_VERIFY;ota::begin();ota::healthCheck(90000,false);assert(bootRollbacks==1);
-  std::cout<<"PASS: real OTA code; signatures, checksums, interruption, flash failure, redirects, public check/install, daily retry, downgrade/current version, timer rollover, boot confirmation and rollback\n";
+  std::cout<<"PASS: real OTA code; signatures, checksums, interruption, flash failure, redirects, public check/install, immediate failed-download retry, protected post-activation daily retry, progress/status, downgrade/current version, timer rollover, boot confirmation and rollback\n";
 }

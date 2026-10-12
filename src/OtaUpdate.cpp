@@ -11,6 +11,7 @@
 #include <mbedtls/pk.h>
 #include <mbedtls/sha256.h>
 #include <time.h>
+#include <mutex>
 #include "ClockCore.h"
 #include "MarketParsers.h"
 #include "OtaManifest.h"
@@ -22,6 +23,12 @@ extern const uint8_t otaPublicKey[] asm("_binary_data_cert_ota_public_pem_start"
 namespace {
 uint32_t nextCheck=60000;
 bool pendingBoot=false,confirmed=false;
+std::mutex statusMutex;
+ota::Status updateStatus;
+void stage(ota::Stage value,int httpStatus=0) {
+  std::lock_guard<std::mutex> lock(statusMutex);
+  updateStatus.stage=value;updateStatus.httpStatus=httpStatus;
+}
 int openDownload(HTTPClient& http,WiFiClientSecure& tls,std::string url) {
   tls.setCACertBundle(otaCaBundle); tls.setHandshakeTimeout(20);tls.setTimeout(6);
   for (int redirects=0;redirects<5;++redirects) {
@@ -30,6 +37,7 @@ int openDownload(HTTPClient& http,WiFiClientSecure& tls,std::string url) {
     http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
     if (!http.begin(tls,url.c_str())) return -1;
     http.setUserAgent("BitcoinClock-OTA/1.0");http.addHeader("Accept-Encoding","identity");
+    http.addHeader("Cache-Control","no-cache");
     const char* headers[]={"Location","Transfer-Encoding","Content-Encoding"};http.collectHeaders(headers,3);
     int status=http.GET();
     if (status!=301&&status!=302&&status!=303&&status!=307&&status!=308) return status;
@@ -53,6 +61,7 @@ bool readManifest(ota::Manifest& manifest,uint32_t slotSize) {
   CooperativeTlsClient tls;HTTPClient http;
   std::string url=std::string("https://raw.githubusercontent.com/")+ota_config::kRepository+"/"+ota_config::kBranch+"/ota/manifest.json";
   int status=openDownload(http,tls,url);
+  stage(ota::Stage::Manifest,status);
   bool ok=false;
   if (status==200 && http.getSize()>0 && http.getSize()<=4096 && http.header("Transfer-Encoding").isEmpty() && (http.header("Content-Encoding").isEmpty() || http.header("Content-Encoding")=="identity")) {
     String body=http.getString();
@@ -62,14 +71,15 @@ bool readManifest(ota::Manifest& manifest,uint32_t slotSize) {
     }
   }
   http.end();tls.stop();
-  if (!ok) Serial.printf("OTA manifest unavailable or rejected (HTTP %d)\n",status);
+  if (!ok) {stage(ota::Stage::ManifestRejected,status);Serial.printf("OTA manifest unavailable or rejected (HTTP %d)\n",status);}
   return ok;
 }
 bool install(const ota::Manifest& manifest) {
   CooperativeTlsClient tls;HTTPClient http;
   int status=openDownload(http,tls,manifest.url);
+  stage(ota::Stage::Download,status);
   if (status!=200 || http.getSize()!=int(manifest.size) || !http.header("Transfer-Encoding").isEmpty() || (!http.header("Content-Encoding").isEmpty() && http.header("Content-Encoding")!="identity") || !Update.begin(manifest.size,U_FLASH)) {
-    http.end();tls.stop();Serial.println("OTA download/header/partition rejected");return false;
+    stage(ota::Stage::DownloadRejected,status);http.end();tls.stop();Serial.println("OTA download/header/partition rejected");return false;
   }
   mbedtls_sha256_context sha;mbedtls_sha256_init(&sha);mbedtls_sha256_starts_ret(&sha,0);
   uint8_t buffer[2048];uint32_t received=0,lastData=millis(),started=lastData;
@@ -82,7 +92,9 @@ bool install(const ota::Manifest& manifest) {
     int count=stream->read(buffer,amount);
     if (count<=0) { delay(2);continue; }
     if (mbedtls_sha256_update_ret(&sha,buffer,count)||Update.write(buffer,count)!=size_t(count)) { ok=false;break; }
-    received+=count;lastData=millis();delay(1);
+    received+=count;lastData=millis();
+    {std::lock_guard<std::mutex> lock(statusMutex);updateStatus.received=received;}
+    delay(1);
   }
   uint8_t hash[32]={};char hex[65];
   if (mbedtls_sha256_finish_ret(&sha,hash)) ok=false;
@@ -92,11 +104,12 @@ bool install(const ota::Manifest& manifest) {
   // Never activate the new slot before both signature and full image hash pass.
   if (ok) ok=Update.end(false)&&Update.isFinished();else Update.abort();
   http.end();tls.stop();
-  if (!ok) { Update.abort();Serial.println("OTA failed; current firmware retained"); }
+  if (!ok) {stage(ota::Stage::DownloadFailed,status);Update.abort();Serial.println("OTA failed; current firmware retained");}
   return ok;
 }
 }
 namespace ota {
+Status status(){std::lock_guard<std::mutex> lock(statusMutex);return updateStatus;}
 bool bootConfirmed(){return confirmed;}
 void begin() {
   esp_ota_img_states_t state;
@@ -119,23 +132,37 @@ void healthCheck(uint32_t now,bool healthy) {
 bool checkDue(uint32_t now,bool online) { return confirmed&&online&&*ota_config::kRepository&&btc::due(now,nextCheck); }
 void defer(uint32_t now) { nextCheck=now+ota_config::kCheckIntervalMs+(esp_random()%900000); }
 bool checkAndInstall() {
+  {std::lock_guard<std::mutex> lock(statusMutex);updateStatus=Status{};updateStatus.checkedAt=millis();updateStatus.stage=Stage::Manifest;}
   const esp_partition_t* slot=esp_ota_get_next_update_partition(nullptr);
-  if (!slot) { Serial.println("OTA unavailable: no second application slot");return false; }
+  if (!slot) {stage(Stage::Unavailable);Serial.println("OTA unavailable: no second application slot");return false;}
   Manifest manifest;
   if (!readManifest(manifest,slot->size)) return false;
-  if (!newer(manifest.version.c_str(),ota_config::kVersion)) { Serial.println("OTA: firmware is current");return true; }
+  {std::lock_guard<std::mutex> lock(statusMutex);snprintf(updateStatus.candidate,sizeof(updateStatus.candidate),"%s",manifest.version.c_str());updateStatus.total=manifest.size;}
+  if (!newer(manifest.version.c_str(),ota_config::kVersion)) {stage(Stage::Current);Serial.println("OTA: firmware is current");return true;}
   Preferences prefs;prefs.begin("btc-ota",false);
   String highest=prefs.getString("highest",ota_config::kVersion);
-  if (!newer(manifest.version.c_str(),highest.c_str())) { prefs.end();return true; }
+  if (!newer(manifest.version.c_str(),highest.c_str())) {stage(Stage::AlreadyInstalled);prefs.end();return true;}
   String attempted=prefs.getString("attempt","");uint32_t attemptedAt=prefs.getUInt("attempt-time",0),now=uint32_t(time(nullptr));
   // A crashed image that rolled back is retried at most once per day.
-  if (attempted==manifest.version.c_str() && uint64_t(attemptedAt)+86400>now) { prefs.end();return true; }
+  if (attempted==manifest.version.c_str() && uint64_t(attemptedAt)+86400>now) {
+    {std::lock_guard<std::mutex> lock(statusMutex);updateStatus.stage=Stage::RetryLimited;updateStatus.retryAfter=uint64_t(attemptedAt)+86400-now;}
+    prefs.end();return true;
+  }
   // Routine manifest checks keep the primary price feed open. Only an
   // authenticated new image needs both sockets' memory for installation.
-  if (!live::pauseAndWait(25000)) {prefs.end();live::resume();return false;}
+  stage(Stage::Pausing);
+  if (!live::pauseAndWait(25000)) {stage(Stage::PauseFailed);prefs.end();live::resume();return false;}
   prefs.putString("attempt",manifest.version.c_str());prefs.putUInt("attempt-time",now);prefs.end();
   Serial.printf("OTA installing signed firmware %s (%lu bytes)\n",manifest.version.c_str(),(unsigned long)manifest.size);
-  if (!install(manifest)) {live::resume();return false;}
+  if (!install(manifest)) {
+    // A rejected/interrupted download never activated an image. Clear its
+    // attempt marker so a remote retry can recover immediately. Leave the
+    // marker intact after activation: an image that crashes and rolls back
+    // still receives the existing one-day boot-loop protection.
+    prefs.begin("btc-ota",false);prefs.remove("attempt");prefs.remove("attempt-time");prefs.end();
+    live::resume();return false;
+  }
+  stage(Stage::Installed);
   Serial.println("OTA verified and installed; rebooting");delay(300);ESP.restart();return true;
 }
 }

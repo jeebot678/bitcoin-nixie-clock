@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include "OtaUpdate.h"
 
 namespace telemetry {
 enum class Command : uint8_t { Ota, Tubes, Readings, Chart };
@@ -15,6 +16,7 @@ struct Snapshot {
   uint32_t digits=0;
   double marketPrice=0,displayPrice=0;
   Dial frequency,range;
+  ota::Status ota;
   uint8_t connections=0,source=0;
   uint8_t displayMode=1,testStep=0,matrixPage=255;
   bool online=false,portal=false,clock=false,confirmed=false,inflight=false,otaPending=false,bootConfirmed=false;

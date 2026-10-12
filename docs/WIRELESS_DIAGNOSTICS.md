@@ -15,7 +15,10 @@ or calling the updater on the display's core. The main loop publishes every
 millivolt readings and raw ADC counts, decoded and selected contacts, defaults,
 expected voltage centers, frequency/range, market/stream counters, quote age,
 commanded digits, price-frame counters/gaps, heap, HTTP/OTA state and boot-health
-confirmation. It distinguishes price, startup, blanking and tube-test modes.
+confirmation. Since 1.0.13, the nested `ota` object reports the last check time,
+check/install stage, HTTP status, candidate version, bytes received/total and
+remaining retry delay. It distinguishes rejected manifests/downloads, failed
+transfers, current/already-installed images and the post-activation retry limit. It distinguishes price, startup, blanking and tube-test modes.
 `decoded=-1` means invalid input; an old `selected` can be retained.
 `initialized=false` means the setting remains a default. No Wi-Fi credentials
 or control token are included in samples.
@@ -69,14 +72,18 @@ both switches run from POS5 to POS1. See [the mapping](PCB_PIN_MAP.md).
 ## Triggering an update
 
 ```sh
-python3 tools/clock_link.py ota --expect 1.0.13 --wait 240
+python3 tools/clock_link.py ota --expect 1.0.14 --wait 240
 ```
 
 First publish and verify the signed newer release and `main` manifest. The tool
 obtains an ephemeral token and queues an immediate OTA check, bypassing the
 six-hour schedule. Existing HTTP work finishes first, and the current boot
 must be health-confirmed. Signature, board, version, hash, trusted download
-hosts, retry policy and rollback checks remain enforced. No arbitrary firmware
+hosts, retry policy and rollback checks remain enforced. Since 1.0.13, a
+failed download or flash operation that never activates an image clears its
+attempt marker so a remote check can retry immediately. Successfully activated
+images retain the one-day retry limit if they crash and roll back. Manifest
+requests also send `Cache-Control: no-cache`. No arbitrary firmware
 URL or unsigned image is accepted. `--expect`/`--wait` confirms that the requested
 version is running and health-confirmed.
 

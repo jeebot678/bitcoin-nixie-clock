@@ -25,6 +25,9 @@ int main(){
   snapshot.range.mv=926;snapshot.range.raw=1200;snapshot.range.decoded=snapshot.range.selected=2;snapshot.range.initialized=true;
   snapshot.interval=3600000;snapshot.window=3600;snapshot.frames=8;snapshot.accepted=99;snapshot.quoteAge=20;
   snapshot.marketPrice=83300.12;snapshot.digits=83300;snapshot.connections=2;snapshot.bootConfirmed=true;
+  snapshot.ota.stage=ota::Stage::RetryLimited;snapshot.ota.httpStatus=200;snapshot.ota.checkedAt=55;
+  snapshot.ota.total=123456;snapshot.ota.received=1234;snapshot.ota.retryAfter=86399;
+  strcpy(snapshot.ota.candidate,"65535.65535.65535");
   telemetry::publish(snapshot);snapshot.accepted=101;telemetry::publish(snapshot);WiFi.connection=WL_CONNECTED;step();
   assert(listening&&telemetryWeb.running&&MDNS.running&&MDNS.port==8080);
   telemetryWeb.request("/telemetry",HTTP_GET);assert(telemetryWeb.statusCode==200&&!telemetryJson.overflowed());
@@ -33,6 +36,9 @@ int main(){
   assert(response["dials"]["frequency"]["mv"]==309&&response["dials"]["frequency"]["decoded"]==-1&&response["dials"]["frequency"]["selected"]==4);
   assert(response["dials"]["range"]["pin"]==34&&response["refresh_ms"]==3600000&&response["boot_confirmed"]==true);
   assert(response["visible_output_verified"]==false&&response["dials"]["frequency"]["centers_mv"].size()==5);
+  assert(response["ota"]["state"]=="retry-limited"&&response["ota"]["http_status"]==200&&response["ota"]["checked_at_ms"]==55);
+  assert(response["ota"]["candidate_version"]=="65535.65535.65535"&&response["ota"]["total_bytes"]==123456);
+  assert(response["ota"]["received_bytes"]==1234&&response["ota"]["retry_after_seconds"]==86399);
   assert(telemetryWeb.body.value.find("token")==std::string::npos&&telemetryWeb.body.value.find("password")==std::string::npos&&telemetryWeb.body.value.find("ssid")==std::string::npos);
   telemetryWeb.request("/",HTTP_GET);assert(telemetryWeb.statusCode==200&&telemetryWeb.body.value.find("Check for update now")!=std::string::npos);
   telemetryWeb.request("/control-token",HTTP_GET);assert(!deserializeJson(response,telemetryWeb.body.c_str()));std::string token=response["token"].as<const char*>();assert(token.size()==32);

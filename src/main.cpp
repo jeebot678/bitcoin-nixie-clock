@@ -107,7 +107,7 @@ void publishTelemetry(uint32_t now) {
   s.displayMode=testing?3:!s.online||!guard.price?1:uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(s.interval)?2:0;
   if(testing)s.testStep=uint8_t((5000-uint32_t(tubeTestEndsAt-now))/500);
   s.matrixPage=matrixDiagnostics?diagnosticPage:255;
-  s.confirmed=guard.confirmed();s.inflight=inflight;s.otaPending=forceOtaPending;s.bootConfirmed=ota::bootConfirmed();telemetry::publish(s);
+  s.confirmed=guard.confirmed();s.inflight=inflight;s.otaPending=forceOtaPending;s.bootConfirmed=ota::bootConfirmed();s.ota=ota::status();telemetry::publish(s);
 }
 void diagnostics(uint32_t now) {
   Serial.printf("Firmware=%s Wi-Fi=%s portal=%s setup=%s clock=%s heap=%u largest=%u refresh=%lu window=%s price=%.2f stale=%s fx=%.6f fxFresh=%s history=%u\n",
