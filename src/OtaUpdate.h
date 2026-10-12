@@ -3,6 +3,7 @@
 namespace ota {
 void begin();
 void healthCheck(uint32_t now,bool healthy);
+bool bootConfirmed();
 bool checkDue(uint32_t now,bool online);
 void defer(uint32_t now);
 // Called by the shared network worker: one TLS connection at a time.

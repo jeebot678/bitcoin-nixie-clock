@@ -37,6 +37,7 @@ def main():
         ("history_tests",["test/host/history_tests.cpp","src/HistoryStore.cpp"],[]),
         ("market_tests",["test/host/market_tests.cpp"],["test/live_fixtures",str(epoch),str(history_epoch)]),
         ("live_tests",["test/host/live_tests.cpp"],["test/live_fixtures"]),
+        ("telemetry_tests",["test/host/telemetry_tests.cpp"],[]),
     ]:
         run(flags+sources+["-o",build/name]);run([build/name]+args)
     # CI uses an ephemeral key; local testing uses the real signing key when
@@ -80,6 +81,10 @@ def main():
         run(["node","test/host/portal_tests.cjs",build/"portal.js"])
         run(["node","test/host/price_sim_tests.mjs"])
     run([sys.executable,"test/host/refresh_report_tests.py"])
+    run([sys.executable,"test/host/clock_link_tests.py"])
+    if shutil.which("node"):
+        text=(ROOT/"src/DeviceTelemetry.cpp").read_text();script=text.split("<script>",1)[1].split("</script>",1)[0]
+        (build/"telemetry.js").write_text(script);run(["node","--check",build/"telemetry.js"])
     print("PASS: all sanitized host suites, portal JavaScript and physical-report behavior")
 
 

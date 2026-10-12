@@ -10,6 +10,7 @@
 #include "HistoryStore.h"
 #include "LivePrice.h"
 #include "QuoteBook.h"
+#include "DeviceTelemetry.h"
 
 namespace {
 Provisioning wifi;
@@ -34,6 +35,12 @@ uint8_t shownSource=0,lastAcceptedSource=0;
 uint32_t shownQuoteReceived=0;
 uint32_t shownDigits=0;
 uint32_t nextNixieAt=0,nixieFrames=0,lastNixieAt=0,acceptedQuotes=0;
+uint32_t lastFrameGap=0,lastFramePeriod=0,minimumFrameGap=0,maximumFrameGap=0;
+uint32_t nextTelemetryAt=0,nextRawAt=0;
+uint16_t frequencyMv=0,rangeMv=0,frequencyRaw=0,rangeRaw=0;
+int frequencyDecoded=-1,rangeDecoded=-1;
+bool forceOtaPending=false,matrixDiagnostics=false;
+uint8_t diagnosticPage=0;
 uint32_t nextQuoteAt=0,nextDialsAt=0,nextDrawAt=0,lastPriceEpoch=0,lastQuoteReceived=0;
 uint32_t nextHistoryAt[5]={},historyErrors[5]={};
 uint8_t historySource[5]={1,1,1,2,1}; // Bitstamp's day JSON uses less heap.
@@ -49,15 +56,58 @@ uint32_t millivolts(uint8_t pin) {
 void readDials(uint32_t now) {
   if (!btc::due(now,nextDialsAt)) return;
   nextDialsAt=now+25;
+  frequencyMv=uint16_t(millivolts(config::kRefreshPin));rangeMv=uint16_t(millivolts(config::kTimelinePin));
+  frequencyDecoded=btc::dialPosition(frequencyMv,config::kRefreshMv);
+  rangeDecoded=btc::dialPosition(rangeMv,config::kTimelineMv);
+  if(btc::due(now,nextRawAt)){
+    nextRawAt=now+250;
+    uint16_t samples[7];
+    for(unsigned i=0;i<7;++i)samples[i]=analogRead(config::kRefreshPin);
+    std::sort(samples,samples+7);frequencyRaw=samples[3];
+    for(unsigned i=0;i<7;++i)samples[i]=analogRead(config::kTimelinePin);
+    std::sort(samples,samples+7);rangeRaw=samples[3];
+  }
   const int previousFrequency=refreshDial.stable;
-  if (refreshDial.update(btc::dialPosition(millivolts(config::kRefreshPin),config::kRefreshMv),now)) {
+  if (refreshDial.update(frequencyDecoded,now)) {
     if (previousFrequency!=refreshDial.stable) {nextQuoteAt=now;nextNixieAt=now;}
     Serial.printf("Frequency JSEL2/GPIO35 position %d: %lu ms\n",refreshDial.stable+1,(unsigned long)config::kRefreshMs[refreshDial.stable]);
   }
-  if (timelineDial.update(btc::dialPosition(millivolts(config::kTimelinePin),config::kTimelineMv),now)) {
+  if (timelineDial.update(rangeDecoded,now)) {
     nextHistoryAt[timelineDial.stable]=now; nextDrawAt=now;
     Serial.printf("Range JSEL1/GPIO34 position %d: %s (%u cached candles)\n",timelineDial.stable+1,config::kWindowNames[timelineDial.stable],histories[timelineDial.stable].count);
   }
+}
+void remoteCommands(uint32_t now) {
+  telemetry::Command command;
+  for(unsigned i=0;i<4&&telemetry::receive(command);++i){
+    switch(command){
+      case telemetry::Command::Ota:forceOtaPending=true;break;
+      case telemetry::Command::Tubes:tubeTestEndsAt=now+5000;break;
+      case telemetry::Command::Readings:matrixDiagnostics=true;diagnosticPage=1;nextDrawAt=now;break;
+      case telemetry::Command::Chart:matrixDiagnostics=false;tubeTestEndsAt=0;nextDrawAt=now;break;
+    }
+  }
+}
+void publishTelemetry(uint32_t now) {
+  if(!btc::due(now,nextTelemetryAt))return;
+  nextTelemetryAt=now+250;
+  telemetry::Snapshot s;s.uptime=now;s.heap=ESP.getFreeHeap();s.largest=ESP.getMaxAllocHeap();
+  s.online=wifi.online();s.portal=wifi.portalActive();s.clock=time(nullptr)>=config::kMinimumEpoch;
+  s.frequency.mv=frequencyMv;s.frequency.raw=frequencyRaw;s.frequency.decoded=frequencyDecoded;
+  s.frequency.selected=refreshDial.stable;s.frequency.initialized=refreshDial.initialized;
+  s.range.mv=rangeMv;s.range.raw=rangeRaw;s.range.decoded=rangeDecoded;
+  s.range.selected=timelineDial.stable;s.range.initialized=timelineDial.initialized;
+  s.interval=config::kRefreshMs[refreshDial.stable];s.window=config::kWindowSeconds[timelineDial.stable];
+  auto liveState=live::status();s.connections=liveState.connections;s.quotes=liveState.quotes;
+  s.accepted=acceptedQuotes;s.frames=nixieFrames;s.quoteAge=now-lastQuoteReceived;s.frameAge=now-lastNixieAt;
+  s.frameGap=lastFrameGap;s.nextFrame=uint32_t(std::max<int32_t>(0,int32_t(nextNixieAt-now)));
+  s.minimumGap=minimumFrameGap;s.maximumGap=maximumFrameGap;
+  s.marketPrice=guard.price;s.displayPrice=shownPrice;s.digits=shownDigits;s.source=shownSource;
+  bool testing=tubeTestEndsAt&&!btc::due(now,tubeTestEndsAt);
+  s.displayMode=testing?3:!s.online||!guard.price?1:uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(s.interval)?2:0;
+  if(testing)s.testStep=uint8_t((5000-uint32_t(tubeTestEndsAt-now))/500);
+  s.matrixPage=matrixDiagnostics?diagnosticPage:255;
+  s.confirmed=guard.confirmed();s.inflight=inflight;s.otaPending=forceOtaPending;s.bootConfirmed=ota::bootConfirmed();telemetry::publish(s);
 }
 void diagnostics(uint32_t now) {
   Serial.printf("Firmware=%s Wi-Fi=%s portal=%s setup=%s clock=%s heap=%u largest=%u refresh=%lu window=%s price=%.2f stale=%s fx=%.6f fxFresh=%s history=%u\n",
@@ -85,6 +135,8 @@ void serialCommands(uint32_t now) {
     else if (serialLine=="setup") wifi.openSetup();
     else if (serialLine=="wifi-reset") wifi.forget();
     else if (serialLine=="selftest") testEndsAt=now+4500;
+    else if (serialLine=="ota-check") forceOtaPending=true;
+    else if (serialLine=="readings") {matrixDiagnostics=!matrixDiagnostics;diagnosticPage=1;nextDrawAt=now;}
     else if (serialLine=="tube-test") {
       tubeTestEndsAt=now+5000;
       Serial.println("Tube test: all six digits advance every 500 ms for 5 seconds, then live display resumes.");
@@ -94,13 +146,20 @@ void serialCommands(uint32_t now) {
       logNixies=serialLine=="ticks"?!logNixies:serialLine=="ticks on";
       Serial.println(logNixies?"Nixie frame logging on":"Nixie frame logging off");
     }
-    else if (!serialLine.isEmpty()) Serial.println("Commands: status, dials, ticks, tube-test, setup, wifi-reset, selftest, reboot");
+    else if (!serialLine.isEmpty()) Serial.println("Commands: status, dials, ticks, tube-test, readings, ota-check, setup, wifi-reset, selftest, reboot");
     serialLine="";
   }
   if (digitalRead(0)==LOW) {
     if (!bootPressedAt) bootPressedAt=now;
-    if (!bootHandled && uint32_t(now-bootPressedAt)>=5000) { bootHandled=true; wifi.openSetup(); }
-  } else { bootPressedAt=0; bootHandled=false; }
+    if (!bootHandled && uint32_t(now-bootPressedAt)>=5000) { bootHandled=true;matrixDiagnostics=false;wifi.openSetup(); }
+  } else {
+    if(bootPressedAt&&!bootHandled){
+      uint32_t held=now-bootPressedAt;
+      if(held>=1000){matrixDiagnostics=!matrixDiagnostics;diagnosticPage=0;nextDrawAt=now;}
+      else if(held>=40&&matrixDiagnostics){diagnosticPage=(diagnosticPage+1)%5;nextDrawAt=now;if(diagnosticPage==4)tubeTestEndsAt=now+5000;}
+    }
+    bootPressedAt=0;bootHandled=false;
+  }
 }
 void acceptQuote(const btc::Quote& quote,uint8_t source,uint32_t receivedAt,uint32_t epoch,uint32_t now) {
   if (source>=btc::kSourceCount) return;
@@ -145,6 +204,9 @@ void refreshNixies(uint32_t now) {
     // intact; the ordinary stale check above still blanks an actual outage.
     shownDigits=btc::displayDollars(selected.price,shownDigits,!firstFrame && period==500,cosmetic);
     display::price(double(shownDigits),true);shownPrice=selected.price;shownSource=selected.source;shownQuoteReceived=selected.receivedAt;++nixieFrames;
+    lastFrameGap=now-lastNixieAt;
+    if(lastFramePeriod!=period||firstFrame){minimumFrameGap=maximumFrameGap=0;lastFramePeriod=period;}
+    else {if(!minimumFrameGap||lastFrameGap<minimumFrameGap)minimumFrameGap=lastFrameGap;if(lastFrameGap>maximumFrameGap)maximumFrameGap=lastFrameGap;}
     if (logNixies || nixieFrames==1) Serial.printf("Nixie frame at %lu ms: %.2f interval=%lu ms gap=%lu ms quoteAge=%lu ms source=%s digits=%lu cosmetic=%s\n",(unsigned long)now,shownPrice,
       (unsigned long)config::kRefreshMs[refreshDial.stable],(unsigned long)uint32_t(now-lastNixieAt),(unsigned long)uint32_t(now-shownQuoteReceived),btc::kSources[shownSource].name,(unsigned long)shownDigits,cosmetic?"yes":"no");
     lastNixieAt=now;
@@ -212,6 +274,9 @@ void schedule(uint32_t now) {
     streamWarmupStarted=true;streamWarmupUntil=now+35000;firstQuoteFallbackAt=now+5000;
   }
   const uint8_t window=timelineDial.stable;
+  if(forceOtaPending&&ota::bootConfirmed()&&market::send({market::Kind::Ota,0,window,epoch})){
+    forceOtaPending=false;ota::defer(now);inflight=true;live::httpBusy(true);return;
+  }
   // An unavailable market must not prevent the device from receiving an OTA
   // fix. Only the bounded initial stream grace precedes manifest checks.
   if (btc::due(now,streamWarmupUntil) && ota::checkDue(now,wifi.online()) && market::send({market::Kind::Ota,0,window,epoch})) {
@@ -270,6 +335,19 @@ void draw(uint32_t now) {
     return;
   }
   if (stale && guard.price && !testingTubes) display::blankPrice();
+  if(matrixDiagnostics){
+    char top[24],bottom[24];
+    if(diagnosticPage==0){
+      const char* frequency[]={"F.5S","F2S","F30S","F5M","F1H"};
+      const char* range[]={"R5M","R30M","R1H","R24H","R7D"};
+      snprintf(top,sizeof(top),"%s%s",frequency[refreshDial.stable],refreshDial.initialized&&frequencyDecoded==refreshDial.stable?"":"?");
+      snprintf(bottom,sizeof(bottom),"%s%s",range[timelineDial.stable],timelineDial.initialized&&rangeDecoded==timelineDial.stable?"":"?");
+    }else if(diagnosticPage==1){snprintf(top,sizeof(top),"F%04u",frequencyMv);snprintf(bottom,sizeof(bottom),"R%04u",rangeMv);}
+    else if(diagnosticPage==2){snprintf(top,sizeof(top),"Q%04lu",(unsigned long)(acceptedQuotes%10000));snprintf(bottom,sizeof(bottom),"N%04lu",(unsigned long)(nixieFrames%10000));}
+    else if(diagnosticPage==3){auto ip=WiFi.localIP();unsigned offset=(now/2000)%2?2:0;snprintf(top,sizeof(top),"%u",ip[offset]);snprintf(bottom,sizeof(bottom),"%u",ip[offset+1]);}
+    else {snprintf(top,sizeof(top),"TUBE");snprintf(bottom,sizeof(bottom),testingTubes?"TEST":"DONE");}
+    display::message(top,bottom,now);nextDrawAt=now+100;return;
+  }
   uint32_t epoch=uint32_t(time(nullptr));
   // A bare ESP32 cannot know how long it was off until SNTP succeeds. Before
   // then, show the saved dated snapshot; never use it as the TLS/current clock.
@@ -314,14 +392,16 @@ void setup() {
   Serial.println("Bitcoin Clock live firmware. Type status or dials; hold BOOT for 5 seconds to set up Wi-Fi.");
   wifi.begin(); networkReady=market::begin(); ota::begin();
   liveReady=live::begin();
+  if(!telemetry::begin())Serial.println("Wi-Fi telemetry worker unavailable.");
   if (!liveReady) Serial.println("Live stream worker unavailable; using REST fallback.");
   if (!networkReady) Serial.println("HTTP worker allocation failed; reboot to retry.");
 }
 void loop() {
   uint32_t now=millis();
-  wifi.loop(now); readDials(now); serialCommands(now);
+  wifi.loop(now); readDials(now); remoteCommands(now);serialCommands(now);
   if (wifi.online()&&!timeStarted) { configTime(0,0,"time.cloudflare.com","pool.ntp.org","time.google.com"); timeStarted=true; }
   processResult(now); processLive(now);now=millis();refreshNixies(now);draw(now);saveHistory(now);schedule(now);
   ota::healthCheck(now,networkReady&&wifi.online()&&guard.price>0&&ESP.getFreeHeap()>30000);
+  publishTelemetry(millis());
   delay(2);
 }

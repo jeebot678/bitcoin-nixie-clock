@@ -97,6 +97,7 @@ bool install(const ota::Manifest& manifest) {
 }
 }
 namespace ota {
+bool bootConfirmed(){return confirmed;}
 void begin() {
   esp_ota_img_states_t state;
   pendingBoot=esp_ota_get_state_partition(esp_ota_get_running_partition(),&state)==ESP_OK&&state==ESP_OTA_IMG_PENDING_VERIFY;

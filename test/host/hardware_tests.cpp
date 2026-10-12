@@ -178,4 +178,22 @@ void startupDisplayTests(){
   display::startupPlot(chart,200000);check(changed);assert(!display::startupAnimating());
   std::cout<<"PASS: all 273 startup fill/unfill cells in physical SPI order, chart preservation/change, full turnaround, once per boot, delayed frames and millis rollover\n";
 }
-int main(){displayTests();setupDisplayTests();startupDisplayTests();provisioningTests();std::cout<<"PASS: real display transport, setup text/scrolling, 100 ms single-zero chase, and provisioning states with host hardware/network models\n";}
+void numericTextTests(){
+  std::array<std::array<bool,21>,13> raster={};
+  matrix_text::drawLine("0",0,0,[&](uint8_t r,uint8_t c){raster[r][c]=true;});
+  unsigned lit=0;
+  for(unsigned r=0;r<13;++r)for(unsigned c=0;c<21;++c){
+    bool expected=r<5&&c>=9&&c<=11&&(r==0||r==4||c==9||c==11);
+    assert(raster[r][c]==expected);if(raster[r][c])++lit;
+  }
+  assert(lit==12);
+  std::vector<std::array<std::array<bool,21>,13>> digits;
+  for(char digit='0';digit<='9';++digit){raster={};char text[2]={digit,0};matrix_text::drawLine(text,1,0,[&](uint8_t r,uint8_t c){raster[r][c]=true;});
+    for(const auto& other:digits)assert(other!=raster);digits.push_back(raster);
+    bool any=false;for(auto& row:raster)for(bool cell:row)any|=cell;assert(any);
+  }
+  raster={};matrix_text::drawLine(".?",7,0,[&](uint8_t r,uint8_t c){raster[r][c]=true;});assert(raster[11][8]);
+  assert(matrix_text::width("F0309")==19&&matrix_text::width("F.5S?")==19);
+  std::cout<<"PASS: readable numeric voltage/frequency glyphs, distinct digits, decimal/question marks and 21-column diagnostic labels\n";
+}
+int main(){displayTests();setupDisplayTests();startupDisplayTests();numericTextTests();provisioningTests();std::cout<<"PASS: real display transport, setup text/scrolling, 100 ms single-zero chase, and provisioning states with host hardware/network models\n";}

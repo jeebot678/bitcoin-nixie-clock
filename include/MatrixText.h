@@ -14,6 +14,11 @@ constexpr uint8_t kGlyphs[26][5] = {
   {5,5,5,5,7}, {5,5,5,5,2}, {5,5,7,7,5}, {5,5,2,5,5},
   {5,5,2,2,2}, {7,1,2,4,7}
 };
+constexpr uint8_t kDigits[10][5] = {
+  {7,5,5,5,7},{2,6,2,2,7},{6,1,7,4,7},{6,1,7,1,6},{5,5,7,1,1},
+  {7,4,6,1,6},{3,4,7,5,7},{7,1,2,2,2},{7,5,7,5,7},{7,5,7,1,6}
+};
+constexpr uint8_t kDot[5]={0,0,0,0,2},kQuestion[5]={6,1,2,0,2};
 inline uint16_t width(const char* text) {
   size_t count = text ? strlen(text) : 0;
   return count ? uint16_t(count * 4 - 1) : 0;
@@ -38,9 +43,11 @@ void drawLine(const char* text, uint8_t firstRow, uint32_t elapsed, Sink sink) {
   for (size_t letter = 0; text[letter]; ++letter) {
     char ch = text[letter];
     if (ch >= 'a' && ch <= 'z') ch -= 'a' - 'A';
-    if (ch < 'A' || ch > 'Z') continue;
+    const uint8_t* glyph=ch>='A'&&ch<='Z'?kGlyphs[ch-'A']:
+      ch>='0'&&ch<='9'?kDigits[ch-'0']:ch=='.'?kDot:ch=='?'?kQuestion:nullptr;
+    if(!glyph)continue;
     for (uint8_t row = 0; row < 5 && firstRow + row < 13; ++row) {
-      uint8_t bits = kGlyphs[ch - 'A'][row];
+      uint8_t bits = glyph[row];
       for (uint8_t col = 0; col < 3; ++col) {
         int16_t x = origin + int16_t(letter * 4 + col);
         if ((bits & (1U << (2 - col))) && x >= 0 && x < 21)

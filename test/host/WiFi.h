@@ -4,7 +4,7 @@
 constexpr int WL_CONNECTED=3,WIFI_STA=1,WIFI_AP_STA=3,WIFI_SCAN_FAILED=-2,WIFI_SCAN_RUNNING=-1;
 constexpr int WIFI_ALL_CHANNEL_SCAN=1,WIFI_CONNECT_AP_BY_SIGNAL=0,WIFI_AUTH_OPEN=0,WIFI_AUTH_WPA2_PSK=3,ARDUINO_EVENT_WIFI_STA_DISCONNECTED=5;
 using WiFiEvent_t=int;struct WiFiEventInfo_t {struct {uint8_t reason;}wifi_sta_disconnected;};
-class IPAddress{public:IPAddress(int a,int b,int c,int d):text(std::to_string(a)+"."+std::to_string(b)+"."+std::to_string(c)+"."+std::to_string(d)){}String toString()const{return text;}private:std::string text;};
+class IPAddress{public:IPAddress(int a,int b,int c,int d):text(std::to_string(a)+"."+std::to_string(b)+"."+std::to_string(c)+"."+std::to_string(d)),octets{a,b,c,d}{}String toString()const{return text;}unsigned operator[](unsigned index)const{return unsigned(octets[index]);}private:std::string text;int octets[4];};
 struct WifiMock{
   int connection=0,currentMode=0,beginCalls=0,apStarts=0,apStops=0,scans=WIFI_SCAN_FAILED;bool ap=false,failAp=false;
   String lastSsid,lastPassword,apSsid,apPassword;std::vector<String> names;std::vector<int> strengths,securities,channels;

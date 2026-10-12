@@ -36,4 +36,5 @@ inline void digitalWrite(uint8_t pin,int value){pins[pin]=value;gpioEvents.push_
 inline void pinMode(uint8_t pin,int mode){modes[pin]=mode;gpioEvents.push_back({pin,mode,true});}
 inline int digitalRead(uint8_t pin){return pins[pin];}
 inline uint32_t analogReadMilliVolts(uint8_t pin){return adc[pin];}inline void analogReadResolution(int){}inline void analogSetPinAttenuation(uint8_t,int){}
+inline uint16_t analogRead(uint8_t pin){return uint16_t(std::min(4095,std::max(0,adc[pin])*4095/3100));}
 inline void configTime(long,int,const char*,const char*,const char*){}

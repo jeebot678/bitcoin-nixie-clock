@@ -1,0 +1,25 @@
+#pragma once
+#include <stdint.h>
+
+namespace telemetry {
+enum class Command : uint8_t { Ota, Tubes, Readings, Chart };
+struct Dial {
+  uint16_t mv=0,raw=0;
+  int8_t decoded=-1,selected=0;
+  bool initialized=false;
+};
+struct Snapshot {
+  uint32_t uptime=0,heap=0,largest=0,quotes=0,accepted=0,frames=0;
+  uint32_t quoteAge=0,frameAge=0,frameGap=0,nextFrame=0,interval=500,window=300;
+  uint32_t minimumGap=0,maximumGap=0;
+  uint32_t digits=0;
+  double marketPrice=0,displayPrice=0;
+  Dial frequency,range;
+  uint8_t connections=0,source=0;
+  uint8_t displayMode=1,testStep=0,matrixPage=255;
+  bool online=false,portal=false,clock=false,confirmed=false,inflight=false,otaPending=false,bootConfirmed=false;
+};
+bool begin();
+void publish(const Snapshot& snapshot);
+bool receive(Command& command);
+}

@@ -11,6 +11,7 @@
 #include "SPIFFS.h"
 #include "LedMatrixMap.h"
 #include "LivePrice.h"
+#include "DeviceTelemetry.h"
 
 SerialMock Serial;EspMock ESP;WifiMock WiFi;uint32_t testMillis=100;
 std::map<int,int>pins,modes,adc;std::vector<GpioEvent>gpioEvents;std::vector<SpiPacket>packets;
@@ -24,7 +25,8 @@ void complete(bool ok=true,int status=200){queued={};queued.request=outstanding;
   if(outstanding.kind==Kind::History){uint32_t step=config::kCandleSeconds[outstanding.window];for(uint32_t close=outstanding.start+step;close<=outstanding.epoch;close+=step)assert(queued.history.add(close,83300));}
   ready=true;}
 }
-namespace ota {bool due=false;void begin(){}void healthCheck(uint32_t,bool){}bool checkDue(uint32_t,bool){return due;}void defer(uint32_t){due=false;}bool checkAndInstall(){return true;}}
+namespace ota {bool due=false,validBoot=true;void begin(){}void healthCheck(uint32_t,bool){}bool bootConfirmed(){return validBoot;}bool checkDue(uint32_t,bool){return due;}void defer(uint32_t){due=false;}bool checkAndInstall(){return true;}}
+namespace telemetry {Snapshot last;std::vector<Command> queued;bool begin(){return true;}void publish(const Snapshot&s){last=s;}bool receive(Command&command){if(queued.empty())return false;command=queued.front();queued.erase(queued.begin());return true;}}
 namespace live {
 Tick pending;bool queued=false,healthy=false,busy=false;
 bool begin(){return true;}bool receive(Tick& tick){if(!queued)return false;tick=pending;queued=false;return true;}
@@ -273,4 +275,29 @@ void tubeDiagnosticTests(){
   packets.clear();refreshNixies(testMillis);assertPriceFrame(83300);assert(!tubeTestEndsAt);
   std::cout<<"PASS: explicit five-second tube diagnostic advances every cathode on all six CS lines at 500 ms without prices, then restores the live/startup display\n";
 }
-int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();soak();}
+void wirelessRuntimeTests(){
+  testMillis+=6000;nextDialsAt=nextRawAt=nextTelemetryAt=testMillis;adc[35]=309;adc[34]=926;readDials(testMillis);
+  assert(frequencyMv==309&&rangeMv==926&&frequencyDecoded==0&&rangeDecoded==2);
+  publishTelemetry(testMillis);assert(telemetry::last.frequency.mv==309&&telemetry::last.frequency.decoded==0&&telemetry::last.range.mv==926);
+  assert(telemetry::last.frames==nixieFrames&&telemetry::last.accepted==acceptedQuotes&&telemetry::last.bootConfirmed);
+  // A queued OTA must wait for ongoing HTTP, but bypass six-hour/stream
+  // grace once it is free. It always dispatches the ordinary signed updater.
+  telemetry::queued.push_back(telemetry::Command::Ota);remoteCommands(testMillis);assert(forceOtaPending);
+  unsigned calls=market::calls;inflight=true;schedule(testMillis);assert(forceOtaPending&&market::calls==calls);inflight=false;
+  streamWarmupStarted=true;streamWarmupUntil=testMillis+35000;ota::validBoot=false;schedule(testMillis);
+  assert(forceOtaPending&&market::calls==calls);ota::validBoot=true;schedule(testMillis);
+  assert(!forceOtaPending&&market::sent&&market::outstanding.kind==market::Kind::Ota);market::complete();processResult(testMillis);
+  telemetry::queued.push_back(telemetry::Command::Readings);remoteCommands(testMillis);assert(matrixDiagnostics&&diagnosticPage==1);
+  packets.clear();draw(testMillis);assert(!packets.empty());for(const auto&p:packets)assert(p.bus==HSPI);
+  telemetry::queued.push_back(telemetry::Command::Tubes);remoteCommands(testMillis);assert(tubeTestEndsAt==testMillis+5000);
+  telemetry::queued.push_back(telemetry::Command::Chart);remoteCommands(testMillis);assert(!matrixDiagnostics&&!tubeTestEndsAt);
+  // BOOT release after one second toggles diagnostics; taps cycle pages.
+  pins[0]=LOW;serialCommands(testMillis);testMillis+=1000;pins[0]=HIGH;serialCommands(testMillis);assert(matrixDiagnostics&&diagnosticPage==0);
+  pins[0]=LOW;serialCommands(testMillis);testMillis+=60;pins[0]=HIGH;serialCommands(testMillis);assert(diagnosticPage==1);
+  pins[0]=LOW;serialCommands(testMillis);testMillis+=1000;pins[0]=HIGH;serialCommands(testMillis);assert(!matrixDiagnostics);
+  matrixDiagnostics=true;pins[0]=LOW;serialCommands(testMillis);testMillis+=5000;serialCommands(testMillis);
+  assert(bootHandled&&!matrixDiagnostics&&wifi.portalActive());pins[0]=HIGH;serialCommands(testMillis);assert(!matrixDiagnostics);
+  WiFi.connection=WL_CONNECTED;wifi.loop(testMillis);testMillis+=8001;wifi.loop(testMillis);assert(wifi.online()&&!wifi.portalActive());
+  std::cout<<"PASS: actual dial sampling/snapshots, queued signed OTA checks bypassing schedule without interrupting in-flight HTTP, wireless matrix/tube controls and BOOT diagnostics gestures\n";
+}
+int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();wirelessRuntimeTests();soak();}

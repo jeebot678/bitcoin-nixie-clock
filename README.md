@@ -2,7 +2,7 @@
 
 Live, standalone firmware for the Rev20 motherboard: ESP32-WROOM-32E, six exixe Nixie modules, a 13 × 21 LED matrix driven by six MAX7219 chips, and two five-position resistor-ladder selectors. The original working simulation is archived in `demo/main_demo.cpp`; the default firmware uses actual market data.
 
-Version **1.0.10** fixes first-price blocking and the grounded dial contact, keeps fast display motion through brief quote gaps, and adds `tube-test` for visible diagnostics. It passes host regression tests and the ESP32 build; new USB/assembled-device validation remains outstanding. Earlier USB timing reports observe firmware commands, not actual light output. The deployed version is selected by the signed `main` OTA manifest.
+Version **1.0.11** adds live diagnostics over Wi-Fi and a computer collector, plus remote signed OTA checks. It retains 1.0.10's first-price, grounded-contact and fast-motion fixes. See [wireless diagnostics](docs/WIRELESS_DIAGNOSTICS.md) for data collection and updating without USB. It passes host regression tests and the ESP32 build; assembled-device validation remains outstanding. Earlier timing reports observe firmware commands, not actual light output. The deployed version is selected by the signed `main` OTA manifest.
 
 The clock receives live BTC/USD through two persistent public streams, preferring Kraken and Coinbase with Bitstamp/Bitfinex failover, and retains eleven independent free REST endpoints for confirmation and fallback. REST rotation honors provider cooldowns and `Retry-After`. USDT quotes are converted with a recent USDT/USD rate. No API keys, subscriptions, intermediary server or running web app are needed.
 
@@ -49,7 +49,7 @@ For a secured network, enter its Wi-Fi password. Credentials are saved as one at
 
 The matrix shows `CONNECT` above `WIFI` while waiting for setup. A single zero runs across the six Nixies at 100 ms per tube; the previous tube turns off first. During setup the matrix reports `CONNECTING`, `CONNECTED`, or a Wi-Fi/save/AP error. Long words scroll to fit the 21-column display. In 1.0.10 the zero chase continues through clock sync and first-price loading. The first fresh, validated quote replaces it immediately; independent confirmation proceeds in the background. Direct USD HTTP fallback starts after five seconds without a stream quote, without fetching USDT conversion first. After setup closes, the startup chart reveal runs when the selected history is ready. Clock synchronization, initial price fetching and initial history fetching also have text status messages.
 
-Hold the ESP32 BOOT button for five seconds while running to reopen setup. Serial commands at 115200 baud are `status`, `dials`, `ticks`, `setup`, `wifi-reset`, `selftest` and `reboot`. `wifi-reset` removes saved Wi-Fi credentials. `selftest` lights the six LED grids in order. An X indicates that no usable chart has arrived after a price is available. The standalone all-LED demo is preserved in `demo/matrix_all_on/`; its separate PlatformIO configuration cannot replace the live build artifacts.
+Hold the ESP32 BOOT button for five seconds while running to reopen setup. Hold for one second and release to toggle matrix diagnostics; short taps cycle readings/counters/IP/tube test. Diagnostics are also available at `http://bitcoin-clock.local:8080`. Serial commands at 115200 baud include `status`, `dials`, `ticks`, `tube-test`, `readings`, `ota-check`, `setup`, `wifi-reset`, `selftest` and `reboot`. `wifi-reset` removes saved Wi-Fi credentials. `selftest` lights the six LED grids in order. An X indicates that no usable chart has arrived after a price is available. The standalone all-LED demo is preserved in `demo/matrix_all_on/`; its separate PlatformIO configuration cannot replace the live build artifacts.
 
 Prices require an SNTP-synchronized clock and certificate-verified HTTPS. Nixies blank after an extended quote outage, instead of presenting an old value as current. Values that would round beyond 999999 also blank, because six tubes cannot represent seven digits. A chart can retain dated historical points during an outage.
 
@@ -64,7 +64,7 @@ Keep and back up `secrets/ota-signing-key.pem` privately. Only `data/cert/ota-pu
 To publish a future update from a clean `main` checkout after committing your code changes:
 
 ```sh
-python3 tools/publish_release.py --version 1.0.10
+python3 tools/publish_release.py --version 1.0.12
 ```
 
 That command builds, runs the host tests, signs locally, pushes the versioned source, publishes the firmware release, then pushes the signed rollout manifest to `main`. The signing key is never sent to GitHub. Routine OTA checks retain the primary price feed. Both streams pause only for a validated new image download/install, and resume on failure. The display timer and rotary inputs continue running.
