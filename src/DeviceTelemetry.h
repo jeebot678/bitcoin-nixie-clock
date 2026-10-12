@@ -12,6 +12,7 @@ struct Dial {
 struct Snapshot {
   uint32_t uptime=0,heap=0,largest=0,quotes=0,accepted=0,frames=0;
   uint32_t dataHeap=0,dataBlock=0,httpStack=0;
+  uint32_t transitions=0,priceChanges=0,multiChanges=0;
   uint32_t chartColumns=0,historySavedAt=0;
   uint16_t chartPixels=0,historyCandles=0;
   int httpStatus=0;
@@ -20,7 +21,7 @@ struct Snapshot {
   uint32_t quoteAge=0,frameAge=0,frameGap=0,nextFrame=0,interval=500,window=300;
   uint32_t minimumGap=0,maximumGap=0;
   uint32_t digits=0;
-  double marketPrice=0,displayPrice=0;
+  double marketPrice=0,displayPrice=0,axisLow=0,axisStep=0;
   Dial frequency,range;
   ota::Status ota;
   uint8_t connections=0,source=0;

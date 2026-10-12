@@ -27,11 +27,11 @@ The fresh lowest-to-highest sweep measured both switches as **POS5 → POS1**:
 
 | Physical position | PCB track / resistor | Frequency / GPIO35 | Range / GPIO34 | Selected frequency | Selected range |
 | --- | --- | --- | --- | --- | --- |
-| Lowest | POS5 / 12 kΩ | 1774 mV | 1775 mV | 0.5 s | 5 min |
-| Second | POS4 / 6.8 kΩ | 1328 mV | 1328 mV | 2 s | 30 min |
-| Third | POS3 / 3.9 kΩ | 915 mV | 909 mV | 30 s | 1 h |
-| Fourth | POS2 / 1.8 kΩ | 490 mV | 493 mV | 5 min | 24 h |
-| Highest | POS1 / 0 Ω | 142 mV, raw 0 | 142 mV, raw 0 | 1 h | 7 d |
+| Lowest | POS5 / 12 kΩ | 1774 mV | 1775 mV | 0.1 s | 30 s |
+| Second | POS4 / 6.8 kΩ | 1328 mV | 1328 mV | 0.5 s | 1 min |
+| Third | POS3 / 3.9 kΩ | 915 mV | 909 mV | 1.5 s | 5 min |
+| Fourth | POS2 / 1.8 kΩ | 490 mV | 493 mV | 10 s | 30 min |
+| Highest | POS1 / 0 Ω | 142 mV, raw 0 | 142 mV, raw 0 | 1 min | 1 h |
 
 Independent calibration arrays follow this physical order. The grounded track
 keeps an explicit zero marker so its low-voltage band handles the observed

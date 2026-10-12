@@ -4,7 +4,7 @@
 #include <freertos/queue.h>
 
 namespace market {
-enum class Kind : uint8_t { Quote, History, Fx, Ota };
+enum class Kind : uint8_t { Quote, History, Fx, Ota, Candles };
 struct Request {
   Kind kind; uint8_t source; uint8_t window; uint32_t epoch, start;
   Request(Kind k=Kind::Quote, uint8_t s=0, uint8_t w=0, uint32_t e=0, uint32_t from=0)
@@ -17,7 +17,8 @@ struct Result {
   int status = 0;
   uint32_t retryAfterMs = 0, receivedAt = 0, epoch = 0;
   btc::Quote quote;
-  btc::History history;
+  btc::History history; // Legacy close-cache migration/tests.
+  btc::CandleSeries candles;
 };
 bool begin();
 bool send(const Request& request);

@@ -2,7 +2,7 @@
 
 Verified on 2026-10-10 using HTTP/1.0, identity encoding and the same Mozilla roots embedded in the firmware: all eleven default tickers returned HTTP 200 and parsed as valid prices. Kraken and Bitstamp returned valid history for all five windows and actual incremental requests for one closed hour and 48 closed hours. Bybit returned HTTP 403 from this network and is excluded. The exact responses, timings and headers are in `test/live_probe_report.json` and `test/live_fixtures/`.
 
-These exchanges can report different last-trade prices. Firmware 1.0.9 caches accepted quotes per provider and prefers recent quotes that change whole-dollar digits. REST uses at least five seconds per provider, including shared history/FX traffic, and respects quotas and geographic restrictions. Version 1.0.16 removes the cosmetic rounding effect, retains three distinct real prices per source for five seconds, and prefers candidates that change multiple digits. Matching prices trigger an asynchronous request to another source. Charts/history retain real values. See [exact refresh behavior](NIXIE_REFRESH.md).
+These exchanges can report different last-trade prices. Firmware 1.0.9 caches accepted quotes per provider and prefers recent quotes that change whole-dollar digits. REST uses at least five seconds per provider, including shared history/FX traffic, and respects quotas and geographic restrictions. Version 1.0.16 removes the cosmetic rounding effect, retains twelve distinct real prices per source for five seconds, and prefers candidates that change multiple digits. Matching prices trigger an asynchronous request to another source. Charts/history retain real values. See [exact refresh behavior](NIXIE_REFRESH.md).
 
 ## Device live streams
 
@@ -43,22 +43,48 @@ Kraken's USDT/USD rate refreshes every 60 seconds independently of the Nixie ref
 
 HTTP 429/418 and recognized JSON rate-limit errors produce at least a one-minute cooldown; `Retry-After` seconds or HTTP date extends it. Authentication, geographic and missing-endpoint errors (401/403/404/451) cool down for an hour. Other failures back off from 5 seconds to 10 minutes. Prices, identifiers and numeric strings must parse correctly; malformed JSON, missing data, NaN/infinity, compressed/chunked unexpected bodies and overlarge responses are rejected. Requests use bounded read/connect/handshake times and certificate verification, never `setInsecure()`.
 
-## Historical candles
+## Candle history
 
-Kraken fallback: `https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=MINUTES&since=EPOCH`. Parse `result.XXBTZUSD`, close at index 4. [Official documentation](https://docs.kraken.com/api-reference/market-data/get-ohlc-data) limits the response to 720 rows and identifies the final candle as unfinished.
+Firmware 1.0.18 builds exact range/21 OHLC candles from individual trades.
+One-minute exchange bars cannot supply the correct high/low for shorter,
+non-aligned column intervals.
 
-Bitstamp primary: `https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=SECONDS&limit=MISSING_COUNT&end=LAST_CLOSED_SECOND&exclude_current_candle=true`. Firmware caps each page at 24 candles, advancing the end time from the first missing candle. Parse `data.ohlc[].close`; confirm pair BTC/USD. [Official documentation](https://www.bitstamp.net/api/) allows at most 1,000 candles. These are genuine USD history, so a current FX rate is never applied retrospectively to stablecoin history.
+Bitstamp primary uses `https://www.bitstamp.net/api/v2/transactions/btcusd/?time=minute`
+for 30 s / 1 min, and `?time=hour` for 5 min / 30 min / 1 h.
+The [official API](https://www.bitstamp.net/api/) documents these time windows
+and the public quotas listed above. Coinbase fallback uses
+`https://api.exchange.coinbase.com/products/BTC-USD/trades?limit=1000`;
+[the product-trades documentation](https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-product-trades)
+documents pagination and a default limit of 1,000. That page can cover less
+than the requested range, so unavailable buckets remain blank.
 
-| Window | Candle interval | Full closed-candle count | Update trigger |
-| --- | --- | --- | --- |
-| 5 minutes | 60 s | 5–6 | New closed minute |
-| 30 minutes | 60 s | 30–31 | New closed minute |
-| 1 hour | 60 s | 60–61 | New closed minute |
-| 24 hours | 300 s | 288–289 | New closed five-minute candle |
-| 7 days | 3,600 s | 168–169 | New closed hour |
+Both were verified on 2026-10-12 in HTTP/1.0 with the embedded Mozilla roots.
+Bitstamp returned 3,513 trades / 358,326 bytes for the hour; Coinbase returned
+1,000 trades / 119,428 bytes. The exact fixtures, timing, framing and
+independently calculated OHLC references are in
+[the candle-trades probe report](../test/candle_trades_probe_report.json).
 
-Only closed candles are plotted, timestamped at close. Rows are validated for order, duplicates, interval alignment, coverage, recency and finite positive prices. Live data overlays its actual timestamp bucket. No synthetic history or invented gap filling is used. Only the selected window fetches history; all caches persist in flash. The three short windows share incoming one-minute candles. Incremental requests begin at the first missing closed candle in the current range, including internal gaps. Kraken gets `since` with one-candle overlap; Bitstamp gets the missing count and an explicit closed end time. A new one-candle response is valid. Merging preserves existing points, replaces matching timestamps, inserts missing points in order and discards points outside the current range. The 5-minute range initially has five or six minute-resolution historical points. The graph connects these points at their actual candle spacing and includes five-second live samples retained since boot; live prices continue independently.
+A 512-byte object pool streams trades into 21 bounded OHLC records. The
+parser validates finite prices, timestamps, IDs and complete response framing,
+with bounds of 50,000 trades, 4 MiB and a 20-second body deadline. It yields
+to the worker scheduler every 64 trades. UTC milliseconds and trade IDs
+preserve chronological opens/closes, including Bitstamp's second-level dates.
+Prices are genuine USD; no present-day FX rate is applied to old USD history.
+These calls share each provider's quote/history quota, use at least five
+seconds between requests, and normal checks are spaced at one minute.
+Healthy streams suppress completed bootstrap downloads. History traffic
+does not follow the 100 ms tube timer. See [candle storage and scale](CANDLE_CHART.md).
+
+Kraken `/0/public/OHLC` and Bitstamp `/api/v2/ohlc/btcusd/` parsing remains
+covered by the legacy cache compatibility tests, but the live candle chart
+uses individual trades rather than close-only history.
 
 ## OTA endpoint
 
 The updater reads `https://raw.githubusercontent.com/jeebot678/bitcoin-nixie-clock/main/ota/manifest.json` and accepts firmware only from the same repository's signed, versioned release URL. These public downloads need no GitHub token on the device. GitHub-owned HTTPS redirects are allowlisted. The manifest signature also binds the binary URL, hash, size, version and board. See [GitHub releases documentation](https://docs.github.com/en/rest/releases/releases) and [Espressif OTA/rollback documentation](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/ota.html).
+
+## Initial short-range endpoint check
+
+The earlier minute-transactions / 100-trades check and exact fixtures remain in
+[the recent-trades probe report](../test/recent_trades_probe_report.json).
+The live candle chart now uses the routes and 1,000-trade fallback described above.

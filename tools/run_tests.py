@@ -33,7 +33,8 @@ def main():
     for name,sources,args in [
         ("core_tests",["test/host/core_tests.cpp"],["test/live_fixtures",str(epoch),str(history_epoch)]),
         ("hardware_tests",["test/host/hardware_tests.cpp","src/Display.cpp","src/Provisioning.cpp"],[]),
-        ("runtime_tests",["test/host/runtime_tests.cpp","src/Display.cpp","src/Provisioning.cpp","src/HistoryStore.cpp"],[]),
+        ("runtime_tests",["test/host/runtime_tests.cpp","src/Display.cpp","src/Provisioning.cpp","src/HistoryStore.cpp","src/CandleStore.cpp"],[]),
+        ("candle_tests",["test/host/candle_tests.cpp","src/CandleStore.cpp","src/Display.cpp"],[]),
         ("history_tests",["test/host/history_tests.cpp","src/HistoryStore.cpp"],[]),
         ("market_tests",["test/host/market_tests.cpp"],["test/live_fixtures",str(epoch),str(history_epoch)]),
         ("live_tests",["test/host/live_tests.cpp"],["test/live_fixtures"]),

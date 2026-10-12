@@ -13,7 +13,7 @@ btc::History full(uint8_t window,uint32_t epoch){
 void repairChecksum(std::vector<uint8_t>&file){btc::cachePut32(file.data()+28,btc::cacheCrc(btc::cacheCrc(UINT32_MAX,file.data(),28),file.data()+32,file.size()-32)^UINT32_MAX);}
 int main(){
   const uint32_t now=1800000000;
-  const uint32_t frequencies[]={500,2000,30000,300000,3600000},ranges[]={300,1800,3600,86400,604800};
+  const uint32_t frequencies[]={100,500,1500,10000,60000},ranges[]={30,60,300,1800,3600};
   for(unsigned w=0;w<5;++w){assert(config::kRefreshMs[w]==frequencies[w]&&config::kWindowSeconds[w]==ranges[w]);}
   assert(config::kRefreshPin==35&&config::kTimelinePin==34);
   btc::History histories[5];HistoryStore store;assert(store.begin(histories));
@@ -22,36 +22,50 @@ int main(){
   btc::History rebooted[5];HistoryStore afterRestart;assert(afterRestart.begin(rebooted));
   for(uint8_t w=0;w<5;++w){assert(rebooted[w].count==histories[w].count);assert(afterRestart.savedEpoch(w)==now);assert(btc::makePlot(rebooted[w],now,ranges[w],0,0).valid);}
   // Real firmware views fit every legal cache while reclaiming unused RAM.
-  btc::Sample p5[7]={},p30[32]={},p60[62]={},pDay[290]={},pWeek[170]={};
-  btc::HistoryView bounded[5]={{p5,7},{p30,32},{p60,62},{pDay,290},{pWeek,170}};
+  btc::Sample p5[32]={},p30[62]={},p60[7]={},pDay[32]={},pWeek[62]={};
+  btc::HistoryView bounded[5]={{p5,32},{p30,62},{p60,7},{pDay,32},{pWeek,62}};
   HistoryStore boundedStore;assert(boundedStore.begin(bounded));
   for(unsigned i=0;i<5;++i)assert(bounded[i].count==histories[i].count&&bounded[i].count<=bounded[i].capacity);
   assert(sizeof(p5)+sizeof(p30)+sizeof(p60)+sizeof(pDay)+sizeof(pWeek)<7000);
   btc::Sample smallStorage[1]={};btc::HistoryView tooSmall(smallStorage,1);btc::CacheMetadata smallMetadata;
-  File fullFile=SPIFFS.open("/history-0-0.bin","r");assert(!btc::readHistoryCache(fullFile,0,smallMetadata,&tooSmall)&&!tooSmall.count);fullFile.close();
+  File fullFile=SPIFFS.open("/history-v2-0-0.bin","r");assert(!btc::readHistoryCache(fullFile,0,smallMetadata,&tooSmall)&&!tooSmall.count);fullFile.close();
   btc::History independent=histories[0];assert(independent.samples!=histories[0].samples);
   independent.samples[0].price+=100;assert(independent.samples[0].price!=histories[0].samples[0].price);
   // A two-day outage retains the five-day overlap with its original timestamps,
   // requests only the missing 48 hourly candles, and merges without duplicates.
-  const uint32_t later=now+2*86400;uint8_t w=4;
-  assert(btc::trimHistory(rebooted[w],w,later));assert(rebooted[w].count==121);
+  const uint32_t later=now+120;uint8_t w=4;
+  assert(btc::trimHistory(rebooted[w],w,later));assert(rebooted[w].count==59);
   assert(btc::missingHistoryStart(rebooted[w],w,later)==now);
-  auto missingPlot=btc::makePlot(rebooted[w],later,ranges[w],0,0);assert(!(missingPlot.valid&(1U<<20)));
-  btc::History delta;for(uint32_t close=now+3600;close<=later;close+=3600)assert(delta.add(close,90000));
-  assert(delta.count==48&&btc::mergeHistory(rebooted[w],delta,w,later));assert(rebooted[w].count==169);
+  auto missingPlot=btc::makePlot(rebooted[w],later,ranges[w],0,0);assert(missingPlot.valid&&rebooted[w].samples[rebooted[w].count-1].timestamp==now);
+  btc::History delta;for(uint32_t close=now+60;close<=later;close+=60)assert(delta.add(close,90000));
+  assert(delta.count==2&&btc::mergeHistory(rebooted[w],delta,w,later));assert(rebooted[w].count==61);
   assert(!btc::missingHistoryStart(rebooted[w],w,later));assert(!btc::mergeHistory(rebooted[w],delta,w,later));
   assert(afterRestart.save(w,rebooted[w],later));
+  // Moved detents migrate the old 5 min / 30 min / 1 h files without touching
+  // their original bytes, even if new-file writing is interrupted.
+  auto currentFiles=fsMock().files;fsMock().files.clear();
+  for(uint8_t target=2;target<5;++target){
+    auto old=full(target,now);btc::CacheMetadata meta;meta.epoch=now;meta.generation=7;
+    std::string path="/history-"+std::to_string(target-2)+"-0.bin";File file=SPIFFS.open(path.c_str(),"w");
+    assert(btc::writeHistoryCache(file,old,target,meta));file.close();fsMock().files[path][5]=target-2;repairChecksum(fsMock().files[path]);
+  }
+  auto legacyFiles=fsMock().files;btc::History migrated[5];HistoryStore migration;assert(migration.begin(migrated));
+  for(uint8_t target=2;target<5;++target){assert(migrated[target].count==full(target,now).count&&migration.savedEpoch(target)==now);assert(fsMock().files["/history-"+std::to_string(target-2)+"-0.bin"]==legacyFiles["/history-"+std::to_string(target-2)+"-0.bin"]);}
+  btc::History restored[5];HistoryStore durable;assert(durable.begin(restored));for(unsigned i=2;i<5;++i)assert(restored[i].count==migrated[i].count);
+  fsMock().files=legacyFiles;fsMock().writeBudget=10;HistoryStore interrupted;assert(interrupted.begin(restored));
+  for(const auto& file:legacyFiles)assert(fsMock().files[file.first]==file.second);fsMock().writeBudget=SIZE_MAX;
+  fsMock().files=currentFiles;
   // A hole in the middle is repaired even when the newest candle exists.
-  btc::History gap=full(2,now);uint32_t hole=gap.samples[12].timestamp;
-  memmove(gap.samples+12,gap.samples+13,(gap.count-13)*sizeof(btc::Sample));--gap.count;
+  btc::History gap=full(2,now);uint32_t hole=gap.samples[2].timestamp;
+  memmove(gap.samples+2,gap.samples+3,(gap.count-3)*sizeof(btc::Sample));--gap.count;
   assert(btc::missingHistoryStart(gap,2,now)==hole-60);
   btc::History single;assert(single.add(hole,83000));assert(btc::mergeHistory(gap,single,2,now));assert(!btc::missingHistoryStart(gap,2,now));
   // Boundary and clock handling: no aging against epoch 0, no shifting dates,
   // expired windows require a full fetch, and a one-candle delta is sufficient.
   btc::History shortWindow=full(0,now);assert(!btc::trimHistory(shortWindow,0,0));
-  assert(!btc::missingHistoryStart(shortWindow,0,now+59));assert(btc::missingHistoryStart(shortWindow,0,now+60)==now);
+  assert(!btc::missingHistoryStart(shortWindow,0,now));assert(btc::missingHistoryStart(shortWindow,0,now+1)==now);
   assert(btc::trimHistory(shortWindow,0,later)&&!shortWindow.count);
-  assert(btc::missingHistoryStart(shortWindow,0,later)==btc::firstHistoryClose(0,later)-60);
+  assert(btc::missingHistoryStart(shortWindow,0,later)==btc::firstHistoryClose(0,later)-1);
   // Interrupted saves at every header/payload offset leave the prior snapshot.
   auto committed=fsMock().files;auto next=full(0,now+60);
   for(size_t cut=0;cut<btc::kCacheHeaderSize+next.count*btc::kCacheSampleSize;++cut){
@@ -62,9 +76,9 @@ int main(){
   }
   fsMock().files=committed;fsMock().writeBudget=SIZE_MAX;
   btc::History copy[5];HistoryStore writer;writer.begin(copy);assert(writer.save(0,next,now+60));
-  auto pristine=fsMock().files;auto newest=pristine["/history-0-1.bin"];
+  auto pristine=fsMock().files;auto newest=pristine["/history-v2-0-1.bin"];
   for(size_t offset=0;offset<newest.size();++offset){
-    fsMock().files=pristine;fsMock().files["/history-0-1.bin"][offset]^=1;
+    fsMock().files=pristine;fsMock().files["/history-v2-0-1.bin"][offset]^=1;
     HistoryStore reader;reader.begin(copy);assert(reader.savedEpoch(0)==now);
   }
   // Even correctly checksummed records reject wrong schema/range, out-of-order,
@@ -78,15 +92,15 @@ int main(){
     if(mutation==4)memset(bad.data()+36,0,8);
     if(mutation==5)btc::cachePut32(bad.data()+44,btc::cacheGet32(bad.data()+32));
     if(mutation==6)btc::cachePut32(bad.data()+24,301);
-    repairChecksum(bad);fsMock().files=pristine;fsMock().files["/history-0-1.bin"]=bad;
+    repairChecksum(bad);fsMock().files=pristine;fsMock().files["/history-v2-0-1.bin"]=bad;
     HistoryStore reader;reader.begin(copy);assert(reader.savedEpoch(0)==now);
   }
   fsMock().failMount=true;HistoryStore unavailable;assert(!unavailable.begin(copy));assert(!unavailable.save(0,next,now+60));fsMock().failMount=false;
   fsMock().files=committed;HistoryStore failedWrite;failedWrite.begin(copy);fsMock().failOpen=true;assert(!failedWrite.save(0,next,now+60));fsMock().failOpen=false;
   // Generation rollover must still select the later intact slot.
-  File old("/history-0-0.bin","w");btc::CacheMetadata metadata;metadata.epoch=now;metadata.generation=UINT32_MAX;
+  File old("/history-v2-0-0.bin","w");btc::CacheMetadata metadata;metadata.epoch=now;metadata.generation=UINT32_MAX;
   assert(btc::writeHistoryCache(old,histories[0],0,metadata));old.close();
-  fsMock().files.erase("/history-0-1.bin");
-  HistoryStore rollover;rollover.begin(copy);assert(rollover.save(0,next,now+60));HistoryStore finalBoot;finalBoot.begin(copy);assert(finalBoot.savedEpoch(0)==now+60);assert(btc::cacheGet32(fsMock().files["/history-0-1.bin"].data()+16)==0);
+  fsMock().files.erase("/history-v2-0-1.bin");
+  HistoryStore rollover;rollover.begin(copy);assert(rollover.save(0,next,now+60));HistoryStore finalBoot;finalBoot.begin(copy);assert(finalBoot.savedEpoch(0)==now+60);assert(btc::cacheGet32(fsMock().files["/history-v2-0-1.bin"].data()+16)==0);
   std::cout<<"PASS: all five persistent ranges; reboot restore; 2-day incremental repair; gaps, duplicates, clock boundaries, every truncated-write/corrupted-byte offset, invalid records, storage failures and generation rollover\n";
 }

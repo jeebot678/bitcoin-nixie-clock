@@ -98,13 +98,14 @@ bool writeHistoryCache(Writer& writer, const HistoryView& history, uint8_t windo
   return true;
 }
 template<class Reader>
-bool readHistoryCache(Reader& reader, uint8_t window, CacheMetadata& metadata, HistoryView* history = nullptr) {
+bool readHistoryCache(Reader& reader, uint8_t window, CacheMetadata& metadata, HistoryView* history = nullptr,uint8_t fileWindow=255) {
   if (history) history->count = 0;
   if (window >= 5) return false;
   uint8_t header[kCacheHeaderSize], bytes[kCacheSampleSize];
   if (reader.readBytes(reinterpret_cast<char*>(header), sizeof(header)) != sizeof(header)) return false;
   uint32_t count = cacheGet32(header + 24), epoch = cacheGet32(header + 20);
-  if (cacheGet32(header) != 0x48435442 || header[4] != 1 || header[5] != window || header[6] || header[7] ||
+  if(fileWindow==255)fileWindow=window;
+  if (cacheGet32(header) != 0x48435442 || header[4] != 1 || header[5] != fileWindow || header[6] || header[7] ||
       cacheGet32(header + 8) != config::kWindowSeconds[window] || cacheGet32(header + 12) != config::kCandleSeconds[window] ||
       !count || count > kMaxCandles || epoch < config::kMinimumEpoch || reader.size() != kCacheHeaderSize + count * kCacheSampleSize) return false;
   if(history&&count>history->capacity)return false;

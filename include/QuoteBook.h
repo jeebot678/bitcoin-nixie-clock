@@ -25,7 +25,7 @@ struct DisplayQuote {
 class QuoteBook {
  public:
   static constexpr uint32_t kMaximumAgeMs=5000;
-  static constexpr unsigned kDepth=3;
+  static constexpr unsigned kDepth=12;
   void put(double price,uint8_t source,uint32_t receivedAt,uint32_t timestamp) {
     if(source>=kSourceCount||!validPrice(price))return;
     auto& latest=entries_[source][heads_[source]];
@@ -40,7 +40,7 @@ class QuoteBook {
     const uint32_t previousDigits=validPrice(previous)?uint32_t(std::floor(previous+0.5)):0;
     // Prefer a genuine multi-digit change. Keep display deadlines independent
     // of fetching; if none differs, use a real quote and request another source.
-    for(unsigned changed=0;changed<2;++changed)for(uint32_t age:{1500U,kMaximumAgeMs}){
+    for(unsigned minimum:{2U,1U,0U})for(uint32_t age:{1500U,kMaximumAgeMs}){
       const DisplayQuote* best=nullptr;unsigned bestChanges=0;bool bestOther=false;uint32_t bestAge=UINT32_MAX;
       for(size_t offset=1;offset<=kSourceCount;++offset){
         size_t index=(previousSource+offset)%kSourceCount;
@@ -49,7 +49,7 @@ class QuoteBook {
           if(!validPrice(quote.price)||quote.price>=999999.5||receiptAge>age||
               (kSources[index].usdt&&!fxFresh)||!validPrice(reference)||std::abs(quote.price/reference-1)>0.05)continue;
           unsigned differences=changedDigits(previousDigits,uint32_t(std::floor(quote.price+0.5)));
-          if(!changed&&!differences)continue;
+          if(differences<minimum)continue;
           bool other=index!=previousSource;
           if(!best||differences>bestChanges||(differences==bestChanges&&other>bestOther)||
               (differences==bestChanges&&other==bestOther&&receiptAge<bestAge)){

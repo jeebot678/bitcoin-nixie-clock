@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <time.h>
+#include <sys/time.h>
 #include "MarketClient.h"
 #include "OtaUpdate.h"
 #include "LivePrice.h"
@@ -18,7 +19,7 @@ std::atomic<uint32_t> stackFree{0};
 market::Result response;
 class BoundedReader {
  public:
-  BoundedReader(WiFiClient& stream, size_t limit) : stream_(stream), left_(limit), deadline_(millis()+12000) {}
+  BoundedReader(WiFiClient& stream, size_t limit) : stream_(stream), left_(limit), deadline_(millis()+20000) {}
   int read() {
     if (!left_ || btc::due(millis(),deadline_)) return -1;
     while (!stream_.available()) {
@@ -47,24 +48,27 @@ int apiError(JsonVariantConst root) {
 }
 void fetch(const market::Request& request) {
   response.ok=false;response.deferred=false; response.status=0; response.retryAfterMs=0;
-  response.quote={}; response.history.count=0; response.request=request;
+  response.quote={}; response.history.count=0; response.candles={}; response.request=request;
   if (WiFi.status()!=WL_CONNECTED || time(nullptr)<config::kMinimumEpoch) return;
   bool history=request.kind==market::Kind::History;
   if (request.source>=btc::kSourceCount || request.window>=5) return;
+  bool candleHistory=request.kind==market::Kind::Candles;
+  bool trades=(history&&request.window<2)||candleHistory;
+  if(trades&&request.source!=0&&request.source!=2)return;
   uint32_t endEpoch=request.epoch;
   uint32_t historyStart=history?btc::historyRequestStart(request.window,request.epoch,request.start):0;
-  if(history&&request.source==2){
+  if(history&&!trades&&request.source==2){
     endEpoch=std::min<uint32_t>(request.epoch,historyStart+24*config::kCandleSeconds[request.window]);
   }
-  size_t capacity=history?btc::historyCapacity(request.source==2,request.window,endEpoch,historyStart):2048;
-  bool allowPause=request.kind==market::Kind::Ota;
-  if (!live::prepareHttp(allowPause?4096:capacity,30000,false,allowPause)){response.deferred=true;return;}
+  size_t capacity=trades?512:history?btc::historyCapacity(request.source==2,request.window,endEpoch,historyStart):2048;
+  bool allowPause=request.kind==market::Kind::Ota||candleHistory;
+  if (!live::prepareHttp(request.kind==market::Kind::Ota?4096:capacity,30000,false,allowPause)){response.deferred=true;return;}
   btc::TlsLease handshake;
   uint32_t waitingAt=millis();
   while (!handshake.acquire() && uint32_t(millis()-waitingAt)<15000) delay(5);
   if (!handshake){response.deferred=true;return;}
   // A stream handshake can finish and consume RAM after the first reservation.
-  if (!live::prepareHttp(allowPause?4096:capacity,30000,true,allowPause)){response.deferred=true;return;}
+  if (!live::prepareHttp(request.kind==market::Kind::Ota?4096:capacity,30000,true,allowPause)){response.deferred=true;return;}
   if (request.kind==market::Kind::Ota) {
     response.ok=ota::checkAndInstall();return;
   }
@@ -76,7 +80,8 @@ void fetch(const market::Request& request) {
     Serial.printf("Market JSON allocation failed: %u free; largest %u\n",ESP.getFreeHeap(),ESP.getMaxAllocHeap());
     return;
   }
-  if (!history) url=btc::kSources[request.source].url;
+  if (!history&&!candleHistory) url=btc::kSources[request.source].url;
+  else if(trades)url=request.source==2?String("https://www.bitstamp.net/api/v2/transactions/btcusd/?time=")+String(request.window<2?"minute":"hour"):String("https://api.exchange.coinbase.com/products/BTC-USD/trades?limit=")+String(candleHistory?1000U:100U);
   else {
     uint32_t interval=config::kCandleSeconds[request.window];
     uint32_t start=btc::historyRequestStart(request.window,request.epoch,request.start);
@@ -97,10 +102,11 @@ void fetch(const market::Request& request) {
   http.addHeader("Accept-Encoding","identity"); http.addHeader("Cache-Control","no-cache");
   const char* headers[]={"Retry-After","Age","Date","Content-Type","Content-Encoding","Transfer-Encoding"};
   http.collectHeaders(headers,6);
+  size_t maximum=candleHistory?4U*1024*1024:history?160000:8192;
   response.status=http.GET();
   response.epoch=uint32_t(time(nullptr));
   response.retryAfterMs=btc::retryAfter(http.header("Retry-After").c_str(),response.epoch);
-  if (response.status==200 && http.getSize()<=int(history ? 160000 : 8192) &&
+  if (response.status==200 && http.getSize()<=int(maximum) &&
       http.header("Content-Type").startsWith("application/json") &&
       (http.header("Content-Encoding").isEmpty() || http.header("Content-Encoding")=="identity") &&
       http.header("Transfer-Encoding").isEmpty()) {
@@ -110,7 +116,16 @@ void fetch(const market::Request& request) {
     // All providers supply HTTP Date. This catches old cached responses even
     // when the ticker itself has no price timestamp.
     if (!cached && btc::freshTimestamp(serverDate,response.epoch,20)) {
-      BoundedReader reader(*http.getStreamPtr(),history ? 160000 : 8192);
+      size_t bound=maximum;if(http.getSize()>=0)bound=std::min<size_t>(bound,http.getSize());
+      BoundedReader reader(*http.getStreamPtr(),bound);
+      if(candleHistory){
+        uint64_t utcMs=uint64_t(response.epoch)*1000;
+#ifdef ARDUINO
+        timeval value;gettimeofday(&value,nullptr);utcMs=uint64_t(value.tv_sec)*1000+unsigned(value.tv_usec)/1000;
+#endif
+        response.ok=btc::parseTradeCandles(reader,document,request.source==2,request.window,utcMs,response.candles,response.quote,[](){delay(1);});http.end();tls.stop();return;
+      }
+      if(trades){response.ok=btc::parseRecentTrades(reader,document,request.source==2,request.window,response.epoch,response.history);http.end();tls.stop();return;}
       if (document.capacity()) {
         DeserializationError error;
         StaticJsonDocument<768> filter;

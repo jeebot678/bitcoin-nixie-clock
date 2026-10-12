@@ -4,11 +4,13 @@
 #include <cstdio>
 #include <cstring>
 #include "HistoryCache.h"
+#include "CandleChart.h"
 
 namespace btc {
 struct Quote {
   double price = 0, usdtUsd = 0;
   uint32_t timestamp = 0; // Zero means endpoint provides no price timestamp.
+  uint64_t timestampMs = 0;
 };
 inline bool number(JsonVariantConst value, double& result) {
   if (value.is<const char*>()) {
@@ -46,6 +48,11 @@ inline uint32_t isoTimestamp(const char* string) {
   if (strcmp(suffix, "Z")) return 0;
   return epoch(y,m,d,h,n,s);
 }
+inline uint64_t isoTimestampMs(const char* value){
+  uint32_t seconds=isoTimestamp(value);if(!seconds)return 0;
+  unsigned fraction=0;if(value[19]=='.'){const char* p=value+20;for(unsigned i=0;i<3;++i){fraction*=10;if(*p>='0'&&*p<='9')fraction+=unsigned(*p++-'0');}}
+  return uint64_t(seconds)*1000+fraction;
+}
 inline uint32_t numericTimestamp(JsonVariantConst value, bool millis = false) {
   double result;
   if (!number(value, result) || result < 0 || floor(result) != result) return 0;
@@ -72,7 +79,7 @@ inline bool parseQuote(Provider provider, JsonVariantConst root, uint32_t now, Q
   bool hasTimestamp = false;
   switch (provider) {
     case Provider::Coinbase:
-      value = root["price"]; quote.timestamp = isoTimestamp(root["time"]); hasTimestamp = true; break;
+      value = root["price"]; quote.timestamp = isoTimestamp(root["time"]); quote.timestampMs=isoTimestampMs(root["time"]); hasTimestamp = true; break;
     case Provider::Kraken:
       if (!root["error"].is<JsonArrayConst>() || root["error"].size()) return false;
       value = root["result"]["XXBTZUSD"]["c"][0];
@@ -102,6 +109,7 @@ inline bool parseQuote(Provider provider, JsonVariantConst root, uint32_t now, Q
       if (!equals(root["code"],"00000") || root["data"].size() != 1 || !equals(root["data"][0]["symbol"],"BTCUSDT")) return false;
       value = root["data"][0]["lastPr"]; quote.timestamp = numericTimestamp(root["data"][0]["ts"],true); hasTimestamp = true; break;
   }
+  if(!quote.timestampMs&&quote.timestamp)quote.timestampMs=uint64_t(quote.timestamp)*1000;
   return number(value, quote.price) && validPrice(quote.price) && (!hasTimestamp || freshTimestamp(quote.timestamp, now));
 }
 inline void quoteFilter(JsonDocument& filter,Provider provider){
@@ -129,6 +137,65 @@ inline void historyFilter(JsonDocument& filter, bool bitstamp) {
     filter["error"] = true;
     filter["result"]["XXBTZUSD"][0][0] = true;
     filter["result"]["XXBTZUSD"][0][4] = true;
+  }
+}
+// Stream one trade object at a time: a whole minute of trades never requires
+// a whole-response JSON allocation. Keep the newest trade ID per real second.
+template<class Reader>
+bool parseRecentTrades(Reader& reader,JsonDocument& document,bool bitstamp,uint8_t window,uint32_t now,HistoryView& history){
+  history.count=0;if(window>=2)return false;
+  auto next=[&](){int c;do{c=reader.read();}while(c==' '||c=='\r'||c=='\n'||c=='\t');return c;};
+  if(next()!='[')return false;
+  StaticJsonDocument<256> filter;filter["price"]=true;filter[bitstamp?"date":"time"]=true;filter[bitstamp?"tid":"trade_id"]=true;
+  uint64_t ids[62]={};unsigned rows=0;int c=next();
+  if(c==']')return next()==-1;
+  for(;;){
+    if(c!='{'||++rows>4096)return false;
+    struct PrefixReader{Reader& source;bool first=true;explicit PrefixReader(Reader& r):source(r){}int read(){if(first){first=false;return '{';}return source.read();}size_t readBytes(char* out,size_t n){size_t i=0;for(;i<n;++i){int value=read();if(value<0)break;out[i]=char(value);}return i;}} item(reader);
+    document.clear();if(deserializeJson(document,item,DeserializationOption::Filter(filter),DeserializationOption::NestingLimit(6)))return false;
+    auto root=document.template as<JsonVariantConst>();double price,id;
+    uint32_t stamp=bitstamp?numericTimestamp(root["date"]):isoTimestamp(root["time"]);
+    if(!stamp||!number(root["price"],price)||!validPrice(price)||!number(root[bitstamp?"tid":"trade_id"],id)||id<1||id>9007199254740991.0||std::floor(id)!=id||stamp>uint64_t(now)+10)return false;
+    if(stamp>=now-config::kWindowSeconds[window]&&stamp<=now){
+      size_t at=0;while(at<history.count&&history.samples[at].timestamp<stamp)++at;
+      if(at<history.count&&history.samples[at].timestamp==stamp){if(uint64_t(id)>ids[at]){history.samples[at].price=price;ids[at]=uint64_t(id);}}
+      else{if(history.count>=std::min<unsigned>(62,history.capacity))return false;memmove(history.samples+at+1,history.samples+at,(history.count-at)*sizeof(Sample));memmove(ids+at+1,ids+at,(history.count-at)*sizeof(uint64_t));history.samples[at]={stamp,price};ids[at]=uint64_t(id);++history.count;}
+    }
+    c=next();if(c==']')return next()==-1;if(c!=',')return false;c=next();
+  }
+}
+// Keep every trade high/low while streaming a bounded object pool. Trade IDs
+// disambiguate open/close when Bitstamp exposes only whole-second timestamps.
+template<class Reader,class Yield>
+bool parseTradeCandles(Reader& reader,JsonDocument& document,bool bitstamp,uint8_t window,uint64_t nowMs,CandleSeries& candles,Quote& latest,Yield cooperate){
+  candles={};latest={};if(window>=5||nowMs<uint64_t(config::kMinimumEpoch)*1000)return false;
+  auto next=[&](){int c;do{c=reader.read();}while(c==' '||c=='\r'||c=='\n'||c=='\t');return c;};
+  if(next()!='[')return false;
+  StaticJsonDocument<256> filter;filter["price"]=true;filter[bitstamp?"date":"time"]=true;filter[bitstamp?"tid":"trade_id"]=true;
+  uint64_t openId[21]={},closeId[21]={},latestId=0;uint32_t rows=0;int c=next();
+  if(c==']')return next()==-1;
+  for(;;){
+    if(c!='{'||++rows>50000)return false;
+    struct PrefixReader{Reader& source;bool first=true;explicit PrefixReader(Reader& r):source(r){}int read(){if(first){first=false;return '{';}return source.read();}size_t readBytes(char* out,size_t n){size_t i=0;for(;i<n;++i){int value=read();if(value<0)break;out[i]=char(value);}return i;}} item(reader);
+    document.clear();if(deserializeJson(document,item,DeserializationOption::Filter(filter),DeserializationOption::NestingLimit(6)))return false;
+    auto root=document.template as<JsonVariantConst>();double price,id;
+    uint64_t stamp=bitstamp?uint64_t(numericTimestamp(root["date"]))*1000:isoTimestampMs(root["time"]);
+    if(!stamp||!number(root["price"],price)||!validPrice(price)||price>UINT32_MAX/100.0||!number(root[bitstamp?"tid":"trade_id"],id)||id<1||id>9007199254740991.0||std::floor(id)!=id||stamp>nowMs+10000)return false;
+    if(stamp<=nowMs){
+      uint32_t bucket=candleBucket(stamp,window),current=candleBucket(nowMs,window);unsigned slot=bucket%21;
+      if(bucket+20>=current){
+        auto before=candles.bars[slot];uint32_t offset=uint32_t(stamp-candleStart(bucket,window));
+        bool openTie=!openId[slot]||uint64_t(id)<openId[slot],closeTie=uint64_t(id)>closeId[slot];
+        candles.add(stamp,price,window,nowMs,openTie,closeTie);
+        if(before.bucket!=bucket||offset<before.openAt||(offset==before.openAt&&openTie))openId[slot]=uint64_t(id);
+        if(before.bucket!=bucket||offset>before.closeAt||(offset==before.closeAt&&closeTie))closeId[slot]=uint64_t(id);
+      }
+      if(stamp>latest.timestampMs||(stamp==latest.timestampMs&&uint64_t(id)>latestId)){
+        latest.price=price;latest.timestamp=uint32_t(stamp/1000);latest.timestampMs=stamp;latestId=uint64_t(id);
+      }
+    }
+    if(rows%64==0)cooperate();
+    c=next();if(c==']')return next()==-1;if(c!=',')return false;c=next();
   }
 }
 inline uint32_t historyRequestStart(uint8_t window, uint32_t epoch, uint32_t start = 0) {

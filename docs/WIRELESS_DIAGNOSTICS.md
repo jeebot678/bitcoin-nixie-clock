@@ -24,6 +24,10 @@ transfers, current/already-installed images and the post-activation retry limit.
 Version 1.0.16 adds active `http_kind`/`http_source`, `last_http_status`,
 `quote_request_pending`, `history_candles`, `history_saved_epoch`,
 `chart_columns_mask` and `chart_pixels` for diagnosing fetching versus drawing.
+Version 1.0.18 adds `price_transitions`, `price_changes` and
+`multi_digit_changes`, counting every actual frame since the last frequency
+change or return from blanking. These expose true 100 ms cadence/motion without
+requiring the collector to sample each frame.
 The chart mask contains real anchors; pixel count includes graphical connectors.
 `decoded=-1` means invalid input; an old `selected` can be retained.
 `initialized=false` means the setting remains a default. No Wi-Fi credentials
@@ -79,7 +83,7 @@ both switches run from POS5 to POS1. See [the mapping](PCB_PIN_MAP.md).
 ## Triggering an update
 
 ```sh
-python3 tools/clock_link.py ota --expect 1.0.17 --wait 240
+python3 tools/clock_link.py ota --expect 1.0.18 --wait 240
 ```
 
 First publish and verify the signed newer release and `main` manifest. The tool

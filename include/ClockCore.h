@@ -119,7 +119,7 @@ class PriceGuard {
   size_t pendingSource_ = 0;
   uint32_t pendingAt_ = 0;
 };
-constexpr size_t kMaxCandles = 300; // Largest range: 24 h of five-minute candles.
+constexpr size_t kMaxCandles = 64; // At most 61 seconds or 61 minute-close samples.
 // Preserve the full 64-bit quoted price while removing four padding bytes
 // per candle. GCC/Clang generate safe unaligned loads; cache encoding stays
 // explicit and compatible with existing 12-byte records on flash.
@@ -172,9 +172,9 @@ inline Plot makePlot(const HistoryView& history, uint32_t now, uint32_t window, 
   double low = 1e12, high = 0;
   for (size_t i = 0; i < 21; ++i) if (plot.valid & (1U << i)) { low = std::min(low, prices[i]); high = std::max(high, prices[i]); }
   if (!plot.valid) return plot;
-  double margin = std::max(10.0, (high - low) * 0.1);
+  double margin = std::max(0.5, (high - low) * 0.1);
   double center = (high + low) * 0.5;
-  double half = std::max(center * 0.0005, (high - low) * 0.5 + margin);
+  double half = std::max(1.0, (high - low) * 0.5 + margin);
   low = center - half; high = center + half;
   for (size_t i = 0; i < 21; ++i) if (plot.valid & (1U << i))
     plot.rows[i] = uint8_t(12 - std::min(12, std::max(0, int(std::lround((prices[i] - low) * 12 / (high - low))))));

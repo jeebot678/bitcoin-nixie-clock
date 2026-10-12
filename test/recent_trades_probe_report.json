@@ -1,0 +1,47 @@
+{
+  "checked_at_utc": "2026-10-12T23:13:49.465304+00:00",
+  "endpoints": {
+    "bitstamp": {
+      "url": "https://www.bitstamp.net/api/v2/transactions/btcusd/?time=minute",
+      "status": 200,
+      "size": 3876,
+      "trades": 38,
+      "epoch": 1791846829,
+      "sample": {
+        "amount": "0.00006167",
+        "date": "1791846828",
+        "price": "81930.98",
+        "tid": "653772502",
+        "type": "1"
+      },
+      "headers": {
+        "Date": "Mon, 12 Oct 2026 23:13:49 GMT",
+        "Age": null,
+        "Content-Type": "application/json",
+        "Content-Length": "3876",
+        "Retry-After": null
+      }
+    },
+    "coinbase": {
+      "url": "https://api.exchange.coinbase.com/products/BTC-USD/trades?limit=100",
+      "status": 200,
+      "size": 11934,
+      "trades": 100,
+      "epoch": 1791846829,
+      "sample": {
+        "trade_id": 1105200957,
+        "side": "buy",
+        "size": "0.00000052",
+        "price": "81916.05000000",
+        "time": "2026-10-12T23:13:44.924421Z"
+      },
+      "headers": {
+        "Date": "Mon, 12 Oct 2026 23:13:49 GMT",
+        "Age": "4",
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Length": null,
+        "Retry-After": null
+      }
+    }
+  }
+}

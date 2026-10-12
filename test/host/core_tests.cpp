@@ -98,9 +98,11 @@ void coreTests() {
   // Multi-digit real candidates win over a synthetic-looking $1 step, at any cadence.
   book.clear();book.put(84191.2,0,100,1800000000);book.put(84192.2,1,100,1800000000);book.put(84176.4,2,100,1800000000);
   assert(book.choose(101,84191,0,84191,false,selected)&&selected.price==84176.4);
+  book.clear();book.put(84192,1,3000,1800000000);book.put(84176,2,100,1800000000);
+  assert(book.choose(3100,84191,0,84191,false,selected)&&selected.price==84176); // Real multi-digit option inside 5 s outranks a one-digit-only newer quote.
   book.put(84166.4,2,120,1800000000);book.put(84166.4,2,130,1800000000);
   assert(book.choose(150,84166,2,84166,false,selected)&&std::floor(selected.price+0.5)!=84166);
-  assert(!book.choose(6000,84166,2,84166,false,selected));
+  assert(!book.choose(9000,84166,2,84166,false,selected));
   bool cosmetic=false;assert(btc::displayDollars(80000.1,80000,true,cosmetic)==80001&&cosmetic);
   assert(btc::displayDollars(80000.1,80001,true,cosmetic)==80000&&!cosmetic);
   assert(btc::displayDollars(80000,80000,true,cosmetic)==80001&&cosmetic);
@@ -178,8 +180,8 @@ void fixtures(const std::string& directory,uint32_t now,uint32_t historyEpoch) {
     assert(!btc::parseQuote(btc::kSources[i].provider,JsonVariantConst(),now,quote));
   }
   now=historyEpoch;
-  const char* windows[]={"5m","30m","hour","day","week"};
-  for(int provider=0;provider<2;++provider)for(uint8_t window=0;window<5;++window){
+  const char* windows[]={"unused","unused","5m","30m","hour"};
+  for(int provider=0;provider<2;++provider)for(uint8_t window=2;window<5;++window){
     DynamicJsonDocument doc(btc::historyCapacity(provider==1,window));StaticJsonDocument<1024> filter;btc::historyFilter(filter,provider==1);
     assert(!deserializeJson(doc,readFile(directory+"/"+(provider?"bitstamp_":"kraken_")+windows[window]+".json"),DeserializationOption::Filter(filter)));
     btc::History history;assert(btc::parseHistory(doc.as<JsonVariantConst>(),provider==1,window,now,history));

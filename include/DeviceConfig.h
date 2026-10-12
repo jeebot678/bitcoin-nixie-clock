@@ -18,11 +18,13 @@ constexpr uint16_t kRefreshMv[5] = {1774, 1328, 915, 490, 0};
 constexpr uint16_t kTimelineMv[5] = {1775, 1328, 909, 493, 0};
 constexpr uint16_t kDialToleranceMv = 160;
 constexpr uint32_t kDebounceMs = 150;
-constexpr uint32_t kRefreshMs[5] = {500, 2000, 30000, 300000, 3600000};
-constexpr uint32_t kWindowSeconds[5] = {300, 1800, 3600, 86400, 604800};
-constexpr uint32_t kCandleSeconds[5] = {60, 60, 60, 300, 3600};
-constexpr const char* kWindowNames[5] = {"5 minutes", "30 minutes", "1 hour", "24 hours", "7 days"};
-constexpr uint32_t kHistoryRefreshMs[5] = {60000, 60000, 60000, 300000, 3600000};
+constexpr uint32_t kRefreshMs[5] = {100, 500, 1500, 10000, 60000};
+constexpr uint32_t kWindowSeconds[5] = {30, 60, 300, 1800, 3600};
+// Short ranges store real per-second trade/live samples; others use minute closes.
+constexpr uint32_t kCandleSeconds[5] = {1, 1, 60, 60, 60};
+constexpr const char* kWindowNames[5] = {"30 seconds", "1 minute", "5 minutes", "30 minutes", "1 hour"};
+constexpr uint32_t kHistoryRefreshMs[5] = {60000, 60000, 60000, 60000, 60000};
+constexpr uint32_t kShortHistorySaveMs = 30000;
 constexpr uint32_t kHistorySaveRetryMs = 60000;
 constexpr uint32_t kQuoteMaxAgeSeconds = 120;
 constexpr uint32_t kFxMaxAgeMs = 120000, kFxRefreshMs = 60000;

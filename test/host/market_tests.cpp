@@ -38,24 +38,34 @@ int main(int argc,char** argv){assert(argc==4);std::string directory=argv[1];tes
   const char* names[]={"coinbase","kraken","bitstamp","gemini","bitfinex","binance","okx","kucoin","gate","bitget","mexc"};
   for(uint8_t source=0;source<11;++source){httpResponses()[btc::kSources[source].url]=fixture(directory+"/"+names[source]+".json");fetch({market::Kind::Quote,source,0,uint32_t(testEpoch)});assert(response.ok&&response.quote.price>80000);}
   testEpoch=time_t(strtoul(argv[3],nullptr,10));
-  const char* windows[]={"5m","30m","hour","day","week"};
-  for(uint8_t source=1;source<=2;++source)for(uint8_t window=0;window<5;++window){uint32_t interval=config::kCandleSeconds[window];
+  const char* windows[]={"unused","unused","5m","30m","hour"};
+  for(uint8_t source=1;source<=2;++source)for(uint8_t window=2;window<5;++window){uint32_t interval=config::kCandleSeconds[window];
     uint32_t start=btc::historyRequestStart(window,uint32_t(testEpoch));uint32_t end=source==2?std::min<uint32_t>(testEpoch,start+24*interval):testEpoch;
     std::string url=source==1?"https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval="+std::to_string(interval/60)+"&since="+std::to_string(start-interval):"https://www.bitstamp.net/api/v2/ohlc/btcusd/?step="+std::to_string(interval)+"&limit="+std::to_string((end/interval*interval-start)/interval)+"&end="+std::to_string(end/interval*interval-1)+"&exclude_current_candle=true";
     httpResponses()[url]=fixture(directory+"/"+(source==1?"kraken_":"bitstamp_")+windows[window]+".json");
     if(source==2){DynamicJsonDocument page(100000);assert(!deserializeJson(page,(const char*)httpResponses()[url].body.data(),httpResponses()[url].body.size()));auto rows=page["data"]["ohlc"].as<JsonArray>();while(rows.size()&&btc::numericTimestamp(rows[rows.size()-1]["timestamp"])+interval>end)rows.remove(rows.size()-1);std::string body;serializeJson(page,body);httpResponses()[url].body.assign(body.begin(),body.end());}fetch({market::Kind::History,source,window,uint32_t(testEpoch)});assert(response.ok&&response.history.count>2);
     auto reply=httpResponses()[url];reply.body.resize(reply.body.size()/2);httpResponses()[url]=reply;fetch({market::Kind::History,source,window,uint32_t(testEpoch)});assert(!response.ok);
   }
-  // One-candle and 48-hour delta requests use a bounded pool and the exact
-  // missing suffix. Old rows returned by Kraken cannot overwrite earlier data.
-  for(uint8_t source=1;source<=2;++source)for(unsigned rows:{1U,48U}){
-    uint8_t window=4;uint32_t step=3600,last=uint32_t(testEpoch)/step*step,start=last-rows*step;uint32_t end=source==2?std::min<uint32_t>(last,start+24*step):last;
-    std::string url=source==1?"https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=60&since="+std::to_string(start-step):"https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=3600&limit="+std::to_string((end-start)/step)+"&end="+std::to_string(end-1)+"&exclude_current_candle=true";
-    httpResponses()[url]=fixture(directory+"/"+(source==1?"kraken_":"bitstamp_")+"week_delta_"+std::to_string(rows)+".json");
-    if(source==2){DynamicJsonDocument page(100000);auto& reply=httpResponses()[url];assert(!deserializeJson(page,(const char*)reply.body.data(),reply.body.size()));auto items=page["data"]["ohlc"].as<JsonArray>();while(items.size()&&btc::numericTimestamp(items[items.size()-1]["timestamp"])+step>end)items.remove(items.size()-1);std::string body;serializeJson(page,body);reply.body.assign(body.begin(),body.end());}
-    fetch({market::Kind::History,source,window,uint32_t(testEpoch),start});assert(response.ok&&response.history.count==std::min<unsigned>(rows,source==2?24:rows));
-    assert(response.history.samples[0].timestamp==start+step&&response.history.samples[response.history.count-1].timestamp==end);
-    assert(btc::historyCapacity(source==2,window,uint32_t(testEpoch),start)<btc::historyCapacity(source==2,window));
+  // Recent transactions stream into one-second caches with a 512-byte pool.
+  StaticJsonDocument<4096> recentReport;assert(!deserializeJson(recentReport,readFile("test/recent_trades_probe_report.json")));
+  for(uint8_t source:{uint8_t(0),uint8_t(2)})for(uint8_t window=0;window<2;++window){
+    const char* name=source==2?"bitstamp":"coinbase";testEpoch=recentReport["endpoints"][name]["epoch"].as<uint32_t>();
+    std::string url=source==2?"https://www.bitstamp.net/api/v2/transactions/btcusd/?time=minute":"https://api.exchange.coinbase.com/products/BTC-USD/trades?limit=100";
+    httpResponses()[url]=fixture(directory+"/"+name+"_recent_trades.json");fetch({market::Kind::History,source,window,uint32_t(testEpoch)});
+    assert(response.ok&&response.history.count>2&&response.history.count<=61);
+    for(unsigned i=0;i<response.history.count;++i)assert(response.history.samples[i].timestamp>=testEpoch-config::kWindowSeconds[window]&&response.history.samples[i].timestamp<=testEpoch);
+    auto bad=httpResponses()[url];bad.body.pop_back();httpResponses()[url]=bad;fetch({market::Kind::History,source,window,uint32_t(testEpoch)});assert(!response.ok);
+  }
+  // Actual candle HTTP routes stream minute/hour transactions and Coinbase
+  // 1000-trade pages, with real high/low values and a 512-byte object pool.
+  DynamicJsonDocument candleReport(100000);assert(!deserializeJson(candleReport,readFile("test/candle_trades_probe_report.json")));
+  for(uint8_t source:{uint8_t(0),uint8_t(2)})for(uint8_t window=0;window<5;++window){
+    const char* name=source==2?"bitstamp":"coinbase";testEpoch=candleReport[name]["epoch"].as<uint32_t>();
+    std::string url=source==2?std::string("https://www.bitstamp.net/api/v2/transactions/btcusd/?time=")+(window<2?"minute":"hour"):"https://api.exchange.coinbase.com/products/BTC-USD/trades?limit=1000";
+    httpResponses()[url]=fixture(directory+"/"+name+"_candle_trades.json");fetch({market::Kind::Candles,source,window,uint32_t(testEpoch)});
+    assert(response.ok&&response.candles.count(window,uint64_t(testEpoch)*1000)&&response.quote.price>0);
+    auto expected=candleReport[name]["expected_candles"][std::to_string(window)].as<JsonObjectConst>();assert(response.candles.count(window,uint64_t(testEpoch)*1000)==expected.size());
+    auto truncated=httpResponses()[url];truncated.body.resize(truncated.body.size()-2);httpResponses()[url]=truncated;fetch({market::Kind::Candles,source,window,uint32_t(testEpoch)});assert(!response.ok);
   }
   testEpoch=time_t(strtoul(argv[2],nullptr,10));
   auto request=market::Request{market::Kind::Quote,0,0,uint32_t(testEpoch)};

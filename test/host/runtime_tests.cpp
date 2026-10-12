@@ -23,6 +23,7 @@ bool begin(){return true;}bool send(const Request&r){assert(!sent);outstanding=r
 bool receive(ResultLease&r){if(!ready)return false;r.value_=&queued;ready=false;return true;}
 ResultLease::~ResultLease(){if(value_)sent=false;}uint32_t stackRemaining(){return 4096;}
 void complete(bool ok=true,int status=200){queued={};queued.request=outstanding;queued.ok=ok;queued.status=status;queued.receivedAt=testMillis;queued.epoch=uint32_t(testEpoch);queued.quote.price=83300.0;queued.quote.usdtUsd=1;queued.quote.timestamp=uint32_t(testEpoch);
+  if(outstanding.kind==Kind::Candles){uint32_t current=btc::candleBucket(uint64_t(testEpoch)*1000,outstanding.window);for(unsigned col=0;col<21;++col)queued.candles.add(btc::candleStart(current-20+col,outstanding.window),83300,outstanding.window,uint64_t(testEpoch)*1000);}
   if(outstanding.kind==Kind::History){uint32_t step=config::kCandleSeconds[outstanding.window];for(uint32_t close=outstanding.start+step;close<=outstanding.epoch;close+=step)assert(queued.history.add(close,83300));}
   ready=true;}
 }
@@ -61,14 +62,14 @@ void settingsTests(){
   market::complete();processResult(testMillis);assert(guard.price==83300&&!guard.confirmed()&&needConfirmation);
   assert(nextQuoteAt==testMillis);
   packets.clear();refreshNixies(testMillis);draw(testMillis);unsigned liveDigits=0;for(const auto&p:packets)if(p.bus==VSPI)++liveDigits;assert(liveDigits==6);
-  testMillis+=8001;wifi.loop(testMillis);assert(!wifi.portalActive());packets.clear();draw(testMillis);assert(!showingSetup&&nextDrawAt==testMillis+1000);
-  assert(display::startupPending()); // A live quote alone must not start the chart reveal.
+  testMillis+=8001;wifi.loop(testMillis);assert(!wifi.portalActive());packets.clear();draw(testMillis);assert(!showingSetup&&display::startupAnimating()&&nextDrawAt==testMillis+config::kStartupFrameMs);
+  assert(display::startupAnimating()); // A first real candle starts the reveal immediately.
   schedule(testMillis);assert(!market::sent); // Background confirmation must not cut off stream startup.
   testMillis+=27000;schedule(testMillis);assert(market::sent); // Stream grace is bounded.
   // An independent live quote confirms the initial source in the background.
   live::pending.quote.price=83300;live::pending.quote.timestamp=uint32_t(testEpoch);live::pending.receivedAt=testMillis;live::pending.source=1;live::queued=true;processLive(testMillis);
   assert(guard.confirmed()&&!needConfirmation);live::healthy=true;market::complete();processResult(testMillis);
-  schedule(testMillis);assert(market::outstanding.kind==market::Kind::History);
+  schedule(testMillis);assert(market::outstanding.kind==market::Kind::Candles);
   unsigned before=market::calls;
   adc[35]=142;adc[34]=1328;readDials(testMillis);testMillis+=151;readDials(testMillis);
   assert(refreshDial.stable==4&&timelineDial.stable==1);schedule(testMillis);assert(market::calls==before);
@@ -76,20 +77,20 @@ void settingsTests(){
   Serial.input="ticks on\nticks on\n";serialCommands(testMillis);assert(logNixies);
   Serial.input="ticks off\nticks off\n";serialCommands(testMillis);assert(!logNixies);
   market::complete();processResult(testMillis);
-  packets.clear();draw(testMillis);assert(display::startupAnimating()&&nextDrawAt==testMillis+config::kStartupFrameMs);
+  display::begin();packets.clear();draw(testMillis);assert(display::startupAnimating()&&nextDrawAt==testMillis+config::kStartupFrameMs);
   testMillis+=273*config::kStartupCellMs;draw(testMillis);assert(display::startupAnimating());
-  testMillis+=273*config::kStartupCellMs;draw(testMillis);assert(!display::startupAnimating()&&nextDrawAt==testMillis+1000);
+  testMillis+=273*config::kStartupCellMs;draw(testMillis);assert(!display::startupAnimating()&&nextDrawAt==testMillis+2);
   liveReady=false;live::healthy=false; // Exercise REST fallback independently of stream suppression.
   for(int setting=0;setting<5;++setting){
     testMillis+=6000;refreshDial.stable=setting;fx.usd=1;fx.receivedAt=testMillis;nextQuoteAt=testMillis;
     for(uint32_t&deadline:nextHistoryAt)deadline=testMillis+1000000;
     schedule(testMillis);assert(market::outstanding.kind==market::Kind::Quote);assert(nextQuoteAt==testMillis+config::kRefreshMs[setting]);
-    market::complete();processResult(testMillis);unsigned calls=market::calls;testMillis+=100;schedule(testMillis);assert(market::calls==calls);
+    market::complete();processResult(testMillis);unsigned calls=market::calls;testMillis+=std::min<uint32_t>(100,config::kRefreshMs[setting]-1);schedule(testMillis);assert(market::calls==calls);
   }
   refreshDial.stable=4;testMillis+=61000;nextQuoteAt=testMillis+200000;fx.receivedAt=testMillis-61000;
   schedule(testMillis);assert(market::outstanding.kind==market::Kind::Fx);double oldPrice=guard.price;uint32_t oldReceived=lastQuoteReceived;
   market::complete();market::queued.quote.price=90000;processResult(testMillis);assert(guard.price==oldPrice&&lastQuoteReceived==oldReceived);
-  packets.clear();lastQuoteReceived=testMillis-btc::staleAfterMs(config::kRefreshMs[4])-1;draw(testMillis);assert(!packets.empty());
+  display::price(guard.price);packets.clear();lastQuoteReceived=testMillis-btc::staleAfterMs(config::kRefreshMs[4])-1;draw(testMillis);assert(!packets.empty());
   // A large quote waits for another provider rather than lighting an outlier.
   market::outstanding={market::Kind::Quote,3,1,uint32_t(testEpoch)};market::sent=true;inflight=true;market::complete();market::queued.quote.price=150000;processResult(testMillis);assert(guard.price==oldPrice);
 }
@@ -97,37 +98,38 @@ void cacheRuntimeTests(){
   liveReady=true;live::healthy=true;needDifferentQuote=false;
   testEpoch=1800000000;testMillis+=6000;timelineDial.stable=4;refreshDial.stable=4;fx.usd=1;fx.receivedAt=testMillis;
   guard.price=83300;guard.acceptedAt=testMillis;lastQuoteReceived=testMillis;lastPriceEpoch=uint32_t(testEpoch);
-  for(auto&state:rotation.states){state.availableAt=testMillis;state.failures=0;}
-  histories[4].count=0;for(uint32_t close=btc::firstHistoryClose(4,uint32_t(testEpoch));close<=testEpoch;close+=3600)assert(histories[4].add(close,83300));
-  historyDirty[4]=true;saveHistory(testMillis);assert(!historyDirty[4]&&historyStore.savedEpoch(4)==testEpoch);
+  for(auto& state:rotation.states){state.availableAt=testMillis;state.failures=0;}
+  candleSeries[4]={};uint64_t now=chartNowMs();uint32_t current=btc::candleBucket(now,4);
+  for(unsigned col=0;col<21;++col)assert(candleSeries[4].add(btc::candleStart(current-20+col,4),83300+col,4,now));
+  markCandleDirty(4,testMillis);nextCandleSave[4]=testMillis;for(unsigned iteration=0;iteration<5;++iteration)saveHistory(testMillis);
+  assert(candleStore.savedEpoch(4)==testEpoch&&!candleDirty[4]);candleBackfilled[4]=true;
   unsigned writes=fsMock().writes;saveHistory(testMillis);assert(fsMock().writes==writes);
   nextQuoteAt=testMillis+1800000;nextHistoryAt[4]=testMillis;unsigned calls=market::calls;schedule(testMillis);assert(market::calls==calls);
-  // Switching away and back changes draw timing, without refetching a complete cache.
   adc[34]=493;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(timelineDial.stable==3);
   adc[34]=142;testMillis+=25;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(timelineDial.stable==4);
   nextQuoteAt=testMillis+1800000;fx.receivedAt=testMillis;schedule(testMillis);assert(market::calls==calls);
-  // The actual main scheduler requests only the missing two days.
-  testEpoch+=2*86400;testMillis+=6000;nextHistoryAt[4]=testMillis;schedule(testMillis);
-  assert(market::sent&&market::outstanding.kind==market::Kind::History&&market::outstanding.start==1800000000);
-  assert(histories[4].count==121);market::complete();processResult(testMillis);assert(histories[4].count==169);saveHistory(testMillis);
-  assert(historyStore.savedEpoch(4)==testEpoch&&!historyDirty[4]);
-  // Before SNTP, a restored chart renders while current Nixies remain blank.
-  testEpoch=0;guard=btc::PriceGuard{};lastPriceEpoch=0;nextDrawAt=testMillis;
-  display::begin(); // A new boot must reveal a saved chart without a network fetch.
-  display::price(83300);display::message("SYNC","CLOCK",testMillis);packets.clear();draw(testMillis);
-  assert(!packets.empty());for(const auto&p:packets)if(p.bus==VSPI)for(int digit=1;digit<16;++digit)assert(p.bytes[digit]==0x80);
-  assert(display::startupAnimating());
-  testMillis+=273*config::kStartupCellMs;draw(testMillis);assert(display::startupAnimating());
+  // A restarted device draws the dated full OHLC snapshot before SNTP.
+  btc::CandleSeries restored[5];btc::CandleScale axes[5];CandleStore reboot;assert(reboot.begin(restored,axes));
+  assert(!memcmp(&restored[4],&candleSeries[4],sizeof(restored[4])));candleScales[4]=axes[4];
+  testEpoch=0;guard=btc::PriceGuard{};lastPriceEpoch=0;nextDrawAt=testMillis;display::begin();
+  display::message("SYNC","CLOCK",testMillis);packets.clear();draw(testMillis);
+  for(const auto& p:packets)if(p.bus==VSPI)for(int digit=1;digit<16;++digit)assert(p.bytes[digit]==0x80);
+  assert(display::startupAnimating());testMillis+=273*config::kStartupCellMs;draw(testMillis);
   testMillis+=273*config::kStartupCellMs;packets.clear();draw(testMillis);assert(!display::startupAnimating());
-  uint8_t registers[6][8]={};unsigned frames=0;
-  for(const auto&p:packets)if(p.bus==HSPI){++frames;for(unsigned slot=0;slot<6;++slot)registers[config::kMaxShiftOrder[slot]][p.bytes[slot*2]-1]=p.bytes[slot*2+1];}
-  assert(frames==8);auto chart=btc::makePlot(histories[4],historyStore.savedEpoch(4),config::kWindowSeconds[4],0,0);
-  for(uint8_t row=0;row<13;++row)for(uint8_t col=0;col<21;++col){auto p=led_matrix::mapPixel(row,col);assert(bool(registers[p.driver][p.digit]&(1U<<p.segmentBit))==bool((chart.valid&(1U<<col))&&chart.rows[col]==row));}
-  guard.price=83300;guard.acceptedAt=testMillis;lastPriceEpoch=1800172800;testEpoch=1800172800;
-  std::cout<<"PASS: actual runtime cache persistence, instant range recall, no redundant writes/fetches, two-day suffix repair and saved chart before SNTP\n";
+  auto frame=btc::makeCandles(candleSeries[4],candleScales[4],4,candleStore.savedTimeMs(4));auto chart=frame.plot(true);
+  uint8_t registers[6][8]={};unsigned frames=0;for(const auto& p:packets)if(p.bus==HSPI){++frames;for(unsigned slot=0;slot<6;++slot)registers[config::kMaxShiftOrder[slot]][p.bytes[slot*2]-1]=p.bytes[slot*2+1];}
+  assert(frames==8);for(unsigned row=0;row<13;++row)for(unsigned col=0;col<21;++col){auto p=led_matrix::mapPixel(row,col);assert(bool(registers[p.driver][p.digit]&(1U<<p.segmentBit))==btc::plotPixel(chart,row,col));}
+  testEpoch=1800000120;guard=btc::PriceGuard{};guard.accept(83300,0,testMillis);guard.accept(83300,1,testMillis);lastPriceEpoch=uint32_t(testEpoch);
+  // A lost stream requests dated transactions; cached old bars remain visible.
+  live::healthy=false;liveReady=false;nextHistoryAt[4]=testMillis;nextQuoteAt=testMillis+100000;for(auto& state:rotation.states)state.availableAt=testMillis;
+  schedule(testMillis);assert(market::sent&&market::outstanding.kind==market::Kind::Candles);
+  market::complete();processResult(testMillis);assert(candleSeries[4].count(4,chartNowMs())==21);
+  liveReady=true;live::healthy=true;
+  std::cout<<"PASS: actual OHLC runtime persistence, instant range recall, no redundant fetches, outage backfill and saved candle chart before SNTP\n";
 }
+
 void soak(){
-  liveReady=false; // REST-only availability/cooldown soak; stream recovery is checked separately.
+  liveReady=false;live::healthy=false;quotes.clear(); // REST-only availability/cooldown soak.
   // Two hours across the millis() rollover, including dial changes, transient
   // failures, source rotation, periodic history, FX and unchanged frames.
   uint32_t start=UINT32_MAX-100000;testMillis=start;
@@ -173,7 +175,7 @@ void nixieCadenceTests(){
   // A dial change takes effect immediately even with a network request active.
   testMillis+=100;refreshDial.stable=4;refreshDial.candidate=-1;nextDialsAt=testMillis;
   inflight=true;adc[35]=1774;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(refreshDial.stable==0&&nextNixieAt==testMillis);
-  lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(83342);assert(nextNixieAt==testMillis+500);inflight=false;
+  lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(83342);assert(nextNixieAt==testMillis+100);inflight=false;refreshDial.stable=1;
   // Once a stream is fresh, REST traffic is only needed for confirmation or fallback.
   needConfirmation=false;needDifferentQuote=false;live::healthy=true;fx.usd=1;fx.receivedAt=testMillis;nextQuoteAt=testMillis;for(auto&deadline:nextHistoryAt)deadline=testMillis+100000;
   unsigned calls=market::calls;schedule(testMillis);assert(market::calls==calls);
@@ -190,12 +192,12 @@ void nixieCadenceTests(){
   uint32_t deadline=nextNixieAt;testMillis=deadline+1005;lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(guard.price);assert(nextNixieAt==deadline+1500);
   // Confirming the default detent must not emit an early same-frequency frame.
   deadline=nextNixieAt;refreshDial.initialized=false;refreshDial.candidate=-1;
-  nextDialsAt=testMillis;adc[35]=1774;readDials(testMillis);testMillis+=151;readDials(testMillis);
-  assert(refreshDial.initialized&&refreshDial.stable==0&&nextNixieAt==deadline);
+  nextDialsAt=testMillis;adc[35]=1328;readDials(testMillis);testMillis+=151;readDials(testMillis);
+  assert(refreshDial.initialized&&refreshDial.stable==1&&nextNixieAt==deadline);
   std::cout<<"PASS: actual Nixie SPI frames at all five selected intervals, unchanged digits, newest stream values, blocked history/TLS, immediate dial changes, REST fallback, outage blanking and millis rollover\n";
 }
 void quoteSelectionRuntimeTests(){
-  testMillis+=6000;refreshDial.stable=0;guard=btc::PriceGuard{};quotes.clear();shownPrice=0;
+  testMillis+=6000;refreshDial.stable=1;guard=btc::PriceGuard{};quotes.clear();shownPrice=0;
   auto tick=[&](uint8_t provider,double value){live::pending.quote.price=value;live::pending.quote.timestamp=uint32_t(testEpoch);live::pending.receivedAt=testMillis;live::pending.source=provider;live::queued=true;processLive(testMillis);};
   tick(0,80010.25);tick(1,80017.6);tick(0,80010.25);
   for(unsigned i=0;i<100;++i)tick(1,80017.6);
@@ -210,11 +212,12 @@ void quoteSelectionRuntimeTests(){
   std::cout<<"PASS: actual runtime/SPI source rotation survives burst overwrite; expired alternatives never invent prices or change chart timestamps\n";
 }
 void startupAndDialRegressionTests(){
-  memset(recentPrices,0,sizeof(recentPrices));recentHead=0; // Fresh-boot chart samples.
+  for(auto& s:candleSeries)s={}; // Fresh-boot chart samples.
   testMillis+=6000;refreshDial=btc::Dial(0);guard=btc::PriceGuard{};quotes.clear();shownPrice=0;
   display::blankPrice();packets.clear();refreshNixies(testMillis);
   assert(packets.size()==1&&packets[0].selected==16&&packets[0].bytes[10]==0xC0);
   testMillis+=100;packets.clear();refreshNixies(testMillis);draw(testMillis);
+  packets.erase(std::remove_if(packets.begin(),packets.end(),[](const SpiPacket& p){return p.bus==HSPI;}),packets.end());
   assert(packets.size()==2&&packets[0].selected==16&&packets[1].selected==17);
   // The first valid quote must replace the startup chase on this same loop,
   // even if the dial previously had a deadline an hour away and no other
@@ -222,7 +225,7 @@ void startupAndDialRegressionTests(){
   nextNixieAt=testMillis+3600000;
   auto tick=[&](double price){live::pending.quote.price=price;live::pending.quote.timestamp=uint32_t(testEpoch);live::pending.receivedAt=testMillis;live::pending.source=0;live::queued=true;processLive(testMillis);};
   tick(80000.25);assert(guard.price==80000.25&&!guard.confirmed()&&needConfirmation);
-  packets.clear();refreshNixies(testMillis);assertPriceFrame(80000);assert(nextNixieAt==testMillis+500);
+  packets.clear();refreshNixies(testMillis);assertPriceFrame(80000);assert(nextNixieAt==testMillis+100);
   testMillis+=500;tick(80000.25);packets.clear();refreshNixies(testMillis);assertPriceFrame(80000);
   testMillis+=500;tick(80000.25);packets.clear();refreshNixies(testMillis);assertPriceFrame(80000);
   uint32_t received=lastQuoteReceived;uint32_t last=shownDigits;
@@ -240,7 +243,7 @@ void startupAndDialRegressionTests(){
   }
   assert(refreshDial.initialized&&refreshDial.stable==0&&nextNixieAt==testMillis-25);
   tick(80000.25);packets.clear();refreshNixies(testMillis);assertPriceFrame(80000);
-  uint32_t deadline=nextNixieAt;assert(deadline==testMillis+475);
+  uint32_t deadline=nextNixieAt;assert(deadline==testMillis+75);
   testMillis=deadline-1;packets.clear();refreshNixies(testMillis);assert(packets.empty());
   testMillis=deadline;tick(80000.25);refreshNixies(testMillis);assertPriceFrame(80000);
   // Background confirmation must leave a previously lit value usable.
@@ -299,17 +302,17 @@ void temporaryCadenceTests(){
       testMillis+=499;packets.clear();refreshNixies(testMillis);assert(packets.empty());
     }
     testMillis=start+30000;lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);
-    assert(!cadenceTestActive&&refreshPeriod()==3600000&&packets.size()==6&&nextNixieAt==testMillis+3600000);
+    assert(!cadenceTestActive&&refreshPeriod()==60000&&packets.size()==6&&nextNixieAt==testMillis+60000);
     assert(refreshDial.stable==4&&timelineDial.stable==3);
   }
   telemetry::queued.push_back(telemetry::Command::Cadence);remoteCommands(testMillis);assert(cadenceTestActive);
-  telemetry::queued.push_back(telemetry::Command::Chart);remoteCommands(testMillis);assert(!cadenceTestActive&&refreshPeriod()==3600000);
+  telemetry::queued.push_back(telemetry::Command::Chart);remoteCommands(testMillis);assert(!cadenceTestActive&&refreshPeriod()==60000);
   std::cout<<"PASS: bounded live-price 500 ms diagnostic writes six modules on every deadline, exposes override, retains dials, expires/cancels and handles millis rollover\n";
 }
 void assembledDialTests(){
   // Independent medians from the fresh range-first / frequency-second sweep.
   const uint16_t frequency[5]={1774,1328,915,490,142},range[5]={1775,1328,909,493,142};
-  const uint32_t periods[5]={500,2000,30000,300000,3600000},windows[5]={300,1800,3600,86400,604800};
+  const uint32_t periods[5]={100,500,1500,10000,60000},windows[5]={30,60,300,1800,3600};
   for(int position=0;position<5;++position){
     testMillis+=6000;nextDialsAt=testMillis;
     refreshDial=btc::Dial((position+4)%5);refreshDial.initialized=true;
@@ -329,6 +332,26 @@ void assembledDialTests(){
     }
   }
   std::cout<<"PASS: fresh assembled switch measurements select all five intended frequency/range settings, debounce, immediate real SPI output and unused/open-contact rejection\n";
+}
+void shortRangeAndMotionTests(){
+  testMillis+=6000;testEpoch=1800000600;for(auto& s:candleSeries)s={};
+  for(unsigned w=0;w<5;++w){candleSeries[w]={};candleScales[w]={};candleDirty[w]=false;nextCandleSave[w]=0;}
+  guard=btc::PriceGuard{};quotes.clear();refreshDial.stable=0;timelineDial.stable=0;shownPrice=0;needConfirmation=false;
+  uint32_t start=testMillis;unsigned writes=fsMock().writes;
+  for(unsigned second=0;second<35;++second){
+    testMillis=start+second*1000;testEpoch=1800000600+second;btc::Quote q;q.timestamp=uint32_t(testEpoch);q.price=81000+second;
+    acceptQuote(q,0,testMillis,uint32_t(testEpoch),testMillis);saveHistory(testMillis);
+    assert(candleSeries[0].count(0,chartNowMs())<=21&&candleSeries[1].count(1,chartNowMs())<=21);
+    if(second<30)assert(fsMock().writes==writes);
+  }
+  assert(candleSeries[0].count(0,chartNowMs())==21&&fsMock().writes>writes);
+  auto plot=btc::makeCandles(candleSeries[0],candleScales[0],0,chartNowMs());assert(__builtin_popcount(plot.valid)==21);
+  // Ten actual deadlines per second retain different real whole-dollar values.
+  quotes.clear();quotes.put(81199,0,testMillis,uint32_t(testEpoch));quotes.put(81203,1,testMillis,uint32_t(testEpoch));
+  guard.price=81203;lastQuoteReceived=testMillis;shownPrice=0;nextNixieAt=testMillis;
+  for(unsigned frame=0;frame<10;++frame){testMillis+=100;packets.clear();refreshNixies(testMillis);assert(packets.size()==6);}
+  assert(priceTransitions==9&&priceChanges==9&&multiDigitChanges==9&&minimumFrameGap==100&&maximumFrameGap==100);
+  std::cout<<"PASS: 100 ms distinct real multi-digit frames, 21 fixed OHLC columns from live quotes, bounded range caches and flash checkpoints instead of per-tick writes\n";
 }
 void streamStarvationRegressionTests(){
   liveReady=true;live::healthy=false;testMillis+=6000;refreshDial.stable=timelineDial.stable=0;
@@ -380,4 +403,4 @@ void wirelessRuntimeTests(){
   WiFi.connection=WL_CONNECTED;wifi.loop(testMillis);testMillis+=8001;wifi.loop(testMillis);assert(wifi.online()&&!wifi.portalActive());
   std::cout<<"PASS: actual dial sampling/snapshots, queued signed OTA checks bypassing schedule without interrupting in-flight HTTP, wireless matrix/tube controls and BOOT diagnostics gestures\n";
 }
-int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}
+int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}
