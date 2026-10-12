@@ -34,6 +34,9 @@ The Python standard-library collector runs on the same LAN as the clock and
 retries discovery/reconnections, including OTA reboots. Pass a fallback address
 with `--fallback-host YOUR_ESP32_IP` before the operation. It remains running
 while this computer is awake; it does not install a login/startup service.
+After discovery it uses the reported LAN IP to avoid repeated slow mDNS lookups,
+verifies the same device identity on every sample and falls back to discovery
+if the address changes.
 
 ```sh
 python3 tools/clock_link.py start

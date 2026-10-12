@@ -5,6 +5,7 @@ import pathlib
 import tempfile
 import threading
 import unittest
+from unittest import mock
 import urllib.parse
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 
@@ -55,6 +56,27 @@ class LinkTests(unittest.TestCase):
         Handler.oversize=True
         with self.assertRaises(RuntimeError):self.clock.snapshot()
         with self.assertRaises(ValueError):link.Clock(["http://not-a-host/"])
+    def test_discovery_reuses_validated_ip_and_falls_back_on_identity_change(self):
+        Handler.sample["ip"]="127.0.0.1"
+        clock=link.Clock(["localhost"],self.server.server_port,timeout=.1)
+        with mock.patch.object(clock,"request",wraps=clock.request) as requests:
+            clock.snapshot();self.assertEqual(clock.last_host,"localhost")
+            clock.snapshot();self.assertEqual(clock.last_host,"127.0.0.1")
+            self.assertEqual([call.args[0] for call in requests.call_args_list],["localhost","127.0.0.1"])
+        request=clock.request
+        def changed_address(host,path,fields=None):
+            if host=="127.0.0.1":
+                other=copy.deepcopy(Handler.sample);other["device_id"]="abcdef123456";return other
+            return request(host,path,fields)
+        with mock.patch.object(clock,"request",side_effect=changed_address):
+            clock.command("ota")
+            self.assertEqual(clock.last_host,"localhost")
+            self.assertEqual(clock.device_id,SAMPLE["device_id"])
+            self.assertEqual(Handler.commands,["ota"])
+        for address in ("http://other/", "8.8.8.8", "0.0.0.0"):
+            Handler.sample["ip"]=address
+            fresh=link.Clock(["localhost"],self.server.server_port,timeout=.1)
+            fresh.snapshot();self.assertIsNone(fresh.cached_ip)
     def test_collection_labels_rotation_and_atomic_records(self):
         with tempfile.TemporaryDirectory() as folder:
             out=pathlib.Path(folder)

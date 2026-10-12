@@ -3,6 +3,7 @@
 import argparse
 import datetime
 import fcntl
+import ipaddress
 import json
 import os
 import pathlib
@@ -26,6 +27,7 @@ class Clock:
         if not self.hosts or any(not re.fullmatch(r"[A-Za-z0-9_.-]+", h) for h in self.hosts):
             raise ValueError("Use an IPv4 address or hostname, not a URL")
         self.port, self.timeout, self.last_host, self.device_id = port, timeout, None, None
+        self.cached_ip = None
         # A local device request must not be sent through an HTTP proxy.
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -44,7 +46,10 @@ class Clock:
 
     def snapshot(self):
         failure = None
-        hosts = ([self.last_host] if self.last_host else []) + self.hosts
+        # mDNS lookup can take seconds on macOS, outside the HTTP timeout.
+        # Reuse the reported LAN address after discovery, checking identity on
+        # every response; fall back to discovery when DHCP changes the address.
+        hosts = ([self.cached_ip] if self.cached_ip else []) + ([self.last_host] if self.last_host else []) + self.hosts
         for host in dict.fromkeys(hosts):
             try:
                 value = self.request(host, "/telemetry")
@@ -53,6 +58,12 @@ class Clock:
                     raise ValueError("A different clock answered at this address")
                 self.device_id=value["device_id"]
                 self.last_host = host
+                try:
+                    address = ipaddress.IPv4Address(value.get("ip", ""))
+                    if address.is_private and not address.is_unspecified:
+                        self.cached_ip = str(address)
+                except ipaddress.AddressValueError:
+                    pass
                 return value
             except (OSError, ValueError) as error:
                 failure = error
