@@ -2,7 +2,7 @@
 
 Live, standalone firmware for the Rev20 motherboard: ESP32-WROOM-32E, six exixe Nixie modules, a 13 × 21 LED matrix driven by six MAX7219 chips, and two five-position resistor-ladder selectors. The original working simulation is archived in `demo/main_demo.cpp`; the default firmware uses actual market data.
 
-Version **1.0.16** fixes HTTP starvation observed with the assembled clock at 0.5 s / 5 min. Ordinary requests preserve the primary feed, reconnects get a bounded grace after each HTTP job, filtered quote JSON uses 2 KiB, and Bitstamp history downloads use pages of at most 24 candles. Recent distinct real prices are retained per provider and selection favors changes in multiple digits. The one-dollar cosmetic effect is removed. The matrix connects normal-resolution real samples into a line and adds recent five-second live samples. The signed `main` OTA manifest selects the deployed version. See [wireless diagnostics](docs/WIRELESS_DIAGNOSTICS.md).
+Version **1.0.17** fixes HTTP starvation observed with the assembled clock at 0.5 s / 5 min. Range-sized static caches reclaim about 11 KiB of data RAM without changing saved files. The conservative 60 KiB TLS budget is retained. Ordinary requests preserve the primary feed, reconnects get a bounded grace after each HTTP job, filtered quote JSON uses 2 KiB, and Bitstamp history downloads use pages of at most 24 candles. Recent distinct real prices are retained per provider and selection favors changes in multiple digits. The one-dollar cosmetic effect is removed. The matrix connects normal-resolution real samples into a line and adds recent five-second live samples. The signed `main` OTA manifest selects the deployed version. See [wireless diagnostics](docs/WIRELESS_DIAGNOSTICS.md).
 
 The clock receives live BTC/USD through two persistent public streams, preferring Kraken and Coinbase with Bitstamp/Bitfinex failover, and retains eleven independent free REST endpoints for confirmation and fallback. REST rotation honors provider cooldowns and `Retry-After`. USDT quotes are converted with a recent USDT/USD rate. No API keys, subscriptions, intermediary server or running web app are needed.
 
@@ -64,7 +64,7 @@ Keep and back up `secrets/ota-signing-key.pem` privately. Only `data/cert/ota-pu
 To publish a future update from a clean `main` checkout after committing your code changes:
 
 ```sh
-python3 tools/publish_release.py --version 1.0.17
+python3 tools/publish_release.py --version 1.0.18
 ```
 
 That command builds, runs the host tests, signs locally, pushes the versioned source, publishes the firmware release, then pushes the signed rollout manifest to `main`. The signing key is never sent to GitHub. Firmware 1.0.13 exposes OTA stages, HTTP status, candidate version, transfer progress and retry delay through wireless diagnostics. Failed transfers that never activate an image can be retried immediately; activated images retain the one-day rollback retry protection. HTTP work releases the secondary feed first. Ordinary quote/history/FX work defers instead of closing the primary if its TLS/JSON reservation cannot fit. OTA may pause both feeds for a validated update. Both feeds pause for a validated new image download/install and resume on failure. The display timer and rotary inputs continue running.

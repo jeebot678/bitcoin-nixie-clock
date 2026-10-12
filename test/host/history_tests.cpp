@@ -21,6 +21,16 @@ int main(){
   // A new instance models loss of all RAM. Every visited dial position restores.
   btc::History rebooted[5];HistoryStore afterRestart;assert(afterRestart.begin(rebooted));
   for(uint8_t w=0;w<5;++w){assert(rebooted[w].count==histories[w].count);assert(afterRestart.savedEpoch(w)==now);assert(btc::makePlot(rebooted[w],now,ranges[w],0,0).valid);}
+  // Real firmware views fit every legal cache while reclaiming unused RAM.
+  btc::Sample p5[7]={},p30[32]={},p60[62]={},pDay[290]={},pWeek[170]={};
+  btc::HistoryView bounded[5]={{p5,7},{p30,32},{p60,62},{pDay,290},{pWeek,170}};
+  HistoryStore boundedStore;assert(boundedStore.begin(bounded));
+  for(unsigned i=0;i<5;++i)assert(bounded[i].count==histories[i].count&&bounded[i].count<=bounded[i].capacity);
+  assert(sizeof(p5)+sizeof(p30)+sizeof(p60)+sizeof(pDay)+sizeof(pWeek)<7000);
+  btc::Sample smallStorage[1]={};btc::HistoryView tooSmall(smallStorage,1);btc::CacheMetadata smallMetadata;
+  File fullFile=SPIFFS.open("/history-0-0.bin","r");assert(!btc::readHistoryCache(fullFile,0,smallMetadata,&tooSmall)&&!tooSmall.count);fullFile.close();
+  btc::History independent=histories[0];assert(independent.samples!=histories[0].samples);
+  independent.samples[0].price+=100;assert(independent.samples[0].price!=histories[0].samples[0].price);
   // A two-day outage retains the five-day overlap with its original timestamps,
   // requests only the missing 48 hourly candles, and merges without duplicates.
   const uint32_t later=now+2*86400;uint8_t w=4;

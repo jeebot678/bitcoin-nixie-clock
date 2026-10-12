@@ -146,7 +146,7 @@ inline size_t historyCapacity(bool bitstamp, uint8_t window, uint32_t epoch = 0,
   return 2048+rows*(bitstamp ? JSON_ARRAY_SIZE(1)+JSON_OBJECT_SIZE(2)+48
                                    : JSON_ARRAY_SIZE(9)+64);
 }
-inline bool parseHistory(JsonVariantConst root, bool bitstamp, uint8_t window, uint32_t now, History& history, uint32_t start = 0) {
+inline bool parseHistory(JsonVariantConst root, bool bitstamp, uint8_t window, uint32_t now, HistoryView& history, uint32_t start = 0) {
   history.count = 0;
   if (window >= 5 || now < config::kWindowSeconds[window]) return false;
   if (!bitstamp && (!root["error"].is<JsonArrayConst>() || root["error"].size())) return false;

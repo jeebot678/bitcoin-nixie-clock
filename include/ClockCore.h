@@ -125,19 +125,32 @@ constexpr size_t kMaxCandles = 300; // Largest range: 24 h of five-minute candle
 // explicit and compatible with existing 12-byte records on flash.
 struct __attribute__((packed)) Sample { uint32_t timestamp; double price; };
 static_assert(sizeof(Sample)==12,"Compact full-precision candle storage required");
-struct History {
-  Sample samples[kMaxCandles] = {};
+struct HistoryView {
+  Sample* samples;
+  uint16_t capacity;
   uint16_t count = 0;
+  HistoryView(Sample* storage,uint16_t size):samples(storage),capacity(size){}
   bool add(uint32_t time, double price) {
-    if (!time || !validPrice(price) || count >= kMaxCandles || (count && time <= samples[count - 1].timestamp)) return false;
+    if (!time || !validPrice(price) || count >= capacity || (count && time <= samples[count - 1].timestamp)) return false;
     samples[count++] = {time, price}; return true;
+  }
+};
+// Worker/test values own their storage and copy independently. The five main
+// caches instead use bounded views over exactly the samples each range needs.
+struct History:HistoryView {
+  Sample storage[kMaxCandles]={};
+  History():HistoryView(storage,kMaxCandles){}
+  History(const History& other):History(){*this=other;}
+  History& operator=(const History& other){
+    if(this!=&other){count=other.count;memcpy(storage,other.samples,count*sizeof(Sample));}
+    return *this;
   }
 };
 struct Plot { uint8_t rows[21]; uint32_t valid = 0;uint16_t connectors[21]={}; };
 inline bool plotPixel(const Plot& plot,unsigned row,unsigned col){
   return row<13&&col<21&&((plot.connectors[col]&(1U<<row))||((plot.valid&(1U<<col))&&plot.rows[col]==row));
 }
-inline Plot makePlot(const History& history, uint32_t now, uint32_t window, double live, uint32_t liveTime,const Sample* recent=nullptr,size_t recentCount=0) {
+inline Plot makePlot(const HistoryView& history, uint32_t now, uint32_t window, double live, uint32_t liveTime,const Sample* recent=nullptr,size_t recentCount=0) {
   Plot plot = {};
   if (!window || now < window) return plot;
   const uint32_t start = now - window;

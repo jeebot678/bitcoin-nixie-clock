@@ -9,7 +9,7 @@ inline uint32_t firstHistoryClose(uint8_t window, uint32_t epoch) {
 }
 // Return the opening time of the FIRST missing closed candle. This also repairs
 // gaps in the middle, rather than assuming the newest cached point proves coverage.
-inline uint32_t missingHistoryStart(const History& history, uint8_t window, uint32_t epoch) {
+inline uint32_t missingHistoryStart(const HistoryView& history, uint8_t window, uint32_t epoch) {
   uint32_t first = firstHistoryClose(window, epoch);
   if (!first) return 0;
   uint32_t step = config::kCandleSeconds[window], last = epoch / step * step;
@@ -20,7 +20,7 @@ inline uint32_t missingHistoryStart(const History& history, uint8_t window, uint
   }
   return 0;
 }
-inline bool trimHistory(History& history, uint8_t window, uint32_t epoch) {
+inline bool trimHistory(HistoryView& history, uint8_t window, uint32_t epoch) {
   uint32_t first = firstHistoryClose(window, epoch);
   if (!first) return false; // Never age stored data against an unsynchronized clock.
   uint16_t count = 0;
@@ -33,7 +33,7 @@ inline bool trimHistory(History& history, uint8_t window, uint32_t epoch) {
   history.count = count;
   return changed;
 }
-inline bool mergeHistory(History& stored, const History& incoming, uint8_t window, uint32_t epoch) {
+inline bool mergeHistory(HistoryView& stored, const HistoryView& incoming, uint8_t window, uint32_t epoch) {
   bool changed = trimHistory(stored, window, epoch);
   uint32_t first = firstHistoryClose(window, epoch);
   if (!first) return changed;
@@ -45,7 +45,7 @@ inline bool mergeHistory(History& stored, const History& incoming, uint8_t windo
     while (index < stored.count && stored.samples[index].timestamp < sample.timestamp) ++index;
     if (index < stored.count && stored.samples[index].timestamp == sample.timestamp) {
       if (stored.samples[index].price != sample.price) { stored.samples[index] = sample; changed = true; }
-    } else if (stored.count < kMaxCandles) {
+    } else if (stored.count < stored.capacity) {
       memmove(stored.samples + index + 1, stored.samples + index, (stored.count - index) * sizeof(Sample));
       stored.samples[index] = sample; ++stored.count; changed = true;
     }
@@ -76,8 +76,8 @@ inline bool validCacheSample(const Sample& sample, uint8_t window, uint32_t epoc
     sample.timestamp % config::kCandleSeconds[window] == 0 && sample.timestamp > previous && validPrice(sample.price);
 }
 template<class Writer>
-bool writeHistoryCache(Writer& writer, const History& history, uint8_t window, const CacheMetadata& metadata) {
-  if (window >= 5 || !history.count || history.count > kMaxCandles || metadata.epoch < config::kMinimumEpoch) return false;
+bool writeHistoryCache(Writer& writer, const HistoryView& history, uint8_t window, const CacheMetadata& metadata) {
+  if (window >= 5 || !history.count || history.count > kMaxCandles || history.count>history.capacity || metadata.epoch < config::kMinimumEpoch) return false;
   uint8_t header[kCacheHeaderSize] = {}, bytes[kCacheSampleSize];
   cachePut32(header, 0x48435442); // BTCH
   header[4] = 1; header[5] = window;
@@ -98,7 +98,7 @@ bool writeHistoryCache(Writer& writer, const History& history, uint8_t window, c
   return true;
 }
 template<class Reader>
-bool readHistoryCache(Reader& reader, uint8_t window, CacheMetadata& metadata, History* history = nullptr) {
+bool readHistoryCache(Reader& reader, uint8_t window, CacheMetadata& metadata, HistoryView* history = nullptr) {
   if (history) history->count = 0;
   if (window >= 5) return false;
   uint8_t header[kCacheHeaderSize], bytes[kCacheSampleSize];
@@ -107,6 +107,7 @@ bool readHistoryCache(Reader& reader, uint8_t window, CacheMetadata& metadata, H
   if (cacheGet32(header) != 0x48435442 || header[4] != 1 || header[5] != window || header[6] || header[7] ||
       cacheGet32(header + 8) != config::kWindowSeconds[window] || cacheGet32(header + 12) != config::kCandleSeconds[window] ||
       !count || count > kMaxCandles || epoch < config::kMinimumEpoch || reader.size() != kCacheHeaderSize + count * kCacheSampleSize) return false;
+  if(history&&count>history->capacity)return false;
   uint32_t crc = cacheCrc(UINT32_MAX, header, 28), previous = 0;
   for (size_t i = 0; i < count; ++i) {
     if (reader.readBytes(reinterpret_cast<char*>(bytes), sizeof(bytes)) != sizeof(bytes)) return false;

@@ -4,13 +4,13 @@
 
 namespace {
 void pathFor(char path[24], uint8_t window, uint8_t slot) { snprintf(path, 24, "/history-%u-%u.bin", window, slot); }
-bool readSlot(uint8_t window, uint8_t slot, btc::CacheMetadata& metadata, btc::History* history = nullptr) {
+bool readSlot(uint8_t window, uint8_t slot, btc::CacheMetadata& metadata, btc::HistoryView* history = nullptr) {
   char path[24]; pathFor(path, window, slot);
   File file = SPIFFS.open(path, "r");
   return file && btc::readHistoryCache(file, window, metadata, history);
 }
 }
-bool HistoryStore::begin(btc::History histories[5]) {
+bool HistoryStore::beginViews(btc::HistoryView* histories[5]) {
   // The existing 128 KiB data partition is separate from Wi-Fi NVS and both
   // OTA application slots. First use formats it; application uploads preserve it.
   ready_ = SPIFFS.begin(true);
@@ -24,13 +24,13 @@ bool HistoryStore::begin(btc::History histories[5]) {
         slot_[window] = slot; metadata_[window] = candidate;
       }
     }
-    histories[window].count = 0;
-    if (slot_[window] >= 0 && readSlot(window, slot_[window], metadata_[window], &histories[window]))
-      Serial.printf("History restored: %s, %u candles, saved epoch %lu\n", config::kWindowNames[window], histories[window].count, (unsigned long)metadata_[window].epoch);
+    histories[window]->count = 0;
+    if (slot_[window] >= 0 && readSlot(window, slot_[window], metadata_[window], histories[window]))
+      Serial.printf("History restored: %s, %u candles, saved epoch %lu\n", config::kWindowNames[window], histories[window]->count, (unsigned long)metadata_[window].epoch);
   }
   return true;
 }
-bool HistoryStore::save(uint8_t window, const btc::History& history, uint32_t epoch) {
+bool HistoryStore::save(uint8_t window, const btc::HistoryView& history, uint32_t epoch) {
   if (!ready_ || window >= 5 || !history.count) return false;
   uint8_t slot = slot_[window] == 0 ? 1 : 0;
   btc::CacheMetadata candidate; candidate.generation = metadata_[window].generation + 1; candidate.epoch = epoch;

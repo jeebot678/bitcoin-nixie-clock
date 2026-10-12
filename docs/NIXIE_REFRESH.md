@@ -1,13 +1,18 @@
 # Nixie refresh and chart behavior
 
-Version 1.0.16 addresses the assembled 0.5 s / 5 min failure: sequential
+Version 1.0.17 addresses the assembled 0.5 s / 5 min failure: sequential
 HTTP jobs could hold `busy` continuously, preventing stream reconnects and
 causing stale-price blanking. After each HTTP job, missing streams get a
 35-second reconnect grace. Ordinary HTTP requests release the secondary but
 never close the primary; a failed local RAM reservation defers without marking
 a provider failure. Quotes use filtered 2 KiB JSON, and primary Bitstamp history
 requests use at most 24 candles per page. TLS reserves two separate 18 KiB
-record allocations and 16 KiB additional context/crypto headroom under the gate.
+record allocations and 24 KiB additional context/crypto headroom under the gate.
+
+Range-sized backing arrays retain 7 / 32 / 62 / 290 / 170 samples instead of
+300 samples for each of five caches, reclaiming about 11 KiB of static data
+RAM. Bounded cache decoding/merging prevents overflow; worker values still own
+a complete 300-sample response. Saved cache files remain compatible.
 
 The normal price timer writes all six modules at the selected 500 ms, 2 s,
 30 s, 5 min or 1 h deadline. Three distinct rounded prices per provider remain
