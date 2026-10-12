@@ -174,6 +174,30 @@ def start(args):
     print(f"Collector started (PID {process.pid}); output: {args.output}")
 
 
+def wait_for_update(clock, expected, seconds):
+    deadline = time.monotonic() + seconds
+    next_check = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        try:
+            snapshot = clock.snapshot()
+            if snapshot["firmware"] == expected and snapshot.get("boot_confirmed") is True:
+                print(f"Verified running firmware {expected}")
+                return
+            # A check can see a cached old manifest or fail transiently. Keep
+            # the explicit update request active, without interrupting HTTP
+            # work, a queued check or a newly installed image's boot validation.
+            if (snapshot["firmware"] != expected and snapshot.get("boot_confirmed") is True
+                    and not snapshot.get("http_busy") and not snapshot.get("ota_queued")
+                    and time.monotonic() >= next_check):
+                next_check = time.monotonic() + 30
+                print("Retrying signed update check…", flush=True)
+                clock.command("ota")
+        except (OSError, ValueError, RuntimeError):
+            pass
+        time.sleep(min(2, max(0, deadline - time.monotonic())))
+    raise RuntimeError(f"Running firmware {expected} was not verified within {seconds:g} seconds")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="bitcoin-clock.local")
@@ -203,18 +227,16 @@ def main():
         snapshot = clock.snapshot();args.output.mkdir(parents=True, exist_ok=True)
         print(json.dumps(record(args.output, snapshot, getattr(args, "label", None)), indent=2));return
     action = "tubes" if args.operation == "tube-test" else args.operation
-    print(json.dumps(clock.command(action)), flush=True)
+    try:
+        print(json.dumps(clock.command(action)), flush=True)
+    except (OSError, ValueError, RuntimeError):
+        if args.operation != "ota" or not args.wait:
+            raise
+        # A restart/slow response can lose the acknowledgment after the clock
+        # accepted the command. Verify its version before deciding to retry.
+        print("Update acknowledgment unavailable; waiting for the device and retrying idle checks.", flush=True)
     if args.operation == "ota" and args.wait:
-        deadline = time.monotonic() + args.wait
-        while time.monotonic() < deadline:
-            try:
-                snapshot = clock.snapshot()
-                if args.expect and snapshot["firmware"] == args.expect and snapshot.get("boot_confirmed") is True:
-                    print(f"Verified running firmware {args.expect}");return
-            except (OSError, ValueError, RuntimeError):
-                pass
-            time.sleep(2)
-        raise RuntimeError(f"Running firmware {args.expect or 'update'} was not verified within {args.wait:g} seconds")
+        wait_for_update(clock, args.expect, args.wait)
 
 
 if __name__ == "__main__":

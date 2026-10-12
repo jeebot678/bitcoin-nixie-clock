@@ -85,7 +85,10 @@ attempt marker so a remote check can retry immediately. Successfully activated
 images retain the one-day retry limit if they crash and roll back. Manifest
 requests also send `Cache-Control: no-cache`. No arbitrary firmware
 URL or unsigned image is accepted. `--expect`/`--wait` confirms that the requested
-version is running and health-confirmed.
+version is running and health-confirmed. While waiting, it repeats an idle,
+health-confirmed old version's check at most once every 30 seconds to recover
+from cached manifests and transient errors. It does not interrupt ongoing
+HTTP work or repeat checks during the expected new version's boot validation.
 
 The browser provides the same voltage, chart, tube-test and update controls.
 POSTs require the token and reject unrelated browser origins. GETs need no

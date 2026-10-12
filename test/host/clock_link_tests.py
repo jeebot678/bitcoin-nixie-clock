@@ -96,6 +96,37 @@ class LinkTests(unittest.TestCase):
             self.assertTrue((out/"samples.previous.jsonl").exists())
             self.assertEqual(len((out/"samples.jsonl").read_text().splitlines()),1)
             self.assertNotIn("token",(out/"samples.jsonl").read_text())
+    def test_update_wait_retries_cached_checks_and_waits_for_boot_health(self):
+        now=[0.0];commands=[]
+        def snapshot():
+            value=copy.deepcopy(SAMPLE)
+            if now[0]>=94:
+                value["firmware"]="1.0.13";value["boot_confirmed"]=now[0]>=98
+            return value
+        clock=mock.Mock();clock.snapshot.side_effect=snapshot
+        clock.command.side_effect=lambda action:commands.append((now[0],action))
+        with mock.patch.object(link.time,"monotonic",side_effect=lambda:now[0]),mock.patch.object(link.time,"sleep",side_effect=lambda seconds:now.__setitem__(0,now[0]+seconds)):
+            link.wait_for_update(clock,"1.0.13",100)
+        self.assertEqual(commands,[(30.0,"ota"),(60.0,"ota"),(90.0,"ota")])
+        self.assertEqual(now[0],98)
+    def test_update_wait_does_not_interrupt_inflight_or_queued_checks(self):
+        now=[0.0];commands=[]
+        def snapshot():
+            value=copy.deepcopy(SAMPLE);value["http_busy"]=now[0]<40;value["ota_queued"]=40<=now[0]<60
+            if commands:value["firmware"]="1.0.13";value["boot_confirmed"]=now[0]>=70
+            return value
+        clock=mock.Mock();clock.snapshot.side_effect=snapshot;clock.command.side_effect=lambda action:commands.append((now[0],action))
+        with mock.patch.object(link.time,"monotonic",side_effect=lambda:now[0]),mock.patch.object(link.time,"sleep",side_effect=lambda seconds:now.__setitem__(0,now[0]+seconds)):
+            link.wait_for_update(clock,"1.0.13",80)
+        self.assertEqual(commands,[(60.0,"ota")]);self.assertEqual(now[0],70)
+        now[0]=0;clock.snapshot.side_effect=lambda:copy.deepcopy(SAMPLE)
+        with mock.patch.object(link.time,"monotonic",side_effect=lambda:now[0]),mock.patch.object(link.time,"sleep",side_effect=lambda seconds:now.__setitem__(0,now[0]+seconds)):
+            with self.assertRaises(RuntimeError):link.wait_for_update(clock,"1.0.13",5)
+    def test_cli_wait_survives_a_lost_update_acknowledgment(self):
+        clock=mock.Mock();clock.command.side_effect=OSError("response lost during reboot")
+        with mock.patch.object(link,"Clock",return_value=clock),mock.patch.object(link,"wait_for_update") as waiter,mock.patch.object(link.sys,"argv",["clock_link.py","ota","--expect","1.0.13","--wait","180"]):
+            link.main()
+        waiter.assert_called_once_with(clock,"1.0.13",180)
 
 if __name__=="__main__":
     unittest.main()
