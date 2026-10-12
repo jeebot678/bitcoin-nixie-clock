@@ -13,5 +13,5 @@ bool pauseAndWait(uint32_t timeoutMs);
 void resume();
 void httpBusy(bool busy);
 // Reserve bounded HTTP memory by releasing the secondary socket first.
-bool prepareHttp(size_t jsonBytes,uint32_t timeoutMs,bool probe=false);
+bool prepareHttp(size_t jsonBytes,uint32_t timeoutMs,bool probe=false,bool allowPrimaryPause=true);
 }

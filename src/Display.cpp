@@ -102,7 +102,7 @@ void testDigits(uint8_t step) {
 void plot(const btc::Plot& chart) {
   textActive=false;
   memset(frame,0,sizeof(frame));
-  for (uint8_t col=0;col<21;++col) if (chart.valid&(1U<<col)) pixel(chart.rows[col],col);
+  for(uint8_t col=0;col<21;++col)for(uint8_t row=0;row<13;++row)if(btc::plotPixel(chart,row,col))pixel(row,col);
   flush();
 }
 bool startupPending() { return startupPhase==StartupPhase::Waiting; }
@@ -119,7 +119,7 @@ void startupPlot(const btc::Plot& chart,uint32_t now) {
   memset(frame,0,sizeof(frame));
   for (uint16_t cell=0;cell<kMatrixCells;++cell) {
     uint8_t row=cell/21,col=cell%21;
-    bool chartPixel=(chart.valid&(1U<<col)) && chart.rows[col]==row;
+    bool chartPixel=btc::plotPixel(chart,row,col);
     if (filling ? cell<cells : cell>=cells || chartPixel) pixel(row,col);
   }
   flush();

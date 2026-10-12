@@ -26,6 +26,8 @@ int main(){
   snapshot.interval=3600000;snapshot.window=3600;snapshot.frames=8;snapshot.accepted=99;snapshot.quoteAge=20;
   snapshot.marketPrice=83300.12;snapshot.digits=83300;snapshot.connections=2;snapshot.bootConfirmed=true;
   snapshot.dataHeap=43000;snapshot.dataBlock=18000;snapshot.httpStack=4096;snapshot.cadenceTest=true;
+  snapshot.httpKind=1;snapshot.httpSource=2;snapshot.httpStatus=200;snapshot.quoteRequested=true;
+  snapshot.chartColumns=0x1FFFFF;snapshot.chartPixels=42;snapshot.historyCandles=6;snapshot.historySavedAt=1800000000;
   snapshot.ota.stage=ota::Stage::RetryLimited;snapshot.ota.httpStatus=200;snapshot.ota.checkedAt=55;
   snapshot.ota.total=123456;snapshot.ota.received=1234;snapshot.ota.retryAfter=86399;
   strcpy(snapshot.ota.candidate,"65535.65535.65535");
@@ -42,6 +44,9 @@ int main(){
   assert(response["ota"]["received_bytes"]==1234&&response["ota"]["retry_after_seconds"]==86399);
   assert(response["data_heap"]==43000&&response["data_largest_allocation"]==18000&&response["http_stack_remaining"]==4096);
   assert(response["cadence_test"]==true);
+  assert(response["http_kind"]=="history"&&response["http_source"]=="Bitstamp"&&response["last_http_status"]==200);
+  assert(response["quote_request_pending"]==true&&response["chart_columns_mask"]==0x1FFFFF&&response["chart_pixels"]==42);
+  assert(response["history_candles"]==6&&response["history_saved_epoch"]==1800000000);
   assert(telemetryWeb.body.value.find("token")==std::string::npos&&telemetryWeb.body.value.find("password")==std::string::npos&&telemetryWeb.body.value.find("ssid")==std::string::npos);
   telemetryWeb.request("/",HTTP_GET);assert(telemetryWeb.statusCode==200&&telemetryWeb.body.value.find("Check for update now")!=std::string::npos);
   telemetryWeb.request("/control-token",HTTP_GET);assert(!deserializeJson(response,telemetryWeb.body.c_str()));std::string token=response["token"].as<const char*>();assert(token.size()==32);

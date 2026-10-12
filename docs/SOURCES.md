@@ -2,11 +2,11 @@
 
 Verified on 2026-10-10 using HTTP/1.0, identity encoding and the same Mozilla roots embedded in the firmware: all eleven default tickers returned HTTP 200 and parsed as valid prices. Kraken and Bitstamp returned valid history for all five windows and actual incremental requests for one closed hour and 48 closed hours. Bybit returned HTTP 403 from this network and is excluded. The exact responses, timings and headers are in `test/live_probe_report.json` and `test/live_fixtures/`.
 
-These exchanges can report different last-trade prices. Firmware 1.0.9 caches accepted quotes per provider and prefers recent quotes that change whole-dollar digits. REST uses at least five seconds per provider, including shared history/FX traffic, and respects quotas and geographic restrictions. At 0.5 s, a cosmetic rounding effect bounded to $1 can keep digits moving when real quotes round alike; charts/history retain real values. See [exact refresh behavior](NIXIE_REFRESH.md).
+These exchanges can report different last-trade prices. Firmware 1.0.9 caches accepted quotes per provider and prefers recent quotes that change whole-dollar digits. REST uses at least five seconds per provider, including shared history/FX traffic, and respects quotas and geographic restrictions. Version 1.0.16 removes the cosmetic rounding effect, retains three distinct real prices per source for five seconds, and prefers candidates that change multiple digits. Matching prices trigger an asynchronous request to another source. Charts/history retain real values. See [exact refresh behavior](NIXIE_REFRESH.md).
 
 ## Device live streams
 
-Two independent verified TLS connections prefer Kraken and Coinbase, with Bitstamp and Bitfinex as fallback. Each worker owns its queue; a busy feed cannot overwrite another's waiting quote. One provider cannot be owned by both workers. The secondary releases memory during HTTP work, while a routine OTA check retains the primary. Retries back off 5–60 seconds, at least a minute for HTTP 429, and an hour for authorization/geographic errors.
+Two independent verified TLS connections prefer Kraken and Coinbase, with Bitstamp and Bitfinex as fallback. Each worker owns its queue; a busy feed cannot overwrite another's waiting quote. One provider cannot be owned by both workers. The secondary releases memory during HTTP work. Ordinary requests defer rather than close the primary if RAM is insufficient; a routine OTA reservation may pause it. Retries back off 5–60 seconds, at least a minute for HTTP 429, and an hour for authorization/geographic errors.
 
 | Provider | Endpoint / public subscription | Rules and freshness |
 | --- | --- | --- |
@@ -45,9 +45,9 @@ HTTP 429/418 and recognized JSON rate-limit errors produce at least a one-minute
 
 ## Historical candles
 
-Kraken primary: `https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=MINUTES&since=EPOCH`. Parse `result.XXBTZUSD`, close at index 4. [Official documentation](https://docs.kraken.com/api-reference/market-data/get-ohlc-data) limits the response to 720 rows and identifies the final candle as unfinished.
+Kraken fallback: `https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=MINUTES&since=EPOCH`. Parse `result.XXBTZUSD`, close at index 4. [Official documentation](https://docs.kraken.com/api-reference/market-data/get-ohlc-data) limits the response to 720 rows and identifies the final candle as unfinished.
 
-Bitstamp fallback: `https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=SECONDS&limit=MISSING_COUNT&end=LAST_CLOSED_SECOND&exclude_current_candle=true`. Parse `data.ohlc[].close`; confirm pair BTC/USD. [Official documentation](https://www.bitstamp.net/api/) allows at most 1,000 candles. These are genuine USD history, so a current FX rate is never applied retrospectively to stablecoin history.
+Bitstamp primary: `https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=SECONDS&limit=MISSING_COUNT&end=LAST_CLOSED_SECOND&exclude_current_candle=true`. Firmware caps each page at 24 candles, advancing the end time from the first missing candle. Parse `data.ohlc[].close`; confirm pair BTC/USD. [Official documentation](https://www.bitstamp.net/api/) allows at most 1,000 candles. These are genuine USD history, so a current FX rate is never applied retrospectively to stablecoin history.
 
 | Window | Candle interval | Full closed-candle count | Update trigger |
 | --- | --- | --- | --- |
@@ -57,7 +57,7 @@ Bitstamp fallback: `https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=SECONDS&li
 | 24 hours | 300 s | 288–289 | New closed five-minute candle |
 | 7 days | 3,600 s | 168–169 | New closed hour |
 
-Only closed candles are plotted, timestamped at close. Rows are validated for order, duplicates, interval alignment, coverage, recency and finite positive prices. Live data overlays its actual timestamp bucket. No synthetic history or invented gap filling is used. Only the selected window fetches history; all caches persist in flash. The three short windows share incoming one-minute candles. Incremental requests begin at the first missing closed candle in the current range, including internal gaps. Kraken gets `since` with one-candle overlap; Bitstamp gets the missing count and an explicit closed end time. A new one-candle response is valid. Merging preserves existing points, replaces matching timestamps, inserts missing points in order and discards points outside the current range. The 5-minute range initially has five or six minute-resolution historical points; live prices continue independently.
+Only closed candles are plotted, timestamped at close. Rows are validated for order, duplicates, interval alignment, coverage, recency and finite positive prices. Live data overlays its actual timestamp bucket. No synthetic history or invented gap filling is used. Only the selected window fetches history; all caches persist in flash. The three short windows share incoming one-minute candles. Incremental requests begin at the first missing closed candle in the current range, including internal gaps. Kraken gets `since` with one-candle overlap; Bitstamp gets the missing count and an explicit closed end time. A new one-candle response is valid. Merging preserves existing points, replaces matching timestamps, inserts missing points in order and discards points outside the current range. The 5-minute range initially has five or six minute-resolution historical points. The graph connects these points at their actual candle spacing and includes five-second live samples retained since boot; live prices continue independently.
 
 ## OTA endpoint
 

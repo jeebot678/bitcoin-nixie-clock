@@ -95,6 +95,12 @@ void coreTests() {
   assert(book.choose(101,80000,0,80000,true,selected)); // FX expiry excludes USDT caches.
   book.clear();book.put(80003,0,UINT32_MAX-100,1);assert(book.choose(200,80000,1,80000,false,selected));
   book.put(NAN,1,200,1);book.put(1,255,200,1);assert(selected.price==80003);
+  // Multi-digit real candidates win over a synthetic-looking $1 step, at any cadence.
+  book.clear();book.put(84191.2,0,100,1800000000);book.put(84192.2,1,100,1800000000);book.put(84176.4,2,100,1800000000);
+  assert(book.choose(101,84191,0,84191,false,selected)&&selected.price==84176.4);
+  book.put(84166.4,2,120,1800000000);book.put(84166.4,2,130,1800000000);
+  assert(book.choose(150,84166,2,84166,false,selected)&&std::floor(selected.price+0.5)!=84166);
+  assert(!book.choose(6000,84166,2,84166,false,selected));
   bool cosmetic=false;assert(btc::displayDollars(80000.1,80000,true,cosmetic)==80001&&cosmetic);
   assert(btc::displayDollars(80000.1,80001,true,cosmetic)==80000&&!cosmetic);
   assert(btc::displayDollars(80000,80000,true,cosmetic)==80001&&cosmetic);
@@ -108,6 +114,17 @@ void coreTests() {
   auto plot=btc::makePlot(history,now,3600,82200,now);assert(plot.valid);for(int i=0;i<21;++i)if(plot.valid&(1U<<i))assert(plot.rows[i]<=12);
   btc::History empty;auto sparse=btc::makePlot(empty,now,604800,80000,now);assert(sparse.valid==(1U<<20));assert(!btc::makePlot(empty,now,604800,80000,now-604801).valid);
   auto unchanged=btc::makePlot(empty,now,604800,80000.01,now);assert(unchanged.valid==sparse.valid&&unchanged.rows[20]==sparse.rows[20]);
+  // Five minute-close anchors render a line across their 21-column time span,
+  // while a two-minute outage remains an actual open gap. Recent real samples
+  // fill additional buckets without altering the persistent candle history.
+  btc::History minutes;for(unsigned i=0;i<5;++i)assert(minutes.add(now-240+i*60,80000+i*50));
+  auto joined=btc::makePlot(minutes,now,300,0,0);unsigned litColumns=0;
+  for(unsigned c=0;c<21;++c){bool lit=false;for(unsigned r=0;r<13;++r)lit=lit||btc::plotPixel(joined,r,c);litColumns+=lit;}
+  assert(litColumns>=17&&minutes.count==5);
+  btc::History gap;assert(gap.add(now-240,80000));assert(gap.add(now-120,80100));auto broken=btc::makePlot(gap,now,300,0,0);
+  assert(!broken.connectors[8]);
+  btc::Sample liveSamples[2]={{now-30,80120},{now-10,80130}};
+  auto dense=btc::makePlot(minutes,now,300,0,0,liveSamples,2);assert(dense.valid!=joined.valid&&minutes.count==5);
   // Every selected range divides into exactly 21 chronological buckets, with
   // the latest sample in each bucket determining its one price pixel.
   for (uint32_t window:config::kWindowSeconds) {

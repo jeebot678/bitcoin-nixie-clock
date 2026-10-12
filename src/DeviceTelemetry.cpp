@@ -17,7 +17,7 @@ WebServer telemetryWeb(8080);
 char controlToken[33]={};
 bool listening=false,mdns=false;
 uint32_t stackRemaining=0;
-StaticJsonDocument<JSON_OBJECT_SIZE(47)+2*JSON_OBJECT_SIZE(7)+2*JSON_ARRAY_SIZE(5)+JSON_OBJECT_SIZE(7)+280> telemetryJson;
+StaticJsonDocument<JSON_OBJECT_SIZE(55)+2*JSON_OBJECT_SIZE(7)+2*JSON_ARRAY_SIZE(5)+JSON_OBJECT_SIZE(7)+280> telemetryJson;
 const char kTelemetryPage[] PROGMEM=R"HTML(<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bitcoin Clock diagnostics</title>
 <style>body{font:16px system-ui;background:#15191c;color:#eee;max-width:760px;margin:30px auto;padding:0 18px}table{width:100%;border-collapse:collapse}td,th{padding:10px;text-align:left;border-bottom:1px solid #555}button{padding:12px;margin:6px 4px 6px 0;font:inherit}pre{white-space:pre-wrap}#message{min-height:24px}</style>
 <h1>Clock diagnostics</h1><p>Rotate one switch at a time. A held/default setting with an invalid input can explain a frozen display. Voltages are measured at the ESP32 inputs.</p>
@@ -46,6 +46,12 @@ void state() {
   writeDial(dials.createNestedObject("range"),s.range,config::kTimelineMv,config::kTimelinePin);
   telemetryJson["refresh_ms"]=s.interval;telemetryJson["range_seconds"]=s.window;
   telemetryJson["cadence_test"]=s.cadenceTest;
+  const char* kinds[]={"quote","history","fx","ota"};
+  telemetryJson["http_kind"]=s.httpKind<4?kinds[s.httpKind]:"idle";
+  telemetryJson["http_source"]=s.httpSource<btc::kSourceCount?btc::kSources[s.httpSource].name:"none";
+  telemetryJson["last_http_status"]=s.httpStatus;telemetryJson["quote_request_pending"]=s.quoteRequested;
+  telemetryJson["chart_columns_mask"]=s.chartColumns;telemetryJson["chart_pixels"]=s.chartPixels;
+  telemetryJson["history_candles"]=s.historyCandles;telemetryJson["history_saved_epoch"]=s.historySavedAt;
   telemetryJson["streams"]=s.connections;telemetryJson["stream_quotes"]=s.quotes;telemetryJson["accepted_quotes"]=s.accepted;
   telemetryJson["quote_age_ms"]=s.accepted?s.quoteAge:UINT32_MAX;telemetryJson["confirmed"]=s.confirmed;
   telemetryJson["market_price"]=s.marketPrice;telemetryJson["display_quote"]=s.displayPrice;telemetryJson["display_digits"]=s.digits;

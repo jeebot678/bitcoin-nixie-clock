@@ -104,6 +104,22 @@ inline bool parseQuote(Provider provider, JsonVariantConst root, uint32_t now, Q
   }
   return number(value, quote.price) && validPrice(quote.price) && (!hasTimestamp || freshTimestamp(quote.timestamp, now));
 }
+inline void quoteFilter(JsonDocument& filter,Provider provider){
+  if(provider==Provider::Bitfinex){filter.set(true);return;}
+  if(provider==Provider::Gate){filter[0]["currency_pair"]=true;filter[0]["last"]=true;return;}
+  filter["code"]=true;
+  switch(provider){
+    case Provider::Coinbase:filter["price"]=true;filter["time"]=true;break;
+    case Provider::Kraken:filter["error"]=true;filter["result"]["XXBTZUSD"]["c"]=true;filter["result"]["USDTZUSD"]["c"]=true;break;
+    case Provider::Bitstamp:filter["last"]=true;filter["timestamp"]=true;break;
+    case Provider::Gemini:filter["symbol"]=true;filter["close"]=true;break;
+    case Provider::Binance:case Provider::Mexc:filter["symbol"]=true;filter["price"]=true;break;
+    case Provider::Okx:filter["data"][0]["instId"]=true;filter["data"][0]["instType"]=true;filter["data"][0]["last"]=true;filter["data"][0]["ts"]=true;break;
+    case Provider::Kucoin:filter["data"]["price"]=true;filter["data"]["time"]=true;break;
+    case Provider::Bitget:filter["data"][0]["symbol"]=true;filter["data"][0]["lastPr"]=true;filter["data"][0]["ts"]=true;break;
+    default:break;
+  }
+}
 inline void historyFilter(JsonDocument& filter, bool bitstamp) {
   if (bitstamp) {
     filter["data"]["pair"] = true;

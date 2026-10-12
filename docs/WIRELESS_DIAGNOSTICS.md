@@ -21,6 +21,10 @@ instruction RAM that cannot hold TLS byte buffers. Since 1.0.13, the nested `ota
 check/install stage, HTTP status, candidate version, bytes received/total and
 remaining retry delay. It distinguishes rejected manifests/downloads, failed
 transfers, current/already-installed images and the post-activation retry limit. It distinguishes price, startup, blanking and tube-test modes.
+Version 1.0.16 adds active `http_kind`/`http_source`, `last_http_status`,
+`quote_request_pending`, `history_candles`, `history_saved_epoch`,
+`chart_columns_mask` and `chart_pixels` for diagnosing fetching versus drawing.
+The chart mask contains real anchors; pixel count includes graphical connectors.
 `decoded=-1` means invalid input; an old `selected` can be retained.
 `initialized=false` means the setting remains a default. No Wi-Fi credentials
 or control token are included in samples.
@@ -75,7 +79,7 @@ both switches run from POS5 to POS1. See [the mapping](PCB_PIN_MAP.md).
 ## Triggering an update
 
 ```sh
-python3 tools/clock_link.py ota --expect 1.0.15 --wait 240
+python3 tools/clock_link.py ota --expect 1.0.16 --wait 240
 ```
 
 First publish and verify the signed newer release and `main` manifest. The tool

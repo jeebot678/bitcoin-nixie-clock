@@ -22,6 +22,8 @@ btc::FxRate fx;
 btc::PriceGuard guard;
 btc::QuoteBook quotes;
 btc::History histories[5];
+btc::Sample recentPrices[64]={};
+unsigned recentHead=0;
 HistoryStore historyStore;
 bool historyDirty[5] = {};
 uint32_t nextSaveAt[5] = {};
@@ -30,6 +32,11 @@ bool liveReady=false,streamWarmupStarted=false;
 uint32_t streamWarmupUntil=0,firstQuoteFallbackAt=0;
 bool showingSetup=false;
 bool needConfirmation=true,logNixies=false;
+bool needDifferentQuote=false;
+uint8_t httpKind=255,httpSource=255;
+int lastHttpStatus=0;
+uint32_t chartColumns=0;
+uint16_t chartPixels=0;
 double shownPrice=0;
 uint8_t shownSource=0,lastAcceptedSource=0;
 uint32_t shownQuoteReceived=0;
@@ -43,7 +50,7 @@ bool forceOtaPending=false,matrixDiagnostics=false;
 uint8_t diagnosticPage=0;
 uint32_t nextQuoteAt=0,nextDialsAt=0,nextDrawAt=0,lastPriceEpoch=0,lastQuoteReceived=0;
 uint32_t nextHistoryAt[5]={},historyErrors[5]={};
-uint8_t historySource[5]={1,1,1,2,1}; // Bitstamp's day JSON uses less heap.
+uint8_t historySource[5]={2,2,2,2,2}; // Bounded Bitstamp pages preserve primary TLS.
 uint32_t bootPressedAt=0,testEndsAt=0,tubeTestEndsAt=0;
 uint32_t cadenceTestEndsAt=0;
 bool cadenceTestActive=false;
@@ -99,6 +106,8 @@ void publishTelemetry(uint32_t now) {
   nextTelemetryAt=now+250;
   telemetry::Snapshot s;s.uptime=now;s.heap=ESP.getFreeHeap();s.largest=ESP.getMaxAllocHeap();
   s.dataHeap=network_memory::freeBytes();s.dataBlock=network_memory::largestBlock();s.httpStack=market::stackRemaining();
+  s.httpKind=inflight?httpKind:255;s.httpSource=httpSource;s.httpStatus=lastHttpStatus;s.quoteRequested=needDifferentQuote;
+  s.chartColumns=chartColumns;s.chartPixels=chartPixels;s.historyCandles=histories[timelineDial.stable].count;s.historySavedAt=historyStore.savedEpoch(timelineDial.stable);
   s.online=wifi.online();s.portal=wifi.portalActive();s.clock=time(nullptr)>=config::kMinimumEpoch;
   s.frequency.mv=frequencyMv;s.frequency.raw=frequencyRaw;s.frequency.decoded=frequencyDecoded;
   s.frequency.selected=refreshDial.stable;s.frequency.initialized=refreshDial.initialized;
@@ -178,6 +187,10 @@ void acceptQuote(const btc::Quote& quote,uint8_t source,uint32_t receivedAt,uint
     lastQuoteReceived=receivedAt;++acceptedQuotes;needConfirmation=!guard.confirmed();
     if (needConfirmation) nextQuoteAt=now; // Confirmation never waits for a slow display dial.
     lastAcceptedSource=source;quotes.put(price,source,receivedAt,lastPriceEpoch);
+    if(lastPriceEpoch>=recentPrices[recentHead].timestamp){
+      if(recentPrices[recentHead].timestamp&&lastPriceEpoch/5!=recentPrices[recentHead].timestamp/5)recentHead=(recentHead+1)%64;
+      recentPrices[recentHead]={lastPriceEpoch,price};
+    }
     nextDrawAt=now;
   } else {needConfirmation=true;nextQuoteAt=now;}
 }
@@ -207,17 +220,15 @@ void refreshNixies(uint32_t now) {
     const uint32_t period=refreshPeriod();
     btc::DisplayQuote selected{guard.price,lastQuoteReceived,lastPriceEpoch,lastAcceptedSource};
     quotes.choose(now,firstFrame?0:shownDigits,shownSource,guard.price,fx.fresh(now),selected);
-    bool cosmetic=false;
-    // Keep the explicitly cosmetic fast-mode effect running while a real
-    // quote is held through a brief reconnect. Its receipt timestamp stays
-    // intact; the ordinary stale check above still blanks an actual outage.
-    shownDigits=btc::displayDollars(selected.price,shownDigits,!firstFrame && period==500,cosmetic);
+    uint32_t digits=uint32_t(std::floor(selected.price+0.5));
+    needDifferentQuote=!firstFrame&&digits==shownDigits;
+    shownDigits=digits;
     display::price(double(shownDigits),true);shownPrice=selected.price;shownSource=selected.source;shownQuoteReceived=selected.receivedAt;++nixieFrames;
     lastFrameGap=now-lastNixieAt;
     if(lastFramePeriod!=period||firstFrame){minimumFrameGap=maximumFrameGap=0;lastFramePeriod=period;}
     else {if(!minimumFrameGap||lastFrameGap<minimumFrameGap)minimumFrameGap=lastFrameGap;if(lastFrameGap>maximumFrameGap)maximumFrameGap=lastFrameGap;}
     if (logNixies || nixieFrames==1) Serial.printf("Nixie frame at %lu ms: %.2f interval=%lu ms gap=%lu ms quoteAge=%lu ms source=%s digits=%lu cosmetic=%s\n",(unsigned long)now,shownPrice,
-      (unsigned long)period,(unsigned long)uint32_t(now-lastNixieAt),(unsigned long)uint32_t(now-shownQuoteReceived),btc::kSources[shownSource].name,(unsigned long)shownDigits,cosmetic?"yes":"no");
+      (unsigned long)period,(unsigned long)uint32_t(now-lastNixieAt),(unsigned long)uint32_t(now-shownQuoteReceived),btc::kSources[shownSource].name,(unsigned long)shownDigits,"no");
     lastNixieAt=now;
     // Preserve the timer phase through normal loop jitter. If work delays a
     // frame, send the latest value once and skip expired deadlines.
@@ -230,9 +241,18 @@ void processResult(uint32_t now) {
   const market::Result& result=lease.get();
   now=millis();
   inflight=false;
+  lastHttpStatus=result.status;
   live::httpBusy(false);
+  // Every HTTP response must give missing streams time to reconnect. Without
+  // this, 500 ms REST/FX/history dispatches keep busy=true indefinitely.
+  if(liveReady&&!live::fresh(now))streamWarmupUntil=now+35000;
   if (result.request.kind==market::Kind::Ota) { nextQuoteAt=now;return; }
   size_t source=result.request.source;
+  if(result.deferred){
+    if(result.request.kind==market::Kind::History)nextHistoryAt[result.request.window]=now+5000;
+    else nextQuoteAt=now+5000;
+    return; // Local RAM contention is not an exchange failure/rate limit.
+  }
   if (!result.ok) {
     rotation.failure(source,now,result.status,result.retryAfterMs);
     Serial.printf("%s %s failed (HTTP %d), cooling down\n",btc::kSources[source].name,result.request.kind==market::Kind::Quote?"ticker":"history",result.status);
@@ -257,7 +277,7 @@ void processResult(uint32_t now) {
     uint32_t interval=config::kCandleSeconds[window];
     bool missing=btc::missingHistoryStart(histories[window],window,epoch)!=0;
     nextHistoryAt[window]=now+(missing?1000:(interval-epoch%interval)*1000); historyErrors[window]=0;
-    if (missing) historySource[window]=source==1?2:1;
+    if (missing) historySource[window]=2;
     Serial.printf("%s: %u closed candles received for %s; %u cached\n",btc::kSources[source].name,result.history.count,config::kWindowNames[window],histories[window].count);
     nextDrawAt=now;
   } else {
@@ -271,6 +291,7 @@ void processResult(uint32_t now) {
 bool dispatch(market::Kind kind,uint8_t source,uint8_t window,uint32_t now,uint32_t epoch,uint32_t start=0) {
   if (!market::send({kind,source,window,epoch,start})) return false;
   live::httpBusy(true);
+  httpKind=uint8_t(kind);httpSource=source;
   rotation.started(source,now); inflight=true; return true;
 }
 void schedule(uint32_t now) {
@@ -287,13 +308,16 @@ void schedule(uint32_t now) {
   }
   const uint8_t window=timelineDial.stable;
   if(forceOtaPending&&ota::bootConfirmed()&&market::send({market::Kind::Ota,0,window,epoch})){
+    httpKind=uint8_t(market::Kind::Ota);httpSource=0;
     forceOtaPending=false;ota::defer(now);inflight=true;live::httpBusy(true);return;
   }
   // An unavailable market must not prevent the device from receiving an OTA
   // fix. Only the bounded initial stream grace precedes manifest checks.
   if (btc::due(now,streamWarmupUntil) && ota::checkDue(now,wifi.online()) && market::send({market::Kind::Ota,0,window,epoch})) {
+    httpKind=uint8_t(market::Kind::Ota);httpSource=0;
     ota::defer(now);inflight=true;live::httpBusy(true);return;
   }
+  if(liveReady&&!live::fresh(now)&&guard.price&&!btc::due(now,streamWarmupUntil))return;
   if (!guard.confirmed()) {
     if (liveReady && !btc::due(now,guard.price?streamWarmupUntil:firstQuoteFallbackAt)) return;
     if (btc::due(now,nextQuoteAt)) {
@@ -323,7 +347,7 @@ void schedule(uint32_t now) {
   if (!live::fresh(now) && (!fx.fresh(now) || uint32_t(now-fx.receivedAt)>=config::kFxRefreshMs) && btc::due(now,rotation.states[1].availableAt)) {
     if (dispatch(market::Kind::Fx,1,window,now,epoch)) return;
   }
-  if (btc::due(now,nextQuoteAt) && (needConfirmation || !live::fresh(now))) {
+  if (btc::due(now,nextQuoteAt) && (needDifferentQuote || needConfirmation || !live::fresh(now))) {
     int source=rotation.choose(now,fx.fresh(now));
     if (source>=0 && dispatch(market::Kind::Quote,uint8_t(source),window,now,epoch)) nextQuoteAt=now+config::kRefreshMs[refreshDial.stable];
     else nextQuoteAt=now+500;
@@ -366,11 +390,12 @@ void draw(uint32_t now) {
   if (epoch<config::kMinimumEpoch) epoch=historyStore.savedEpoch(timelineDial.stable);
   const auto& history=histories[timelineDial.stable];
   uint32_t window=config::kWindowSeconds[timelineDial.stable];
-  auto chart=btc::makePlot(history,epoch,window,guard.price,lastPriceEpoch);
+  auto chart=btc::makePlot(history,epoch,window,guard.price,lastPriceEpoch,recentPrices,64);
   // Wait for dated history on the first boot rather than revealing a lone
   // live quote and fetching the selected chart only after the animation ends.
   bool waitingForHistory=display::startupPending() && !btc::makePlot(history,epoch,window,0,0).valid;
   if (chart.valid && !waitingForHistory) {
+    chartColumns=chart.valid;chartPixels=0;for(unsigned col=0;col<21;++col)for(unsigned row=0;row<13;++row)chartPixels+=btc::plotPixel(chart,row,col);
     display::startupPlot(chart,now);
     nextDrawAt=now+(display::startupAnimating()?config::kStartupFrameMs:1000);
   }

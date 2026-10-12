@@ -1,6 +1,6 @@
 #pragma once
 #ifndef BTC_FIRMWARE_VERSION
-#define BTC_FIRMWARE_VERSION "1.0.15"
+#define BTC_FIRMWARE_VERSION "1.0.16"
 #endif
 namespace ota_config {
 constexpr const char* kVersion=BTC_FIRMWARE_VERSION;

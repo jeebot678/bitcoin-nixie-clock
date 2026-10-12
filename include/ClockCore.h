@@ -133,8 +133,11 @@ struct History {
     samples[count++] = {time, price}; return true;
   }
 };
-struct Plot { uint8_t rows[21]; uint32_t valid = 0; };
-inline Plot makePlot(const History& history, uint32_t now, uint32_t window, double live, uint32_t liveTime) {
+struct Plot { uint8_t rows[21]; uint32_t valid = 0;uint16_t connectors[21]={}; };
+inline bool plotPixel(const Plot& plot,unsigned row,unsigned col){
+  return row<13&&col<21&&((plot.connectors[col]&(1U<<row))||((plot.valid&(1U<<col))&&plot.rows[col]==row));
+}
+inline Plot makePlot(const History& history, uint32_t now, uint32_t window, double live, uint32_t liveTime,const Sample* recent=nullptr,size_t recentCount=0) {
   Plot plot = {};
   if (!window || now < window) return plot;
   const uint32_t start = now - window;
@@ -150,6 +153,7 @@ inline Plot makePlot(const History& history, uint32_t now, uint32_t window, doub
     prices[column] = price; plot.valid |= 1U << column;
   };
   for (size_t i = 0; i < history.count; ++i) add(history.samples[i].timestamp, history.samples[i].price);
+  for(size_t i=0;i<recentCount;++i)add(recent[i].timestamp,recent[i].price);
   // The live tick occupies its actual bucket. Gaps remain gaps during outages.
   if (liveTime) add(liveTime, live);
   double low = 1e12, high = 0;
@@ -161,6 +165,19 @@ inline Plot makePlot(const History& history, uint32_t now, uint32_t window, doub
   low = center - half; high = center + half;
   for (size_t i = 0; i < 21; ++i) if (plot.valid & (1U << i))
     plot.rows[i] = uint8_t(12 - std::min(12, std::max(0, int(std::lround((prices[i] - low) * 12 / (high - low))))));
+  // Draw a line between real samples at the source's normal resolution. A
+  // minute candle spans several 5-minute-chart columns. These pixels are
+  // graphical connectors, not invented historical samples; long gaps stay open.
+  uint32_t candle=60;for(unsigned i=0;i<5;++i)if(window==config::kWindowSeconds[i])candle=config::kCandleSeconds[i];
+  uint32_t maximumGap=std::max<uint32_t>(candle,(window+20)/21*2);
+  int previous=-1;
+  for(int col=0;col<21;++col)if(plot.valid&(1U<<col)){
+    if(previous>=0&&timestamps[col]>=timestamps[previous]&&timestamps[col]-timestamps[previous]<=maximumGap){
+      int x=previous,y=plot.rows[previous],targetY=plot.rows[col],dx=col-x,dy=-std::abs(targetY-y),sy=y<targetY?1:-1,error=dx+dy;
+      for(;;){plot.connectors[x]|=uint16_t(1U<<y);if(x==col&&y==targetY)break;int twice=2*error;if(twice>=dy){error+=dy;++x;}if(twice<=dx){error+=dx;y+=sy;}}
+    }
+    previous=col;
+  }
   return plot;
 }
 inline uint32_t staleAfterMs(uint32_t refreshMs) { return std::max<uint32_t>(30000, refreshMs * 3); }

@@ -46,19 +46,25 @@ int apiError(JsonVariantConst root) {
   return 0;
 }
 void fetch(const market::Request& request) {
-  response.ok=false; response.status=0; response.retryAfterMs=0;
+  response.ok=false;response.deferred=false; response.status=0; response.retryAfterMs=0;
   response.quote={}; response.history.count=0; response.request=request;
   if (WiFi.status()!=WL_CONNECTED || time(nullptr)<config::kMinimumEpoch) return;
   bool history=request.kind==market::Kind::History;
   if (request.source>=btc::kSourceCount || request.window>=5) return;
-  size_t capacity=history?btc::historyCapacity(request.source==2,request.window,request.epoch,request.start):8192;
-  if (!live::prepareHttp(request.kind==market::Kind::Ota?4096:capacity,30000)) return;
+  uint32_t endEpoch=request.epoch;
+  uint32_t historyStart=history?btc::historyRequestStart(request.window,request.epoch,request.start):0;
+  if(history&&request.source==2){
+    endEpoch=std::min<uint32_t>(request.epoch,historyStart+24*config::kCandleSeconds[request.window]);
+  }
+  size_t capacity=history?btc::historyCapacity(request.source==2,request.window,endEpoch,historyStart):2048;
+  bool allowPause=request.kind==market::Kind::Ota;
+  if (!live::prepareHttp(allowPause?4096:capacity,30000,false,allowPause)){response.deferred=true;return;}
   btc::TlsLease handshake;
   uint32_t waitingAt=millis();
   while (!handshake.acquire() && uint32_t(millis()-waitingAt)<15000) delay(5);
-  if (!handshake) return;
+  if (!handshake){response.deferred=true;return;}
   // A stream handshake can finish and consume RAM after the first reservation.
-  if (!live::prepareHttp(request.kind==market::Kind::Ota?4096:capacity,30000,true)) return;
+  if (!live::prepareHttp(allowPause?4096:capacity,30000,true,allowPause)){response.deferred=true;return;}
   if (request.kind==market::Kind::Ota) {
     response.ok=ota::checkAndInstall();return;
   }
@@ -77,7 +83,7 @@ void fetch(const market::Request& request) {
     if (request.source==1)
       url="https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval="+String(interval/60)+"&since="+String(start-interval);
     else
-      url="https://www.bitstamp.net/api/v2/ohlc/btcusd/?step="+String(interval)+"&limit="+String((request.epoch/interval*interval-start)/interval)+"&end="+String(request.epoch/interval*interval-1)+"&exclude_current_candle=true";
+      url="https://www.bitstamp.net/api/v2/ohlc/btcusd/?step="+String(interval)+"&limit="+String((endEpoch/interval*interval-start)/interval)+"&end="+String(endEpoch/interval*interval-1)+"&exclude_current_candle=true";
   }
   CooperativeTlsClient tls;
   tls.setCACertBundle(caBundle); tls.setHandshakeTimeout(20); tls.setTimeout(6);
@@ -107,14 +113,13 @@ void fetch(const market::Request& request) {
       BoundedReader reader(*http.getStreamPtr(),history ? 160000 : 8192);
       if (document.capacity()) {
         DeserializationError error;
-        if (history) {
-          StaticJsonDocument<512> filter;
-          btc::historyFilter(filter,request.source==2);
-          error=deserializeJson(document,reader,DeserializationOption::Filter(filter),DeserializationOption::NestingLimit(12));
-        } else error=deserializeJson(document,reader,DeserializationOption::NestingLimit(12));
+        StaticJsonDocument<768> filter;
+        if(history)btc::historyFilter(filter,request.source==2);
+        else btc::quoteFilter(filter,btc::kSources[request.source].provider);
+        error=deserializeJson(document,reader,DeserializationOption::Filter(filter),DeserializationOption::NestingLimit(12));
         if (!error) {
           response.epoch=uint32_t(time(nullptr));
-          response.ok=history ? btc::parseHistory(document.as<JsonVariantConst>(),request.source==2,request.window,request.epoch,response.history,request.start)
+          response.ok=history ? btc::parseHistory(document.as<JsonVariantConst>(),request.source==2,request.window,endEpoch,response.history,historyStart)
                               : btc::parseQuote(btc::kSources[request.source].provider,document.as<JsonVariantConst>(),response.epoch,response.quote);
           if (!response.ok) { int code=apiError(document.as<JsonVariantConst>()); if (code) response.status=code; }
         } else Serial.printf("%s JSON failed: %s\n",btc::kSources[request.source].name,error.c_str());

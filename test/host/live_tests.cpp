@@ -68,6 +68,7 @@ int main(int argc,char** argv){
   // Reported on the real ESP32: ~89 KiB total / 45 KiB largest included IRAM,
   // while the byte-accessible pool could not allocate another TLS session.
   ESP.freeHeap=89000;ESP.largest=45044;testDataHeap()=43000;testDataBlock()=18000;
+  assert(!live::prepareHttp(8192,0,false,false));assert(primary.connected&&!primaryReserved);
   assert(!live::prepareHttp(8192,0));steps();assert(!liveSockets()&&primary.paused);
   testDataHeap()=testDataBlock()=UINT32_MAX;ESP.largest=100000;
   ESP.freeHeap=150000;assert(live::prepareHttp(8192,0));live::httpBusy(false);steps();assert(live::status().connections==2);

@@ -13,6 +13,7 @@ struct Request {
 struct Result {
   Request request;
   bool ok = false;
+  bool deferred = false;
   int status = 0;
   uint32_t retryAfterMs = 0, receivedAt = 0, epoch = 0;
   btc::Quote quote;

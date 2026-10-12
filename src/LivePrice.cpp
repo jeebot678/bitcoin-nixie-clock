@@ -191,12 +191,13 @@ bool pauseAndWait(uint32_t timeoutMs) {
 }
 void resume() {pauseRequested=false;}
 void httpBusy(bool value) {if (!value) primaryReserved=false;busy=value;}
-bool prepareHttp(size_t jsonBytes,uint32_t timeoutMs,bool probe) {
+bool prepareHttp(size_t jsonBytes,uint32_t timeoutMs,bool probe,bool allowPrimaryPause) {
   busy=true;uint32_t start=millis();
   while (!slots[1].paused && uint32_t(millis()-start)<timeoutMs) delay(5);
   if (!slots[1].paused) return false;
   auto fits=[&](){return probe?network_memory::fits(jsonBytes):network_memory::available(jsonBytes);};
   if (!fits()) {
+    if(!allowPrimaryPause)return false;
     primaryReserved=true;
     while (!slots[0].paused && uint32_t(millis()-start)<timeoutMs) delay(5);
     if (!slots[0].paused) return false;

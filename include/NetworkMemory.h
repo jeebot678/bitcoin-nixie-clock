@@ -8,7 +8,7 @@ namespace network_memory {
 // mbedTLS buffers, JSON and network payloads need byte-addressable data RAM.
 inline uint32_t freeBytes(){return heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);}
 inline uint32_t largestBlock(){return heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);}
-constexpr uint32_t kHandshakeBytes=60000,kRecordBuffer=18000;
+constexpr uint32_t kHandshakeBytes=52000,kRecordBuffer=18000;
 inline bool available(size_t jsonBytes=0){
   return freeBytes()>=kHandshakeBytes+jsonBytes &&
     largestBlock()>=std::max<size_t>(kRecordBuffer,jsonBytes);
