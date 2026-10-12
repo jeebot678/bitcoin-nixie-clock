@@ -1,6 +1,6 @@
 # Wireless diagnostics and OTA control
 
-Firmware 1.0.11 exposes a LAN service at `http://bitcoin-clock.local:8080`.
+Firmware 1.0.11 and later expose a LAN service at `http://bitcoin-clock.local:8080`.
 If multicast discovery fails, use the clock's IP on port 8080. It starts when
 home Wi-Fi is connected and the setup portal has closed. The passwordless
 provisioning hotspot still closes normally; diagnostics remain on home Wi-Fi.
@@ -61,13 +61,15 @@ The collector records independently; it does not make Codex keep working
 after a conversation ends. For calibration, move one dial through all five
 contacts, holding each at least three seconds, while leaving the other dial
 still. Label positions with `mark`, or tell Codex which dial/position is set.
-Use observed values to update the separate calibration arrays, then publish
-another signed firmware version.
+Use observed values to update the separate calibration arrays in physical
+lowest-to-highest order, then publish another signed firmware version. The
+1.0.12 calibration uses only the fresh range-first / frequency-second sweep;
+both switches run from POS5 to POS1. See [the mapping](PCB_PIN_MAP.md).
 
 ## Triggering an update
 
 ```sh
-python3 tools/clock_link.py ota --expect 1.0.12 --wait 240
+python3 tools/clock_link.py ota --expect 1.0.13 --wait 240
 ```
 
 First publish and verify the signed newer release and `main` manifest. The tool

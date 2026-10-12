@@ -69,9 +69,9 @@ void settingsTests(){
   assert(guard.confirmed()&&!needConfirmation);market::complete();processResult(testMillis);
   schedule(testMillis);assert(market::outstanding.kind==market::Kind::History);
   unsigned before=market::calls;
-  adc[35]=1800;adc[34]=503;readDials(testMillis);testMillis+=151;readDials(testMillis);
+  adc[35]=142;adc[34]=1328;readDials(testMillis);testMillis+=151;readDials(testMillis);
   assert(refreshDial.stable==4&&timelineDial.stable==1);schedule(testMillis);assert(market::calls==before);
-  Serial.input="dials\n";serialCommands(testMillis);assert(Serial.log.find("Frequency JSEL2 GPIO35=1800 mV; range JSEL1 GPIO34=503 mV")!=std::string::npos);
+  Serial.input="dials\n";serialCommands(testMillis);assert(Serial.log.find("Frequency JSEL2 GPIO35=142 mV; range JSEL1 GPIO34=1328 mV")!=std::string::npos);
   Serial.input="ticks on\nticks on\n";serialCommands(testMillis);assert(logNixies);
   Serial.input="ticks off\nticks off\n";serialCommands(testMillis);assert(!logNixies);
   market::complete();processResult(testMillis);
@@ -100,8 +100,8 @@ void cacheRuntimeTests(){
   unsigned writes=fsMock().writes;saveHistory(testMillis);assert(fsMock().writes==writes);
   nextQuoteAt=testMillis+1800000;nextHistoryAt[4]=testMillis;unsigned calls=market::calls;schedule(testMillis);assert(market::calls==calls);
   // Switching away and back changes draw timing, without refetching a complete cache.
-  adc[34]=1336;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(timelineDial.stable==3);
-  adc[34]=1800;testMillis+=25;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(timelineDial.stable==4);
+  adc[34]=493;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(timelineDial.stable==3);
+  adc[34]=142;testMillis+=25;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(timelineDial.stable==4);
   nextQuoteAt=testMillis+1800000;fx.receivedAt=testMillis;schedule(testMillis);assert(market::calls==calls);
   // The actual main scheduler requests only the missing two days.
   testEpoch+=2*86400;testMillis+=6000;nextHistoryAt[4]=testMillis;schedule(testMillis);
@@ -168,7 +168,7 @@ void nixieCadenceTests(){
   }
   // A dial change takes effect immediately even with a network request active.
   testMillis+=100;refreshDial.stable=4;refreshDial.candidate=-1;nextDialsAt=testMillis;
-  inflight=true;adc[35]=0;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(refreshDial.stable==0&&nextNixieAt==testMillis);
+  inflight=true;adc[35]=1774;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(refreshDial.stable==0&&nextNixieAt==testMillis);
   lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(83343);assert(nextNixieAt==testMillis+500);inflight=false;
   // Once a stream is fresh, REST traffic is only needed for confirmation or fallback.
   needConfirmation=false;live::healthy=true;fx.usd=1;fx.receivedAt=testMillis;nextQuoteAt=testMillis;for(auto&deadline:nextHistoryAt)deadline=testMillis+100000;
@@ -186,7 +186,7 @@ void nixieCadenceTests(){
   uint32_t deadline=nextNixieAt;testMillis=deadline+1005;lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(guard.price+1);assert(nextNixieAt==deadline+1500);
   // Confirming the default detent must not emit an early same-frequency frame.
   deadline=nextNixieAt;refreshDial.initialized=false;refreshDial.candidate=-1;
-  nextDialsAt=testMillis;adc[35]=0;readDials(testMillis);testMillis+=151;readDials(testMillis);
+  nextDialsAt=testMillis;adc[35]=1774;readDials(testMillis);testMillis+=151;readDials(testMillis);
   assert(refreshDial.initialized&&refreshDial.stable==0&&nextNixieAt==deadline);
   std::cout<<"PASS: actual Nixie SPI frames at all five selected intervals, unchanged digits, newest stream values, blocked history/TLS, immediate dial changes, REST fallback, outage blanking and millis rollover\n";
 }
@@ -226,11 +226,11 @@ void startupAndDialRegressionTests(){
     assertPriceFrame(shownDigits);assert(std::abs(double(shownDigits)-80000.25)<=1);
     assert(lastQuoteReceived==received&&shownQuoteReceived==received&&guard.price==80000.25);last=shownDigits;
   }
-  // Replay observed readings at the fast contact after a stable 1-hour
-  // setting. All readings represent the same detent, so noise must not
-  // keep resetting its debounce or strand the display at the old rate.
+  // Replay the fresh lowest-detent measurements after a stable 1-hour
+  // setting. The assembled frequency switch is reversed; all voltages in
+  // this independently recorded band must return to 500 ms after debounce.
   refreshDial=btc::Dial(4);refreshDial.initialized=true;nextNixieAt=testMillis+3600000;nextDialsAt=testMillis;
-  for(uint32_t measured:{142U,301U,309U,222U,237U,182U,309U}){
+  for(uint32_t measured:{1766U,1774U,1776U,1769U,1775U,1770U,1774U}){
     adc[35]=measured;readDials(testMillis);testMillis+=25;
   }
   assert(refreshDial.initialized&&refreshDial.stable==0&&nextNixieAt==testMillis-25);
@@ -255,7 +255,7 @@ void startupAndDialRegressionTests(){
   guard=btc::PriceGuard{};ota::due=true;schedule(testMillis);
   assert(market::sent&&market::outstanding.kind==market::Kind::Ota&&!ota::due);
   market::complete();processResult(testMillis);liveReady=true;
-  std::cout<<"PASS: first-source display, startup chase, 500 ms tube packets during a 12-second reconnect without new ticks, observed dial noise recovering from 1-hour frequency, dial-independent confirmation and OTA without market data\n";
+  std::cout<<"PASS: first-source display, startup chase, 500 ms tube packets during a 12-second reconnect without new ticks, fresh reversed-contact measurements recovering from 1-hour frequency, dial-independent confirmation and OTA without market data\n";
 }
 void tubeDiagnosticTests(){
   guard=btc::PriceGuard{};quotes.clear();testMillis+=6000;Serial.input="tube-test\n";serialCommands(testMillis);
@@ -275,10 +275,34 @@ void tubeDiagnosticTests(){
   packets.clear();refreshNixies(testMillis);assertPriceFrame(83300);assert(!tubeTestEndsAt);
   std::cout<<"PASS: explicit five-second tube diagnostic advances every cathode on all six CS lines at 500 ms without prices, then restores the live/startup display\n";
 }
+void assembledDialTests(){
+  // Independent medians from the fresh range-first / frequency-second sweep.
+  const uint16_t frequency[5]={1774,1328,915,490,142},range[5]={1775,1328,909,493,142};
+  const uint32_t periods[5]={500,2000,30000,300000,3600000},windows[5]={300,1800,3600,86400,604800};
+  for(int position=0;position<5;++position){
+    testMillis+=6000;nextDialsAt=testMillis;
+    refreshDial=btc::Dial((position+4)%5);refreshDial.initialized=true;
+    timelineDial=btc::Dial((position+4)%5);timelineDial.initialized=true;
+    adc[35]=frequency[position];adc[34]=range[position];nextNixieAt=testMillis+3600000;
+    readDials(testMillis);assert(refreshDial.stable!=position&&timelineDial.stable!=position);
+    testMillis+=151;readDials(testMillis);
+    assert(refreshDial.stable==position&&timelineDial.stable==position&&nextNixieAt==testMillis);
+    assert(nextDrawAt==testMillis&&nextHistoryAt[position]==testMillis);
+    assert(config::kRefreshMs[refreshDial.stable]==periods[position]&&config::kWindowSeconds[timelineDial.stable]==windows[position]);
+    guard.price=83300;quotes.clear();shownPrice=83300;shownDigits=83300;lastQuoteReceived=testMillis;
+    packets.clear();refreshNixies(testMillis);assertPriceFrame(position==0?83301:83300);
+    assert(nextNixieAt==testMillis+periods[position]);
+    for(uint16_t invalid:{uint16_t(2269),uint16_t(3300)}){
+      adc[35]=adc[34]=invalid;testMillis+=25;readDials(testMillis);testMillis+=151;readDials(testMillis);
+      assert(refreshDial.stable==position&&timelineDial.stable==position);
+    }
+  }
+  std::cout<<"PASS: fresh assembled switch measurements select all five intended frequency/range settings, debounce, immediate real SPI output and unused/open-contact rejection\n";
+}
 void wirelessRuntimeTests(){
-  testMillis+=6000;nextDialsAt=nextRawAt=nextTelemetryAt=testMillis;adc[35]=309;adc[34]=926;readDials(testMillis);
-  assert(frequencyMv==309&&rangeMv==926&&frequencyDecoded==0&&rangeDecoded==2);
-  publishTelemetry(testMillis);assert(telemetry::last.frequency.mv==309&&telemetry::last.frequency.decoded==0&&telemetry::last.range.mv==926);
+  testMillis+=6000;nextDialsAt=nextRawAt=nextTelemetryAt=testMillis;adc[35]=1774;adc[34]=909;readDials(testMillis);
+  assert(frequencyMv==1774&&rangeMv==909&&frequencyDecoded==0&&rangeDecoded==2);
+  publishTelemetry(testMillis);assert(telemetry::last.frequency.mv==1774&&telemetry::last.frequency.decoded==0&&telemetry::last.range.mv==909);
   assert(telemetry::last.frames==nixieFrames&&telemetry::last.accepted==acceptedQuotes&&telemetry::last.bootConfirmed);
   // A queued OTA must wait for ongoing HTTP, but bypass six-hour/stream
   // grace once it is free. It always dispatches the ordinary signed updater.
@@ -300,4 +324,4 @@ void wirelessRuntimeTests(){
   WiFi.connection=WL_CONNECTED;wifi.loop(testMillis);testMillis+=8001;wifi.loop(testMillis);assert(wifi.online()&&!wifi.portalActive());
   std::cout<<"PASS: actual dial sampling/snapshots, queued signed OTA checks bypassing schedule without interrupting in-flight HTTP, wireless matrix/tube controls and BOOT diagnostics gestures\n";
 }
-int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();wirelessRuntimeTests();soak();}
+int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();assembledDialTests();wirelessRuntimeTests();soak();}

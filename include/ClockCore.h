@@ -20,12 +20,22 @@ inline bool priceDigits(double price, uint8_t digits[6]) {
 }
 inline int dialPosition(uint32_t mv, const uint16_t centers[5]) {
   // The grounded contact reads above zero on this board's calibrated ADC.
-  // Logs measured 142..309 mV here. Include the low end up to the second
-  // contact's acceptance band, otherwise returning from a slow setting can
-  // retain it forever. Open/high contacts still fall through as invalid.
-  if (mv < centers[1] && centers[1] - mv > config::kDialToleranceMv) return 0;
-  for (int i = 0; i < 5; ++i)
-    if (std::abs(int(mv) - int(centers[i])) <= config::kDialToleranceMv) return i;
+  // Contact order follows the assembled switch, not ascending resistor value.
+  // Extend only the explicitly grounded contact to the lowest nonzero band's
+  // edge, preserving the observed 142..309 mV readings in any wiring order.
+  int grounded=-1,selected=-1;
+  uint32_t firstNonzero=UINT16_MAX,best=config::kDialToleranceMv+1;
+  bool tied=false;
+  for (int i=0;i<5;++i) {
+    if (!centers[i]) grounded=i;
+    else firstNonzero=std::min<uint32_t>(firstNonzero,centers[i]);
+    uint32_t distance=mv>=centers[i]?mv-centers[i]:centers[i]-mv;
+    if (distance<best) {best=distance;selected=i;tied=false;}
+    else if (distance==best) tied=true;
+  }
+  if (grounded>=0 && firstNonzero!=UINT16_MAX && firstNonzero>config::kDialToleranceMv &&
+      mv<firstNonzero-config::kDialToleranceMv) return grounded;
+  if (selected>=0 && !tied) return selected;
   return -1; // Open switch/transition: retain last stable setting.
 }
 struct Dial {

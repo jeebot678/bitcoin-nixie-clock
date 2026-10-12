@@ -10,10 +10,12 @@ constexpr uint8_t kMaxShiftOrder[6] = {3, 4, 5, 2, 1, 0};
 // Rev20: SEL1_ADC -> U7.J2_5/IO34; SEL2_ADC -> U7.J2_6/IO35.
 // As assembled: JSEL1 = range, JSEL2 = frequency.
 constexpr uint8_t kRefreshPin = 35, kTimelinePin = 34;
-// First five contacts of the board's resistor ladder. Use `dials` over serial
-// to measure the assembled selectors; adjust EACH dial independently here.
-constexpr uint16_t kRefreshMv[5] = {0, 503, 926, 1336, 1800};
-constexpr uint16_t kTimelineMv[5] = {0, 503, 926, 1336, 1800};
+// Physical lowest -> highest, measured independently over Wi-Fi on 2026-10-12.
+// Both assembled switches run P5 -> P1 (12k, 6.8k, 3.9k, 1.8k, 0 ohms).
+// Keep the grounded track marked 0: raw ADC=0 reports a 142 mV calibrated
+// floor; dialPosition extends that track's low band independently of order.
+constexpr uint16_t kRefreshMv[5] = {1774, 1328, 915, 490, 0};
+constexpr uint16_t kTimelineMv[5] = {1775, 1328, 909, 493, 0};
 constexpr uint16_t kDialToleranceMv = 160;
 constexpr uint32_t kDebounceMs = 150;
 constexpr uint32_t kRefreshMs[5] = {500, 2000, 30000, 300000, 3600000};

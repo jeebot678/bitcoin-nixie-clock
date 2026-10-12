@@ -25,9 +25,40 @@ void coreTests() {
   for (double bad:{0.0,-1.0,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) assert(!btc::priceDigits(bad,digits));
   for (int i=0;i<5;++i) { assert(btc::dialPosition(config::kRefreshMv[i],config::kRefreshMv)==i); assert(btc::dialPosition(config::kRefreshMv[i]+150,config::kRefreshMv)==i); }
   assert(btc::dialPosition(3200,config::kRefreshMv)==-1);assert(btc::dialPosition(2269,config::kRefreshMv)==-1);
+  const uint16_t originalLadder[5]={0,503,926,1336,1800};
   for(uint32_t measured:{142U,155U,177U,182U,216U,222U,237U,240U,301U,309U,342U})
-    assert(btc::dialPosition(measured,config::kRefreshMv)==0);
-  assert(btc::dialPosition(343,config::kRefreshMv)==1);
+    assert(btc::dialPosition(measured,originalLadder)==0);
+  assert(btc::dialPosition(343,originalLadder)==1);
+  // Fresh physical lowest-to-highest sweep: independently captured bands on
+  // GPIO35 (frequency) and GPIO34 (range), not generated from the config.
+  const uint16_t observedFrequency[5][2]={{1766,1776},{1326,1330},{912,917},{488,493},{142,142}};
+  const uint16_t observedRange[5][2]={{1767,1775},{1326,1330},{908,914},{489,495},{142,142}};
+  for(int i=0;i<5;++i){
+    for(uint32_t v=observedFrequency[i][0];v<=observedFrequency[i][1];++v)assert(btc::dialPosition(v,config::kRefreshMv)==i);
+    for(uint32_t v=observedRange[i][0];v<=observedRange[i][1];++v)assert(btc::dialPosition(v,config::kTimelineMv)==i);
+  }
+  // All mechanical wiring orders must decode the same resistor voltages to
+  // their configured positions, including the nonzero lowest detents observed
+  // over Wi-Fi. Ground tolerance must follow its contact rather than index 0.
+  uint16_t ordered[5]={0,503,926,1336,1800};unsigned permutations=0;
+  do {
+    for(int i=0;i<5;++i){
+      assert(btc::dialPosition(ordered[i],ordered)==i);
+      assert(btc::dialPosition(ordered[i]+150,ordered)==i);
+      if(ordered[i])assert(btc::dialPosition(ordered[i]-150,ordered)==i);
+      else for(uint32_t value:{142U,309U,342U})assert(btc::dialPosition(value,ordered)==i);
+    }
+    assert(btc::dialPosition(724,ordered)==-1);
+    assert(btc::dialPosition(2269,ordered)==-1&&btc::dialPosition(3300,ordered)==-1);
+    assert(btc::dialPosition(UINT32_MAX,ordered)==-1);++permutations;
+  }while(std::next_permutation(ordered,ordered+5));
+  assert(permutations==120);
+  const uint16_t withoutGround[5]={1800,1336,926,503,2269};
+  assert(btc::dialPosition(1774,withoutGround)==0&&btc::dialPosition(1329,withoutGround)==1);
+  assert(btc::dialPosition(0,withoutGround)==-1&&btc::dialPosition(309,withoutGround)==-1);
+  const uint16_t overlapping[5]={1000,1100,1800,2269,503};
+  assert(btc::dialPosition(1049,overlapping)==0&&btc::dialPosition(1051,overlapping)==1);
+  assert(btc::dialPosition(1050,overlapping)==-1);
   btc::Dial dial; assert(!dial.update(0,100));assert(!dial.update(0,249));assert(dial.update(0,250));
   assert(!dial.update(4,251));assert(!dial.update(-1,300));assert(!dial.update(4,400));assert(dial.update(4,550));assert(dial.stable==4);
   dial={};assert(!dial.update(2,UINT32_MAX-50));assert(dial.update(2,100));

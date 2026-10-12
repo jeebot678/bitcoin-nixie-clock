@@ -26,7 +26,7 @@ Without a battery-backed RTC, the ESP32 cannot know how long it was powered off 
 
 Once a saved or freshly fetched chart is ready, the matrix performs a startup reveal once per boot: all 273 LEDs fill left to right, row by row from top to bottom, then clear in the same order while leaving the selected chart pixels lit. Each pass takes about 0.82 seconds, with a fully lit frame between them. The reveal follows current prices and dial selections and runs without delaying the main loop. Later range changes show their chart immediately without repeating it.
 
-`include/DeviceConfig.h` contains independent calibration centers for each dial, debounce, intervals and brightness. The archived board documentation described six resistor positions; this application uses the first five (0, 503, 926, 1336, 1800 mV). Firmware 1.0.10 accepts 0–342 mV at the grounded first contact: previous device logs measured 142–309 mV, which could prevent returning from a slow setting to 0.5 s. Other contacts retain their calibrated bands, and unused/high/open contacts retain the prior setting. **Measure your actual five selector positions with the serial `dials` command before device acceptance.** The pin assignments were checked against the linked PCB-design session and its Rev20 schematic/board; see [PCB pin mapping](docs/PCB_PIN_MAP.md). GPIO34/35 are ADC1 inputs, so they work with Wi-Fi enabled. Display wiring, matrix mapping and chain order follow the working demo.
+`include/DeviceConfig.h` contains independent calibration centers for each dial, debounce, intervals and brightness. Firmware 1.0.12 maps the assembled switches from physical lowest to highest: P5 → P4 → P3 → P2 → P1 (12 kΩ → 6.8 kΩ → 3.9 kΩ → 1.8 kΩ → 0 Ω). A fresh Wi-Fi sweep measured frequency centers of 1774/1328/915/490 mV and range centers of 1775/1328/909/493 mV; the grounded contact reports raw ADC 0 and calibrated 142 mV on both. Its configured zero marker extends the low acceptance band regardless of wiring order. Lowest now selects 0.5 s / 5 min; highest selects 1 h / 7 d. The decoder supports any contact order, with nearest-band selection and invalid/open/unused contacts retaining the prior setting. See the [fresh calibration measurements](test/dial_calibration_report.json) and [PCB pin mapping](docs/PCB_PIN_MAP.md). Future calibration can use the wireless diagnostics without USB. GPIO34/35 are ADC1 inputs, so they work with Wi-Fi enabled. Display wiring, matrix mapping and chain order follow the working demo.
 
 ## Program the ESP32
 
@@ -64,7 +64,7 @@ Keep and back up `secrets/ota-signing-key.pem` privately. Only `data/cert/ota-pu
 To publish a future update from a clean `main` checkout after committing your code changes:
 
 ```sh
-python3 tools/publish_release.py --version 1.0.12
+python3 tools/publish_release.py --version 1.0.13
 ```
 
 That command builds, runs the host tests, signs locally, pushes the versioned source, publishes the firmware release, then pushes the signed rollout manifest to `main`. The signing key is never sent to GitHub. Routine OTA checks retain the primary price feed. Both streams pause only for a validated new image download/install, and resume on failure. The display timer and rotary inputs continue running.

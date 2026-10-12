@@ -12,15 +12,36 @@ and `Controller_Rev20.sch` agree:
 
 The original board only names the selectors SEL1 and SEL2. Firmware 1.0.6 swaps
 the functions to match the user's assembled controls: JSEL1 is range; JSEL2 is
-frequency. Contacts POS1
-through POS5 select the settings in README order. COMMON is the wiper; the other
-pole of a two-pole selector is unused. POS6 is not a setting in this firmware.
+frequency. The fresh assembled-device sweep for firmware 1.0.12 confirmed
+these GPIO roles: range moved first on GPIO34, then frequency on GPIO35.
 
-The board has a 10 kΩ pull-up to 3.3 V, position resistors of 0 Ω, 1.8 kΩ,
-3.9 kΩ, 6.8 kΩ and 12 kΩ, then a 1 kΩ series resistor and 100 nF ADC filter.
-Nominal detent voltages are 0, 503, 926, 1336 and 1800 mV. The independent
-calibration arrays in `include/DeviceConfig.h` remain adjustable with `dials`.
-These are passive selectors; do not supply an external voltage to the contacts.
+The user's Rev20 `Component_Installation_Guide.html` independently confirms
+10 kΩ pull-ups, six grounded position tracks (0 Ω, 1.8 kΩ, 3.9 kΩ, 6.8 kΩ,
+12 kΩ, 22 kΩ), and each common-to-ADC connection through 1 kΩ with a 100 nF
+filter. The manufactured board source named there is
+`Controller_Production_Candidate.brd` (SHA-256
+`bdb7042236a56f207aaa09973c254fda8605efadfd1a4155382a34c518afdddc`).
+
+The switch's mechanical order is independent of PCB position numbering.
+The fresh lowest-to-highest sweep measured both switches as **POS5 → POS1**:
+
+| Physical position | PCB track / resistor | Frequency / GPIO35 | Range / GPIO34 | Selected frequency | Selected range |
+| --- | --- | --- | --- | --- | --- |
+| Lowest | POS5 / 12 kΩ | 1774 mV | 1775 mV | 0.5 s | 5 min |
+| Second | POS4 / 6.8 kΩ | 1328 mV | 1328 mV | 2 s | 30 min |
+| Third | POS3 / 3.9 kΩ | 915 mV | 909 mV | 30 s | 1 h |
+| Fourth | POS2 / 1.8 kΩ | 490 mV | 493 mV | 5 min | 24 h |
+| Highest | POS1 / 0 Ω | 142 mV, raw 0 | 142 mV, raw 0 | 1 h | 7 d |
+
+Independent calibration arrays follow this physical order. The grounded track
+keeps an explicit zero marker so its low-voltage band handles the observed
+calibrated floor without assuming that ground is the first setting. POS6
+(22 kΩ, nominal 2269 mV) and open/high readings are invalid and retain the
+last stable setting. COMMON is the wiper; the other pole of a two-pole selector
+is unused. These are passive selectors; do not supply an external voltage.
+
+Only samples from the newly requested session were used. See
+[the captured calibration report](../test/dial_calibration_report.json).
 
 Source SHA-256 values recorded during verification:
 

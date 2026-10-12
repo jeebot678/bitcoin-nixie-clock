@@ -1,0 +1,157 @@
+{
+  "measurement": "firmware_lan_adc_telemetry",
+  "device_id": "08576da50528",
+  "firmware_measured": "1.0.11",
+  "firmware_corrected": "1.0.12",
+  "start_utc": "2026-10-12T03:20:07.096833+00:00",
+  "end_utc": "2026-10-12T03:21:18.143826+00:00",
+  "only_fresh_session_used": true,
+  "user_sweep_order": [
+    "range",
+    "frequency"
+  ],
+  "physical_order": "lowest to highest",
+  "position_resistors_ohms": [
+    12000,
+    6800,
+    3900,
+    1800,
+    0
+  ],
+  "range": {
+    "pin": 34,
+    "expected_seconds": [
+      300,
+      1800,
+      3600,
+      86400,
+      604800
+    ],
+    "positions": [
+      {
+        "nominal_mv": 1800,
+        "start": "2026-10-12T03:20:07.096833+00:00",
+        "end": "2026-10-12T03:20:13.570007+00:00",
+        "duration_seconds": 6.473,
+        "samples": 15,
+        "median_mv": 1775,
+        "min_mv": 1767,
+        "max_mv": 1775,
+        "median_raw": 1957
+      },
+      {
+        "nominal_mv": 1336,
+        "start": "2026-10-12T03:20:14.145912+00:00",
+        "end": "2026-10-12T03:20:19.130612+00:00",
+        "duration_seconds": 4.985,
+        "samples": 11,
+        "median_mv": 1328,
+        "min_mv": 1326,
+        "max_mv": 1330,
+        "median_raw": 1428
+      },
+      {
+        "nominal_mv": 926,
+        "start": "2026-10-12T03:20:19.616176+00:00",
+        "end": "2026-10-12T03:20:25.192266+00:00",
+        "duration_seconds": 5.576,
+        "samples": 12,
+        "median_mv": 909.0,
+        "min_mv": 908,
+        "max_mv": 914,
+        "median_raw": 923.0
+      },
+      {
+        "nominal_mv": 503,
+        "start": "2026-10-12T03:20:25.704040+00:00",
+        "end": "2026-10-12T03:20:31.190040+00:00",
+        "duration_seconds": 5.486,
+        "samples": 12,
+        "median_mv": 493.0,
+        "min_mv": 489,
+        "max_mv": 495,
+        "median_raw": 421.5
+      },
+      {
+        "nominal_mv": 0,
+        "start": "2026-10-12T03:20:31.785277+00:00",
+        "end": "2026-10-12T03:21:18.143826+00:00",
+        "duration_seconds": 46.359,
+        "samples": 93,
+        "median_mv": 142,
+        "min_mv": 142,
+        "max_mv": 142,
+        "median_raw": 0
+      }
+    ]
+  },
+  "frequency": {
+    "pin": 35,
+    "expected_ms": [
+      500,
+      2000,
+      30000,
+      300000,
+      3600000
+    ],
+    "positions": [
+      {
+        "nominal_mv": 1800,
+        "start": "2026-10-12T03:20:07.096833+00:00",
+        "end": "2026-10-12T03:20:36.253682+00:00",
+        "duration_seconds": 29.157,
+        "samples": 60,
+        "median_mv": 1774.0,
+        "min_mv": 1766,
+        "max_mv": 1776,
+        "median_raw": 1963.0
+      },
+      {
+        "nominal_mv": 1336,
+        "start": "2026-10-12T03:20:36.768644+00:00",
+        "end": "2026-10-12T03:20:41.362509+00:00",
+        "duration_seconds": 4.594,
+        "samples": 10,
+        "median_mv": 1328.0,
+        "min_mv": 1326,
+        "max_mv": 1330,
+        "median_raw": 1425.0
+      },
+      {
+        "nominal_mv": 926,
+        "start": "2026-10-12T03:20:42.113313+00:00",
+        "end": "2026-10-12T03:20:45.359844+00:00",
+        "duration_seconds": 3.247,
+        "samples": 8,
+        "median_mv": 915.0,
+        "min_mv": 912,
+        "max_mv": 917,
+        "median_raw": 931.0
+      },
+      {
+        "nominal_mv": 503,
+        "start": "2026-10-12T03:20:45.801452+00:00",
+        "end": "2026-10-12T03:20:49.388582+00:00",
+        "duration_seconds": 3.587,
+        "samples": 8,
+        "median_mv": 490.0,
+        "min_mv": 488,
+        "max_mv": 493,
+        "median_raw": 421.5
+      },
+      {
+        "nominal_mv": 0,
+        "start": "2026-10-12T03:20:49.886239+00:00",
+        "end": "2026-10-12T03:21:18.143826+00:00",
+        "duration_seconds": 28.258,
+        "samples": 57,
+        "median_mv": 142,
+        "min_mv": 142,
+        "max_mv": 142,
+        "median_raw": 0
+      }
+    ]
+  },
+  "ground_note": "Grounded contact raw ADC=0 reports 142 mV; configured center 0 explicitly identifies this contact for low-band extension.",
+  "installation_guide": "Component_Installation_Guide.html, Rev20: 10k pull-up, independent P1..P6 tracks of 0/1.8k/3.9k/6.8k/12k/22k, 1k ADC series and 100nF filter."
+}
