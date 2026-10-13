@@ -1,0 +1,31 @@
+{
+  "version": "1.0.18",
+  "device_id": "08576da50528",
+  "transport": "LAN telemetry after signed GitHub/main OTA",
+  "checked_at_utc": "2026-10-13T00:01:21.845578+00:00",
+  "duration_ms": 179913,
+  "samples": 398,
+  "connection_errors": [],
+  "frames": 1799,
+  "average_frame_ms": 100.00722623679822,
+  "min_frame_gap_ms": 33,
+  "max_frame_gap_ms": 167,
+  "transitions": 1799,
+  "price_changes": 1365,
+  "multi_digit_changes": 1050,
+  "changed_fraction": 0.7587548638132295,
+  "multi_digit_fraction": 0.5836575875486382,
+  "minimum_chart_columns": 4,
+  "chart_pixels_min": 4,
+  "chart_pixels_max": 50,
+  "scale_steps": [
+    4.38,
+    7.505,
+    7.9
+  ],
+  "lowest_data_heap": 14348,
+  "boot_confirmed": true,
+  "history_checkpoint_advanced": true,
+  "visible_output_verified": false,
+  "pass": false
+}

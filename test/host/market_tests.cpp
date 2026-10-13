@@ -88,6 +88,20 @@ int main(int argc,char** argv){assert(argc==4);std::string directory=argv[1];tes
     assert(!market::receive(lease)&&acknowledgments->messages.empty());}
   bool consumed=false;assert(xQueueReceive(acknowledgments,&consumed,0)==pdTRUE&&consumed);
   {market::ResultLease empty;assert(!market::receive(empty));}assert(acknowledgments->messages.empty());
+  // Cache IO shares the existing worker without touching TLS/provider state.
+  // The queued copy remains immutable while the display app changes its candle.
+  btc::CandleSeries cacheSeries[5];btc::CandleScale cacheScales[5];CandleStore store;assert(store.begin(cacheSeries,cacheScales));
+  uint64_t stamp=uint64_t(testEpoch)*1000;cacheSeries[0].add(stamp,83300,0,stamp);cacheScales[0].update(cacheSeries[0],0,stamp);
+  auto before=cacheSeries[0];unsigned reservationsBefore=pauseCalls;
+  assert(market::sendCache(store,0,cacheSeries[0],cacheScales[0],stamp));
+  assert(!market::sendCache(store,0,cacheSeries[0],cacheScales[0],stamp));
+  market::Request cacheRequest;assert(xQueueReceive(requests,&cacheRequest,0)==pdTRUE&&cacheRequest.kind==market::Kind::SaveCache);
+  cacheSeries[0].add(stamp,83400,0,stamp);WiFi.connection=0;fetch(cacheRequest);
+  assert(response.ok&&response.cacheEpochMs==stamp&&pauseCalls==reservationsBefore);
+  btc::CandleSeries restored[5];btc::CandleScale restoredScales[5];CandleStore boot;assert(boot.begin(restored,restoredScales));assert(!memcmp(&before,&restored[0],sizeof(before)));
+  pointer=&response;assert(xQueueSend(results,&pointer,0)==pdTRUE);{market::ResultLease lease;assert(market::receive(lease));}
+  assert(xQueueReceive(acknowledgments,&consumed,0)==pdTRUE);assert(!cachePending.load());
+  WiFi.connection=WL_CONNECTED;
   vQueueDelete(requests);vQueueDelete(results);vQueueDelete(acknowledgments);requests=results=acknowledgments=nullptr;
   WiFi.connection=0;fetch(request);assert(!response.ok);
   std::cout<<"PASS: actual HTTP worker; all 11 quote and 10 history fixtures, truncation, cache freshness, framing, size bounds, rate limits and Wi-Fi loss\n";

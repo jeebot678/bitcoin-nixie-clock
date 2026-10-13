@@ -17,6 +17,8 @@ QueueHandle_t requests=nullptr,results=nullptr,acknowledgments=nullptr;
 std::atomic<uint32_t> stackFree{0};
 // The worker waits for the main loop's response lease before reusing this.
 market::Result response;
+struct CacheJob{CandleStore* store=nullptr;btc::CandleSeries series;btc::CandleScale scale;uint64_t epochMs=0;} cacheJob;
+std::atomic<bool> cachePending{false};
 class BoundedReader {
  public:
   BoundedReader(WiFiClient& stream, size_t limit) : stream_(stream), left_(limit), deadline_(millis()+20000) {}
@@ -48,7 +50,8 @@ int apiError(JsonVariantConst root) {
 }
 void fetch(const market::Request& request) {
   response.ok=false;response.deferred=false; response.status=0; response.retryAfterMs=0;
-  response.quote={}; response.history.count=0; response.candles={}; response.request=request;
+  response.quote={}; response.history.count=0; response.candles={}; response.request=request;response.cacheEpochMs=0;
+  if(request.kind==market::Kind::SaveCache){response.ok=cacheJob.store&&cacheJob.store->save(request.window,cacheJob.series,cacheJob.scale,cacheJob.epochMs);response.cacheEpochMs=cacheJob.epochMs;return;}
   if (WiFi.status()!=WL_CONNECTED || time(nullptr)<config::kMinimumEpoch) return;
   bool history=request.kind==market::Kind::History;
   if (request.source>=btc::kSourceCount || request.window>=5) return;
@@ -171,7 +174,13 @@ bool begin() {
   return true;
 }
 bool send(const Request& request) { return requests && xQueueSend(requests,&request,0)==pdTRUE; }
+bool sendCache(CandleStore& store,uint8_t window,const btc::CandleSeries& series,const btc::CandleScale& scale,uint64_t epochMs){
+  bool expected=false;if(!requests||window>=5||!cachePending.compare_exchange_strong(expected,true))return false;
+  cacheJob.store=&store;cacheJob.series=series;cacheJob.scale=scale;cacheJob.epochMs=epochMs;
+  if(send({Kind::SaveCache,0,window,uint32_t(epochMs/1000)}))return true;
+  cachePending=false;return false;
+}
 bool receive(ResultLease& result){return !result.value_&&results&&xQueueReceive(results,&result.value_,0)==pdTRUE;}
-ResultLease::~ResultLease(){if(value_&&acknowledgments){bool consumed=true;xQueueSend(acknowledgments,&consumed,0);}}
+ResultLease::~ResultLease(){if(value_&&acknowledgments){if(value_->request.kind==Kind::SaveCache)cachePending=false;bool consumed=true;xQueueSend(acknowledgments,&consumed,0);}}
 uint32_t stackRemaining(){return stackFree.load();}
 }

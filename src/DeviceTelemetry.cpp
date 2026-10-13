@@ -46,8 +46,8 @@ void state() {
   writeDial(dials.createNestedObject("range"),s.range,config::kTimelineMv,config::kTimelinePin);
   telemetryJson["refresh_ms"]=s.interval;telemetryJson["range_seconds"]=s.window;
   telemetryJson["cadence_test"]=s.cadenceTest;
-  const char* kinds[]={"quote","history","fx","ota","candles"};
-  telemetryJson["http_kind"]=s.httpKind<5?kinds[s.httpKind]:"idle";
+  const char* kinds[]={"quote","history","fx","ota","candles","cache"};
+  telemetryJson["http_kind"]=s.httpKind<6?kinds[s.httpKind]:"idle";
   telemetryJson["http_source"]=s.httpSource<btc::kSourceCount?btc::kSources[s.httpSource].name:"none";
   telemetryJson["last_http_status"]=s.httpStatus;telemetryJson["quote_request_pending"]=s.quoteRequested;
   telemetryJson["chart_columns_mask"]=s.chartColumns;telemetryJson["chart_pixels"]=s.chartPixels;

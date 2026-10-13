@@ -19,10 +19,13 @@ time_t testEpoch=1791408754;
 time_t testTime(time_t* output){if(output)*output=testEpoch;return testEpoch;}
 namespace market {
 Request outstanding;Result queued;bool sent=false,ready=false;unsigned calls=0;
+CandleStore* savingStore=nullptr;btc::CandleSeries savingSeries;btc::CandleScale savingScale;uint64_t savingTime=0;
 bool begin(){return true;}bool send(const Request&r){assert(!sent);outstanding=r;sent=true;++calls;return true;}
+bool sendCache(CandleStore& store,uint8_t window,const btc::CandleSeries& series,const btc::CandleScale& scale,uint64_t epochMs){savingStore=&store;savingSeries=series;savingScale=scale;savingTime=epochMs;return send({Kind::SaveCache,0,window,uint32_t(epochMs/1000)});}
 bool receive(ResultLease&r){if(!ready)return false;r.value_=&queued;ready=false;return true;}
 ResultLease::~ResultLease(){if(value_)sent=false;}uint32_t stackRemaining(){return 4096;}
 void complete(bool ok=true,int status=200){queued={};queued.request=outstanding;queued.ok=ok;queued.status=status;queued.receivedAt=testMillis;queued.epoch=uint32_t(testEpoch);queued.quote.price=83300.0;queued.quote.usdtUsd=1;queued.quote.timestamp=uint32_t(testEpoch);
+  if(outstanding.kind==Kind::SaveCache){queued.ok=ok&&savingStore->save(outstanding.window,savingSeries,savingScale,savingTime);queued.cacheEpochMs=savingTime;}
   if(outstanding.kind==Kind::Candles){uint32_t current=btc::candleBucket(uint64_t(testEpoch)*1000,outstanding.window);for(unsigned col=0;col<21;++col)queued.candles.add(btc::candleStart(current-20+col,outstanding.window),83300,outstanding.window,uint64_t(testEpoch)*1000);}
   if(outstanding.kind==Kind::History){uint32_t step=config::kCandleSeconds[outstanding.window];for(uint32_t close=outstanding.start+step;close<=outstanding.epoch;close+=step)assert(queued.history.add(close,83300));}
   ready=true;}
@@ -101,8 +104,8 @@ void cacheRuntimeTests(){
   for(auto& state:rotation.states){state.availableAt=testMillis;state.failures=0;}
   candleSeries[4]={};uint64_t now=chartNowMs();uint32_t current=btc::candleBucket(now,4);
   for(unsigned col=0;col<21;++col)assert(candleSeries[4].add(btc::candleStart(current-20+col,4),83300+col,4,now));
-  markCandleDirty(4,testMillis);nextCandleSave[4]=testMillis;for(unsigned iteration=0;iteration<5;++iteration)saveHistory(testMillis);
-  assert(candleStore.savedEpoch(4)==testEpoch&&!candleDirty[4]);candleBackfilled[4]=true;
+  markCandleDirty(4,testMillis);nextCandleSave[4]=testMillis;for(unsigned iteration=0;iteration<5;++iteration){saveHistory(testMillis);if(market::sent){market::complete();processResult(testMillis);}}
+  assert(candleSavedTime[4]/1000==uint64_t(testEpoch)&&!candleDirty[4]);candleBackfilled[4]=true;
   unsigned writes=fsMock().writes;saveHistory(testMillis);assert(fsMock().writes==writes);
   nextQuoteAt=testMillis+1800000;nextHistoryAt[4]=testMillis;unsigned calls=market::calls;schedule(testMillis);assert(market::calls==calls);
   adc[34]=493;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(timelineDial.stable==3);
@@ -340,7 +343,7 @@ void shortRangeAndMotionTests(){
   uint32_t start=testMillis;unsigned writes=fsMock().writes;
   for(unsigned second=0;second<35;++second){
     testMillis=start+second*1000;testEpoch=1800000600+second;btc::Quote q;q.timestamp=uint32_t(testEpoch);q.price=81000+second;
-    acceptQuote(q,0,testMillis,uint32_t(testEpoch),testMillis);saveHistory(testMillis);
+    acceptQuote(q,0,testMillis,uint32_t(testEpoch),testMillis);saveHistory(testMillis);if(market::sent){market::complete();processResult(testMillis);}
     assert(candleSeries[0].count(0,chartNowMs())<=21&&candleSeries[1].count(1,chartNowMs())<=21);
     if(second<30)assert(fsMock().writes==writes);
   }
@@ -352,6 +355,20 @@ void shortRangeAndMotionTests(){
   for(unsigned frame=0;frame<10;++frame){testMillis+=100;packets.clear();refreshNixies(testMillis);assert(packets.size()==6);}
   assert(priceTransitions==9&&priceChanges==9&&multiDigitChanges==9&&minimumFrameGap==100&&maximumFrameGap==100);
   std::cout<<"PASS: 100 ms distinct real multi-digit frames, 21 fixed OHLC columns from live quotes, bounded range caches and flash checkpoints instead of per-tick writes\n";
+}
+void asyncCacheTests(){
+  testMillis+=6000;testEpoch=1800001200;guard=btc::PriceGuard{};guard.accept(83300,0,testMillis);guard.accept(83300,1,testMillis);
+  refreshDial.stable=0;shownPrice=0;lastQuoteReceived=testMillis;quotes.clear();live::busy=false;
+  for(unsigned w=0;w<5;++w){candleDirty[w]=false;nextCandleSave[w]=0;}
+  candleSeries[2]={};candleSeries[2].add(chartNowMs(),83300,2,chartNowMs());candleScales[2].update(candleSeries[2],2,chartNowMs());
+  auto snapshot=candleSeries[2];markCandleDirty(2,testMillis);nextCandleSave[2]=testMillis;unsigned writes=fsMock().writes;
+  uint32_t warmup=streamWarmupUntil;saveHistory(testMillis);assert(inflight&&market::sent&&market::outstanding.kind==market::Kind::SaveCache&&!live::busy&&fsMock().writes==writes);
+  btc::Quote tick;tick.price=83320;tick.timestamp=uint32_t(testEpoch);acceptQuote(tick,0,testMillis,uint32_t(testEpoch),testMillis);
+  assert(candleDirty[2]);packets.clear();refreshNixies(testMillis);assertPriceFrame(83320);testMillis+=100;packets.clear();refreshNixies(testMillis);assert(packets.size()==6&&fsMock().writes==writes);
+  market::complete();processResult(testMillis);assert(!inflight&&candleDirty[2]&&!live::busy&&streamWarmupUntil==warmup);
+  assert(candleSavedTime[2]/1000==uint64_t(testEpoch));btc::CandleSeries restored[5];btc::CandleScale axes[5];CandleStore boot;assert(boot.begin(restored,axes));assert(!memcmp(&snapshot,&restored[2],sizeof(snapshot)));
+  unsigned calls=market::calls;saveHistory(testMillis);assert(market::calls==calls); // New ticks wait for the next 30 s checkpoint.
+  std::cout<<"PASS: immutable asynchronous checkpoints leave display deadlines/streams responsive and preserve live changes for the next save\n";
 }
 void streamStarvationRegressionTests(){
   liveReady=true;live::healthy=false;testMillis+=6000;refreshDial.stable=timelineDial.stable=0;
@@ -403,4 +420,4 @@ void wirelessRuntimeTests(){
   WiFi.connection=WL_CONNECTED;wifi.loop(testMillis);testMillis+=8001;wifi.loop(testMillis);assert(wifi.online()&&!wifi.portalActive());
   std::cout<<"PASS: actual dial sampling/snapshots, queued signed OTA checks bypassing schedule without interrupting in-flight HTTP, wireless matrix/tube controls and BOOT diagnostics gestures\n";
 }
-int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}
+int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();asyncCacheTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}

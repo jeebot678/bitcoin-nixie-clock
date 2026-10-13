@@ -1,6 +1,6 @@
 # Candle matrix and stable scale
 
-Firmware 1.0.18 uses the physical 21×13 matrix for 21 OHLC candles. Each
+Firmware 1.0.19 uses the physical 21×13 matrix for 21 OHLC candles. Each
 column holds an open-to-close body and a high-to-low wick. Bodies stay lit;
 wick-only pixels use a 1/3-duty, 12 ms cycle on the monochrome matrix. The
 startup fill/unfill preserves the complete body and wick mask, then resumes
@@ -55,8 +55,10 @@ requests, and a Coinbase page may cover less than the selected range.
 Onboard `/candles-RANGE-SLOT.bin` snapshots retain all OHLC values, exact
 UTC snapshot time and scale parameters. Two alternating, CRC-covered
 slots protect the prior snapshot during an interrupted write. Checkpoints
-run at most every 30 seconds; powering off between checkpoints can lose
-up to 30 seconds of newly collected data, which bootstrap repairs. At boot
+run at most every 30 seconds on the existing core-0 worker. Immutable copies
+keep subsequent live ticks separate from in-flight writes. A checkpoint can
+wait for ongoing network work. Powering off loses any data since the last
+completed checkpoint; bootstrap repairs that gap. At boot
 the saved chart is available before SNTP; synchronization then ages candles
 against current UTC. Runtime scale timers reset on restart so time powered
 off does not count as observed volatility. Previous close-only history files

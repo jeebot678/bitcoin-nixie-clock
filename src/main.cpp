@@ -27,6 +27,7 @@ btc::CandleScale candleScales[5];
 CandleStore candleStore;
 bool candleDirty[5]={},candleBackfilled[5]={};
 uint32_t nextCandleSave[5]={};
+uint64_t candleSavedTime[5]={};
 uint64_t chartContinuousSince=0;
 uint32_t lastChartTickAt=0;
 bool networkReady=false,inflight=false,timeStarted=false;
@@ -119,7 +120,7 @@ void publishTelemetry(uint32_t now) {
   telemetry::Snapshot s;s.uptime=now;s.heap=ESP.getFreeHeap();s.largest=ESP.getMaxAllocHeap();
   s.dataHeap=network_memory::freeBytes();s.dataBlock=network_memory::largestBlock();s.httpStack=market::stackRemaining();
   s.httpKind=inflight?httpKind:255;s.httpSource=httpSource;s.httpStatus=lastHttpStatus;s.quoteRequested=needDifferentQuote;
-  s.chartColumns=chartColumns;s.chartPixels=chartPixels;s.historyCandles=candleSeries[timelineDial.stable].count(timelineDial.stable,chartNowMs());s.historySavedAt=candleStore.savedEpoch(timelineDial.stable);
+  s.chartColumns=chartColumns;s.chartPixels=chartPixels;s.historyCandles=candleSeries[timelineDial.stable].count(timelineDial.stable,chartNowMs());s.historySavedAt=uint32_t(candleSavedTime[timelineDial.stable]/1000);
   s.axisLow=candleScales[timelineDial.stable].low;s.axisStep=candleScales[timelineDial.stable].step;
   s.online=wifi.online();s.portal=wifi.portalActive();s.clock=time(nullptr)>=config::kMinimumEpoch;
   s.frequency.mv=frequencyMv;s.frequency.raw=frequencyRaw;s.frequency.decoded=frequencyDecoded;
@@ -144,8 +145,8 @@ void diagnostics(uint32_t now) {
     ota_config::kVersion,wifi.online()?"connected":"offline",wifi.portalActive()?"on":"off",btc::setupStateName(wifi.setupState()),time(nullptr)>=config::kMinimumEpoch?"synced":"waiting",
     ESP.getFreeHeap(),ESP.getMaxAllocHeap(),(unsigned long)config::kRefreshMs[refreshDial.stable],config::kWindowNames[timelineDial.stable],guard.price,
     !guard.price||uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(config::kRefreshMs[refreshDial.stable])?"yes":"no",fx.usd,fx.fresh(now)?"yes":"no",candleSeries[timelineDial.stable].count(timelineDial.stable,chartNowMs()));
-  Serial.printf("  History storage=%s savedEpoch=%lu dirty=%s\n",candleStore.ready()?"ready":"unavailable",(unsigned long)candleStore.savedEpoch(timelineDial.stable),candleDirty[timelineDial.stable]?"yes":"no");
-  for (uint8_t window=0;window<5;++window) Serial.printf("  Cache %s: %u candles, savedEpoch=%lu\n",config::kWindowNames[window],candleSeries[window].count(window,chartNowMs()),(unsigned long)candleStore.savedEpoch(window));
+  Serial.printf("  History storage=%s savedEpoch=%lu dirty=%s\n",candleStore.ready()?"ready":"unavailable",(unsigned long)uint32_t(candleSavedTime[timelineDial.stable]/1000),candleDirty[timelineDial.stable]?"yes":"no");
+  for (uint8_t window=0;window<5;++window) Serial.printf("  Cache %s: %u candles, savedEpoch=%lu\n",config::kWindowNames[window],candleSeries[window].count(window,chartNowMs()),(unsigned long)uint32_t(candleSavedTime[window]/1000));
   for (size_t i=0;i<btc::kSourceCount;++i)
     Serial.printf("  %s failures=%u cooldown=%ld ms\n",btc::kSources[i].name,rotation.states[i].failures,(long)std::max<int32_t>(0,int32_t(rotation.states[i].availableAt-now)));
   auto stream=live::status();
@@ -257,6 +258,12 @@ void processResult(uint32_t now) {
   const market::Result& result=lease.get();
   now=millis();
   inflight=false;
+  if(result.request.kind==market::Kind::SaveCache){
+    unsigned w=result.request.window;
+    if(result.ok)candleSavedTime[w]=result.cacheEpochMs;
+    else{candleDirty[w]=true;nextCandleSave[w]=now+config::kHistorySaveRetryMs;}
+    return; // Flash jobs neither pause streams nor change provider cooldowns.
+  }
   lastHttpStatus=result.status;
   live::httpBusy(false);
   // Every HTTP response must give missing streams time to reconnect. Without
@@ -396,7 +403,7 @@ void draw(uint32_t now) {
     display::message(top,bottom,now);nextDrawAt=now+100;return;
   }
   uint64_t utcMs=chartNowMs();
-  if(utcMs<uint64_t(config::kMinimumEpoch)*1000)utcMs=candleStore.savedTimeMs(timelineDial.stable);
+  if(utcMs<uint64_t(config::kMinimumEpoch)*1000)utcMs=candleSavedTime[timelineDial.stable];
   unsigned window=timelineDial.stable;
   if(candleScales[window].update(candleSeries[window],window,utcMs))markCandleDirty(window,now);
   auto frame=btc::makeCandles(candleSeries[window],candleScales[window],window,utcMs);
@@ -418,16 +425,20 @@ void draw(uint32_t now) {
 
 void saveHistory(uint32_t now) {
   uint64_t utcMs=chartNowMs();
-  if(candleStore.ready()&&utcMs>=uint64_t(config::kMinimumEpoch)*1000)for(unsigned w=0;w<5;++w){
+  if(!inflight&&candleStore.ready()&&utcMs>=uint64_t(config::kMinimumEpoch)*1000)for(unsigned w=0;w<5;++w){
     if(candleSeries[w].trim(w,utcMs))markCandleDirty(w,now);
     if(candleDirty[w]&&btc::due(now,nextCandleSave[w])){
       candleScales[w].update(candleSeries[w],w,utcMs);
-      if(!candleSeries[w].count(w,utcMs)||candleStore.save(w,candleSeries[w],candleScales[w],utcMs)){candleDirty[w]=false;nextCandleSave[w]=0;}
-      else nextCandleSave[w]=now+config::kHistorySaveRetryMs;
-      break; // One batched snapshot per loop keeps the 100 ms timer responsive.
+      if(!candleSeries[w].count(w,utcMs)){candleDirty[w]=false;nextCandleSave[w]=0;continue;}
+      if(market::sendCache(candleStore,w,candleSeries[w],candleScales[w],utcMs)){
+        // Subsequent live ticks dirty the next checkpoint while this immutable
+        // copy saves on core 0. Only this loop publishes committed cache dates.
+        candleDirty[w]=false;nextCandleSave[w]=now+config::kShortHistorySaveMs;
+        inflight=true;httpKind=uint8_t(market::Kind::SaveCache);httpSource=255;
+      }
+      break;
     }
   }
-
 }
 }
 void setup() {
@@ -438,6 +449,7 @@ void setup() {
   Serial.printf("Firmware boot: %s\n",ota_config::kVersion);
   display::begin();
   candleStore.begin(candleSeries,candleScales);
+  for(unsigned w=0;w<5;++w)candleSavedTime[w]=candleStore.savedTimeMs(w);
   pinMode(0,INPUT_PULLUP); pinMode(config::kRefreshPin,INPUT); pinMode(config::kTimelinePin,INPUT);
   analogReadResolution(12);
   analogSetPinAttenuation(config::kRefreshPin,ADC_11db); analogSetPinAttenuation(config::kTimelinePin,ADC_11db);

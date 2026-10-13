@@ -9,10 +9,10 @@ a provider failure. Quotes use filtered 2 KiB JSON, and primary Bitstamp history
 requests use at most 24 candles per page. TLS reserves two separate 18 KiB
 record allocations and 24 KiB additional context/crypto headroom under the gate.
 
-Version 1.0.18 maps frequency to 100 / 500 / 1500 / 10000 / 60000 ms and
+Version 1.0.19 maps frequency to 100 / 500 / 1500 / 10000 / 60000 ms and
 range to 30 / 60 / 300 / 1800 / 3600 seconds. Twenty-one OHLC records per
 range replace the running point caches. Candles and per-range scale parameters
-checkpoint every 30 seconds in separate CRC-protected files; legacy history
+checkpoint every 30 seconds on core 0 in separate CRC-protected files; legacy history
 files remain intact. Candle bootstrap uses individual transactions in a
 512-byte streaming JSON pool and may briefly pause the primary for its TLS
 reservation when RAM requires it. Ordinary quote/FX jobs still preserve the
@@ -42,6 +42,12 @@ and multi-digit-change counters observe every 100 ms frame even when LAN
 sampling is slower. A 30-second
 `cadence-test` temporarily selects the normal 500 ms live-price path, marks
 `cadence_test=true`, and restores the mechanical setting automatically.
+
+The 1.0.18 assembled LAN measurement averaged 100.007 ms but found
+33–167 ms individual gaps during synchronous checkpoints. The result is
+preserved in [the report](../test/device_release_1.0.18_report.json) as a failed
+timing check. Version 1.0.19 moves immutable checkpoint writes to the existing
+background worker without pausing streams or changing source cooldowns.
 
 The prior 1.0.15 bare-ESP32 measurement passed its 30-second diagnostic but did
 not exercise ongoing minute-history requests on the assembled 5-minute range.
