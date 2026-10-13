@@ -384,9 +384,18 @@ connected at the end. Repeated preferred-feed retries replaced working
 fallbacks, and actual quote age reached 49.754 seconds. Display estimates
 kept the numbers moving through that gap; they did not refresh the actual
 market data. Version 1.0.28 preserves a fresh fallback and requires a truly
-fresh peer before intentional preferred recovery. Its installation and
-device outcome remain pending. Visible appearance is not established by
-telemetry.
+fresh peer before intentional preferred recovery. Its signed OTA installation and boot were confirmed. The
+[v1.0.28 device report](../test/device_release_1.0.28_report.json) passed:
+all 2,397 transitions changed over 239.716 seconds at an average 100.007 ms,
+with 91–110 ms gaps and zero holds, reversals, resets or collection errors.
+All 21 columns remained displayed; 389 estimate frames stayed within $8,
+with no bounds, rounding, marker or adjustment errors. The automatic OTA
+check ran at 78.689 seconds and flash checkpoints advanced. Bitstamp and
+Bitfinex then stayed connected for 138.932 seconds without failures; real
+latest accepted quote age stayed within 3.558 seconds in that retained pair. One Coinbase
+and one Kraken TLS failure occurred earlier during recovery. Estimates
+maintained the display through those gaps without renewing market data.
+These counters verify commands rather than visible cathode/matrix light.
 
 The prior 1.0.15 bare-ESP32 measurement passed its 30-second diagnostic but did
 not exercise ongoing minute-history requests on the assembled 5-minute range.
