@@ -164,15 +164,34 @@ bool parseRecentTrades(Reader& reader,JsonDocument& document,bool bitstamp,uint8
     c=next();if(c==']')return next()==-1;if(c!=',')return false;c=next();
   }
 }
-// Keep every trade high/low while streaming a bounded object pool. Trade IDs
-// disambiguate open/close when Bitstamp exposes only whole-second timestamps.
-template<class Reader,class Yield>
-bool parseTradeCandles(Reader& reader,JsonDocument& document,bool bitstamp,uint8_t window,uint64_t nowMs,CandleSeries& candles,Quote& latest,Yield cooperate){
-  candles={};latest={};if(window>=5||nowMs<uint64_t(config::kMinimumEpoch)*1000)return false;
+// Per-range trade IDs disambiguate open/close at identical timestamps. The
+// shared HTTP parser owns this scratch on the data heap, never its TLS stack.
+struct TradeCandleScratch {
+  uint64_t openId[5][21]={},closeId[5][21]={};
+};
+static_assert(sizeof(TradeCandleScratch)==1680,"Shared chronological trade scratch must remain bounded");
+struct TradeCandleHorizon {
+  uint64_t oldestMs=0,newestMs=0;
+  uint32_t trades=0;
+};
+inline void addCandleTrade(CandleSeries& candles,uint8_t window,uint64_t stamp,double price,uint64_t id,uint64_t nowMs,uint64_t* openId,uint64_t* closeId){
+  uint32_t bucket=candleBucket(stamp,window),current=candleBucket(nowMs,window);unsigned slot=bucket%21;
+  if(bucket+20<current||bucket>current)return;
+  auto before=candles.bars[slot];uint32_t offset=uint32_t(stamp-candleStart(bucket,window));
+  bool openTie=!openId[slot]||id<openId[slot],closeTie=id>closeId[slot];
+  candles.add(stamp,price,window,nowMs,openTie,closeTie);
+  if(before.bucket!=bucket||offset<before.openAt||(offset==before.openAt&&openTie))openId[slot]=id;
+  if(before.bucket!=bucket||offset>before.closeAt||(offset==before.closeAt&&closeTie))closeId[slot]=id;
+}
+// Read each object once and feed every requested range from the same genuine
+// transactions. No coarse candle is split into invented shorter candles.
+template<class Reader,class Trade,class Yield>
+bool parseCandleTrades(Reader& reader,JsonDocument& document,bool bitstamp,uint64_t nowMs,Quote& latest,TradeCandleHorizon& horizon,Trade trade,Yield cooperate){
+  latest={};horizon={};if(nowMs<uint64_t(config::kMinimumEpoch)*1000)return false;
   auto next=[&](){int c;do{c=reader.read();}while(c==' '||c=='\r'||c=='\n'||c=='\t');return c;};
   if(next()!='[')return false;
   StaticJsonDocument<256> filter;filter["price"]=true;filter[bitstamp?"date":"time"]=true;filter[bitstamp?"tid":"trade_id"]=true;
-  uint64_t openId[21]={},closeId[21]={},latestId=0;uint32_t rows=0;int c=next();
+  uint64_t latestId=0;uint32_t rows=0;int c=next();
   if(c==']')return next()==-1;
   for(;;){
     if(c!='{'||++rows>50000)return false;
@@ -182,14 +201,9 @@ bool parseTradeCandles(Reader& reader,JsonDocument& document,bool bitstamp,uint8
     uint64_t stamp=bitstamp?uint64_t(numericTimestamp(root["date"]))*1000:isoTimestampMs(root["time"]);
     if(!stamp||!number(root["price"],price)||!validPrice(price)||price>UINT32_MAX/100.0||!number(root[bitstamp?"tid":"trade_id"],id)||id<1||id>9007199254740991.0||std::floor(id)!=id||stamp>nowMs+10000)return false;
     if(stamp<=nowMs){
-      uint32_t bucket=candleBucket(stamp,window),current=candleBucket(nowMs,window);unsigned slot=bucket%21;
-      if(bucket+20>=current){
-        auto before=candles.bars[slot];uint32_t offset=uint32_t(stamp-candleStart(bucket,window));
-        bool openTie=!openId[slot]||uint64_t(id)<openId[slot],closeTie=uint64_t(id)>closeId[slot];
-        candles.add(stamp,price,window,nowMs,openTie,closeTie);
-        if(before.bucket!=bucket||offset<before.openAt||(offset==before.openAt&&openTie))openId[slot]=uint64_t(id);
-        if(before.bucket!=bucket||offset>before.closeAt||(offset==before.closeAt&&closeTie))closeId[slot]=uint64_t(id);
-      }
+      if(!horizon.oldestMs||stamp<horizon.oldestMs)horizon.oldestMs=stamp;
+      horizon.newestMs=std::max(horizon.newestMs,stamp);++horizon.trades;
+      trade(stamp,price,uint64_t(id));
       if(stamp>latest.timestampMs||(stamp==latest.timestampMs&&uint64_t(id)>latestId)){
         latest.price=price;latest.timestamp=uint32_t(stamp/1000);latest.timestampMs=stamp;latestId=uint64_t(id);
       }
@@ -197,6 +211,35 @@ bool parseTradeCandles(Reader& reader,JsonDocument& document,bool bitstamp,uint8
     if(rows%64==0)cooperate();
     c=next();if(c==']')return next()==-1;if(c!=',')return false;c=next();
   }
+}
+// Preserve the existing single-range parser for tests and callers that do not
+// require shared bootstrap. Its small two-ID arrays retain the old stack bound.
+template<class Reader,class Yield>
+bool parseTradeCandles(Reader& reader,JsonDocument& document,bool bitstamp,uint8_t window,uint64_t nowMs,CandleSeries& candles,Quote& latest,Yield cooperate){
+  candles={};latest={};if(window>=5)return false;
+  uint64_t openId[21]={},closeId[21]={};TradeCandleHorizon horizon;
+  return parseCandleTrades(reader,document,bitstamp,nowMs,latest,horizon,[&](uint64_t stamp,double price,uint64_t id){addCandleTrade(candles,window,stamp,price,id,nowMs,openId,closeId);},cooperate)&&candles.count(window,nowMs);
+}
+template<class Reader,class Yield>
+bool parseTradeCandleRanges(Reader& reader,JsonDocument& document,bool bitstamp,uint8_t mask,uint64_t nowMs,CandleSeries (&candles)[5],Quote& latest,TradeCandleScratch& scratch,TradeCandleHorizon& horizon,Yield cooperate){
+  for(auto& range:candles)range={};
+  latest={};horizon={};
+  for(auto& ids:scratch.openId)std::fill(ids,ids+21,uint64_t(0));
+  for(auto& ids:scratch.closeId)std::fill(ids,ids+21,uint64_t(0));
+  if(!mask||(mask&~uint8_t(0x1F)))return false;
+  if(!parseCandleTrades(reader,document,bitstamp,nowMs,latest,horizon,[&](uint64_t stamp,double price,uint64_t id){
+    for(uint8_t window=0;window<5;++window)if(mask&(1U<<window))addCandleTrade(candles[window],window,stamp,price,id,nowMs,scratch.openId[window],scratch.closeId[window]);
+  },cooperate))return false;
+  for(uint8_t window=0;window<5;++window)if((mask&(1U<<window))&&candles[window].count(window,nowMs))return true;
+  return false; // Empty or wholly expired transactions are not a bootstrap.
+}
+inline uint8_t candleHistoryCoverage(const CandleSeries (&candles)[5],uint8_t mask,uint64_t nowMs,const TradeCandleHorizon& horizon){
+  uint8_t covered=0;if(!horizon.trades||!horizon.oldestMs)return covered;
+  for(uint8_t window=0;window<5;++window)if((mask&(1U<<window))&&candles[window].count(window,nowMs)){
+    uint32_t current=candleBucket(nowMs,window);
+    if(current>=20&&horizon.oldestMs<=candleStart(current-20,window))covered|=uint8_t(1U<<window);
+  }
+  return covered;
 }
 inline uint32_t historyRequestStart(uint8_t window, uint32_t epoch, uint32_t start = 0) {
   uint32_t first = firstHistoryClose(window, epoch);

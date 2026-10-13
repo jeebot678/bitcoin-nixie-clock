@@ -19,7 +19,11 @@ struct Result {
   uint32_t retryAfterMs = 0, receivedAt = 0, epoch = 0;
   btc::Quote quote;
   btc::History history; // Legacy close-cache migration/tests.
-  btc::CandleSeries candles;
+  btc::CandleSeries candles[5];
+  // Attempted ranges may contain sparse/partial observations; coverage bits
+  // additionally establish the historical left boundary from complete trades.
+  uint8_t candleAttemptMask=0,candleCoverageMask=0;
+  uint64_t candleSnapshotMs=0,candleOldestMs=0,candleNewestMs=0;
   uint64_t cacheEpochMs=0;
 };
 bool begin();

@@ -64,6 +64,11 @@ struct CandleSeries {
     for(const auto& c:bars)n+=c.bucket&&c.bucket+20>=current&&c.bucket<=current;
     return n;
   }
+  uint32_t latestCloseCents(uint8_t window)const{
+    const Candle* latest=nullptr;
+    for(const auto& c:bars)if(validCandle(c,window)&&(!latest||c.bucket>latest->bucket))latest=&c;
+    return latest?latest->close:0;
+  }
   bool extent(uint8_t window,uint64_t nowMs,double& low,double& high)const{
     low=1e12;high=0;uint32_t current=candleBucket(nowMs,window);
     for(const auto& c:bars)if(c.bucket&&c.bucket+20>=current&&c.bucket<=current){low=std::min(low,c.low/100.0);high=std::max(high,c.high/100.0);}
@@ -122,9 +127,9 @@ struct CandleScale {
 };
 struct CandleFrame {
   uint16_t bodies[21]={},wicks[21]={};uint32_t valid=0;
-  Plot plot(bool showWicks)const{
+  Plot plot()const{
     Plot p={};p.valid=valid;
-    for(unsigned col=0;col<21;++col){p.connectors[col]=bodies[col]|(showWicks?wicks[col]:0);p.rows[col]=0;
+    for(unsigned col=0;col<21;++col){p.connectors[col]=bodies[col]|wicks[col];p.rows[col]=0;
       if(p.connectors[col])p.rows[col]=uint8_t(__builtin_ctz(unsigned(p.connectors[col])));}
     return p;
   }
@@ -132,13 +137,22 @@ struct CandleFrame {
 inline uint16_t candleMask(uint8_t a,uint8_t b){
   uint16_t mask=0;for(unsigned row=std::min(a,b);row<=std::max(a,b);++row)mask|=uint16_t(1U<<row);return mask;
 }
-inline CandleFrame makeCandles(const CandleSeries& series,const CandleScale& scale,uint8_t window,uint64_t nowMs){
-  CandleFrame frame;if(window>=5||!scale.valid())return frame;
-  uint32_t current=candleBucket(nowMs,window);
-  for(const auto& c:series.bars)if(c.bucket&&c.bucket+20>=current&&c.bucket<=current){
-    unsigned col=c.bucket+20-current;frame.valid|=1U<<col;
-    frame.bodies[col]=candleMask(scale.row(c.open),scale.row(c.close));
-    frame.wicks[col]=candleMask(scale.row(c.high),scale.row(c.low));
+// Missing/quiet buckets are display-only flat candles, carried from the
+// preceding close. Leading gaps use the first known open; an entirely aged
+// window can use its last known close. Never put placeholders into OHLC/cache.
+inline CandleFrame makeCandles(const CandleSeries& series,const CandleScale& scale,uint8_t window,uint64_t nowMs,uint32_t fallbackCents=0){
+  CandleFrame frame;if(window>=5||!scale.valid()||nowMs<uint64_t(config::kMinimumEpoch)*1000)return frame;
+  uint32_t current=candleBucket(nowMs,window),first=current-20,carried=fallbackCents;
+  const Candle* earliest=nullptr;
+  for(const auto& c:series.bars)if(validCandle(c,window)&&c.bucket>=first&&c.bucket<=current&&(!earliest||c.bucket<earliest->bucket))earliest=&c;
+  if(earliest)carried=earliest->open;
+  if(!carried)return frame;
+  for(unsigned col=0;col<21;++col){
+    uint32_t bucket=first+col;const auto& c=series.bars[bucket%21];frame.valid|=1U<<col;
+    if(c.bucket==bucket&&validCandle(c,window)){
+      frame.bodies[col]=candleMask(scale.row(c.open),scale.row(c.close));
+      frame.wicks[col]=candleMask(scale.row(c.high),scale.row(c.low));carried=c.close;
+    }else frame.bodies[col]=frame.wicks[col]=uint16_t(1U<<scale.row(carried));
   }
   return frame;
 }

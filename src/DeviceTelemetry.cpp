@@ -17,7 +17,7 @@ WebServer telemetryWeb(8080);
 char controlToken[33]={};
 bool listening=false,mdns=false;
 uint32_t stackRemaining=0;
-StaticJsonDocument<JSON_OBJECT_SIZE(61)+2*JSON_OBJECT_SIZE(7)+2*JSON_ARRAY_SIZE(5)+JSON_OBJECT_SIZE(7)+280> telemetryJson;
+StaticJsonDocument<JSON_OBJECT_SIZE(68)+2*JSON_OBJECT_SIZE(7)+2*JSON_ARRAY_SIZE(5)+JSON_OBJECT_SIZE(7)+2*JSON_ARRAY_SIZE(btc::kSourceCount)+280> telemetryJson;
 const char kTelemetryPage[] PROGMEM=R"HTML(<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bitcoin Clock diagnostics</title>
 <style>body{font:16px system-ui;background:#15191c;color:#eee;max-width:760px;margin:30px auto;padding:0 18px}table{width:100%;border-collapse:collapse}td,th{padding:10px;text-align:left;border-bottom:1px solid #555}button{padding:12px;margin:6px 4px 6px 0;font:inherit}pre{white-space:pre-wrap}#message{min-height:24px}</style>
 <h1>Clock diagnostics</h1><p>Rotate one switch at a time. A held/default setting with an invalid input can explain a frozen display. Voltages are measured at the ESP32 inputs.</p>
@@ -53,6 +53,10 @@ void state() {
   telemetryJson["chart_columns_mask"]=s.chartColumns;telemetryJson["chart_pixels"]=s.chartPixels;
   telemetryJson["chart_type"]="candles";telemetryJson["chart_axis_low_usd"]=s.axisLow;telemetryJson["chart_usd_per_row"]=s.axisStep;
   telemetryJson["history_candles"]=s.historyCandles;telemetryJson["history_saved_epoch"]=s.historySavedAt;
+  telemetryJson["stream_source_mask"]=s.streamProviders;telemetryJson["stream_dropped"]=s.streamDropped;telemetryJson["stream_rejected"]=s.streamRejected;telemetryJson["stream_disconnects"]=s.streamDisconnects;
+  telemetryJson["stream_stack_remaining"]=s.streamStack;
+  JsonArray sourceQuotes=telemetryJson.createNestedArray("stream_source_quotes"),sourceAges=telemetryJson.createNestedArray("stream_source_age_ms");
+  for(unsigned i=0;i<btc::kSourceCount;++i){sourceQuotes.add(s.sourceQuotes[i]);sourceAges.add(s.sourceQuotes[i]?s.sourceAges[i]:UINT32_MAX);}
   telemetryJson["streams"]=s.connections;telemetryJson["stream_quotes"]=s.quotes;telemetryJson["accepted_quotes"]=s.accepted;
   telemetryJson["quote_age_ms"]=s.accepted?s.quoteAge:UINT32_MAX;telemetryJson["confirmed"]=s.confirmed;
   telemetryJson["market_price"]=s.marketPrice;telemetryJson["display_quote"]=s.displayPrice;telemetryJson["display_digits"]=s.digits;

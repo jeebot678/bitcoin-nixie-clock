@@ -1,0 +1,51 @@
+{
+  "checked_at_utc": "2026-10-13T18:03:03.437Z",
+  "measurement": "Computer two authenticated public USD streams; firmware QuoteBook selection replicated, no synthetic prices. Not physical ESP32 reception.",
+  "duration_ms": 60000,
+  "warmup_ms": 5000,
+  "quotes": {
+    "Coinbase": 325,
+    "Kraken": 832
+  },
+  "frames": 547,
+  "whole_dollar_changes": 546,
+  "multi_digit_changes": 516,
+  "empty_frames": 0,
+  "frame_gap_ms": {
+    "min": 99,
+    "max": 102
+  },
+  "percent_changed": 100,
+  "selector_reference": "include/QuoteBook.h; computer JavaScript replica, not compiled ESP32 execution",
+  "sources": [
+    {
+      "name": "Coinbase",
+      "url": "wss://ws-feed.exchange.coinbase.com",
+      "subscription": {
+        "type": "subscribe",
+        "product_ids": [
+          "BTC-USD"
+        ],
+        "channels": [
+          "ticker",
+          "heartbeat"
+        ]
+      }
+    },
+    {
+      "name": "Kraken",
+      "url": "wss://ws.kraken.com/v2",
+      "subscription": {
+        "method": "subscribe",
+        "params": {
+          "channel": "ticker",
+          "symbol": [
+            "BTC/USD"
+          ],
+          "event_trigger": "bbo",
+          "snapshot": true
+        }
+      }
+    }
+  ]
+}

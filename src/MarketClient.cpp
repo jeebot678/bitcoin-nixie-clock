@@ -10,6 +10,9 @@
 #include "TlsGate.h"
 #include "CooperativeTlsClient.h"
 #include <atomic>
+#include <memory>
+#include <new>
+#include <esp_heap_caps.h>
 
 extern const uint8_t caBundle[] asm("_binary_data_cert_x509_crt_bundle_bin_start");
 namespace {
@@ -19,6 +22,11 @@ std::atomic<uint32_t> stackFree{0};
 market::Result response;
 struct CacheJob{CandleStore* store=nullptr;btc::CandleSeries series;btc::CandleScale scale;uint64_t epochMs=0;} cacheJob;
 std::atomic<bool> cachePending{false};
+struct TradeScratchDeleter {
+  void operator()(btc::TradeCandleScratch* scratch)const{
+    if(scratch){scratch->~TradeCandleScratch();heap_caps_free(scratch);}
+  }
+};
 class BoundedReader {
  public:
   BoundedReader(WiFiClient& stream, size_t limit) : stream_(stream), left_(limit), deadline_(millis()+20000) {}
@@ -50,7 +58,9 @@ int apiError(JsonVariantConst root) {
 }
 void fetch(const market::Request& request) {
   response.ok=false;response.deferred=false; response.status=0; response.retryAfterMs=0;
-  response.quote={}; response.history.count=0; response.candles={}; response.request=request;response.cacheEpochMs=0;
+  response.quote={}; response.history.count=0;for(auto& candles:response.candles)candles={};
+  response.candleAttemptMask=response.candleCoverageMask=0;response.candleSnapshotMs=response.candleOldestMs=response.candleNewestMs=0;
+  response.request=request;response.cacheEpochMs=0;
   if(request.kind==market::Kind::SaveCache){response.ok=cacheJob.store&&cacheJob.store->save(request.window,cacheJob.series,cacheJob.scale,cacheJob.epochMs);response.cacheEpochMs=cacheJob.epochMs;return;}
   if (WiFi.status()!=WL_CONNECTED || time(nullptr)<config::kMinimumEpoch) return;
   bool history=request.kind==market::Kind::History;
@@ -58,22 +68,32 @@ void fetch(const market::Request& request) {
   bool candleHistory=request.kind==market::Kind::Candles;
   bool trades=(history&&request.window<2)||candleHistory;
   if(trades&&request.source!=0&&request.source!=2)return;
+  if(candleHistory)response.candleAttemptMask=request.source==2&&request.window<2?0x03:0x1F;
   uint32_t endEpoch=request.epoch;
   uint32_t historyStart=history?btc::historyRequestStart(request.window,request.epoch,request.start):0;
   if(history&&!trades&&request.source==2){
     endEpoch=std::min<uint32_t>(request.epoch,historyStart+24*config::kCandleSeconds[request.window]);
   }
   size_t capacity=trades?512:history?btc::historyCapacity(request.source==2,request.window,endEpoch,historyStart):2048;
+  // Reserve both the object pool and five-range chronological trade-ID scratch
+  // before opening TLS. Scratch is data-heap allocated, not added to the stack.
+  size_t reservedBytes=request.kind==market::Kind::Ota?4096:capacity+(candleHistory?sizeof(btc::TradeCandleScratch):0);
   bool allowPause=request.kind==market::Kind::Ota||candleHistory;
-  if (!live::prepareHttp(request.kind==market::Kind::Ota?4096:capacity,30000,false,allowPause)){response.deferred=true;return;}
+  if (!live::prepareHttp(reservedBytes,30000,false,allowPause)){response.deferred=true;return;}
   btc::TlsLease handshake;
   uint32_t waitingAt=millis();
   while (!handshake.acquire() && uint32_t(millis()-waitingAt)<15000) delay(5);
   if (!handshake){response.deferred=true;return;}
   // A stream handshake can finish and consume RAM after the first reservation.
-  if (!live::prepareHttp(request.kind==market::Kind::Ota?4096:capacity,30000,true,allowPause)){response.deferred=true;return;}
+  if (!live::prepareHttp(reservedBytes,30000,true,allowPause)){response.deferred=true;return;}
   if (request.kind==market::Kind::Ota) {
     response.ok=ota::checkAndInstall();return;
+  }
+  std::unique_ptr<btc::TradeCandleScratch,TradeScratchDeleter> tradeScratch;
+  if(candleHistory){
+    void* memory=heap_caps_malloc(sizeof(btc::TradeCandleScratch),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
+    if(!memory){response.deferred=true;return;}
+    tradeScratch.reset(new(memory)btc::TradeCandleScratch());
   }
   String url;
   // Reserve the contiguous JSON pool before TLS fragments the ESP32 heap.
@@ -126,7 +146,15 @@ void fetch(const market::Request& request) {
 #ifdef ARDUINO
         timeval value;gettimeofday(&value,nullptr);utcMs=uint64_t(value.tv_sec)*1000+unsigned(value.tv_usec)/1000;
 #endif
-        response.ok=btc::parseTradeCandles(reader,document,request.source==2,request.window,utcMs,response.candles,response.quote,[](){delay(1);});http.end();tls.stop();return;
+        btc::TradeCandleHorizon horizon;
+        response.ok=btc::parseTradeCandleRanges(reader,document,request.source==2,response.candleAttemptMask,utcMs,response.candles,response.quote,*tradeScratch,horizon,[](){delay(1);});
+        if(response.ok){
+          response.candleSnapshotMs=utcMs;response.candleOldestMs=horizon.oldestMs;response.candleNewestMs=horizon.newestMs;
+          // Coinbase's bounded latest-trade page remains explicitly partial,
+          // even when its recent trades happen to populate many columns.
+          if(request.source==2)response.candleCoverageMask=btc::candleHistoryCoverage(response.candles,response.candleAttemptMask,utcMs,horizon);
+        }
+        http.end();tls.stop();return;
       }
       if(trades){response.ok=btc::parseRecentTrades(reader,document,request.source==2,request.window,response.epoch,response.history);http.end();tls.stop();return;}
       if (document.capacity()) {

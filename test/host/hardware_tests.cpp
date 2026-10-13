@@ -122,7 +122,10 @@ void setupDisplayTests(){
 }
 void displayTests(){
   for(int cs:{16,17,21,22,25,26})pins[cs]=LOW;
-  display::begin();for(int cs:{16,17,21,22,25,26}){assert(pins[cs]==HIGH);auto first=std::find_if(gpioEvents.begin(),gpioEvents.end(),[&](const GpioEvent&e){return e.pin==cs;});assert(first!=gpioEvents.end()&&!first->mode&&first->value==HIGH);}
+  packets.clear();display::begin();unsigned intensityWrites=0;
+  for(const auto& packet:packets)if(packet.bus==HSPI&&packet.bytes.size()==12&&packet.bytes[0]==0x0A){for(unsigned chip=0;chip<6;++chip)assert(packet.bytes[chip*2]==0x0A&&packet.bytes[chip*2+1]==15);++intensityWrites;}
+  assert(intensityWrites==1&&config::kMatrixIntensity==15);
+  for(int cs:{16,17,21,22,25,26}){assert(pins[cs]==HIGH);auto first=std::find_if(gpioEvents.begin(),gpioEvents.end(),[&](const GpioEvent&e){return e.pin==cs;});assert(first!=gpioEvents.end()&&!first->mode&&first->value==HIGH);}
   for(const auto&p:packets)if(p.bus==VSPI){assert(p.bytes.size()==16&&p.bytes[0]==0xAA);for(int i=1;i<16;++i)assert(p.bytes[i]==0x80);}
   packets.clear();display::price(123456.49);assert(packets.size()==6);int chip[6]={16,17,21,22,25,26};for(int i=0;i<6;++i){auto&p=packets[i];assert(p.selected==chip[i]&&p.bytes[0]==0xAA);for(int b=1;b<16;++b)assert(p.bytes[b]==(b==i+1?0xC0:0x80));}
   packets.clear();display::price(123456.49);assert(packets.empty());display::price(123457);assert(packets.size()==1&&packets[0].selected==26&&packets[0].bytes[7]==0xC0);

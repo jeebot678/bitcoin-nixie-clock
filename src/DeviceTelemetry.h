@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include "OtaUpdate.h"
+#include "PriceSources.h"
 
 namespace telemetry {
 enum class Command : uint8_t { Ota, Tubes, Readings, Chart, Cadence };
@@ -13,6 +14,9 @@ struct Snapshot {
   uint32_t uptime=0,heap=0,largest=0,quotes=0,accepted=0,frames=0;
   uint32_t dataHeap=0,dataBlock=0,httpStack=0;
   uint32_t transitions=0,priceChanges=0,multiChanges=0;
+  uint16_t streamProviders=0;
+  uint32_t streamDropped=0,streamRejected=0,streamDisconnects=0,streamStack=0;
+  uint32_t sourceQuotes[btc::kSourceCount]={},sourceAges[btc::kSourceCount]={};
   uint32_t chartColumns=0,historySavedAt=0;
   uint16_t chartPixels=0,historyCandles=0;
   int httpStatus=0;

@@ -28,7 +28,19 @@ Version 1.0.18 adds `price_transitions`, `price_changes` and
 `multi_digit_changes`, counting every actual frame since the last frequency
 change or return from blanking. These expose true 100 ms cadence/motion without
 requiring the collector to sample each frame.
-The chart mask contains real anchors; pixel count includes graphical connectors.
+Version 1.0.20 adds `stream_source_mask`, `stream_source_quotes` and
+`stream_source_age_ms` in the source order from `PriceSources.h`. The mask
+identifies currently connected providers; the arrays count actual received BTC
+quotes and their receipt ages. An unseen provider has age `UINT32_MAX`.
+`stream_dropped`, `stream_rejected`, `stream_disconnects` and
+`stream_stack_remaining` distinguish queue overflow, rejected messages, feed
+failures and the lowest measured stream-task stack headroom. FX ticks do not
+increment BTC quote counts. Compare these counters with `price_changes` to
+separate incoming-data throughput from the display's selected refresh period.
+The chart mask now contains every displayed candle column, including one-cell
+carried-price markers for quiet or missing buckets. `history_candles` counts
+only retained real OHLC buckets; placeholders are neither stored nor used to
+rescale the chart. Pixel count includes candle bodies and wicks, all fully on.
 `decoded=-1` means invalid input; an old `selected` can be retained.
 `initialized=false` means the setting remains a default. No Wi-Fi credentials
 or control token are included in samples.
@@ -83,7 +95,7 @@ both switches run from POS5 to POS1. See [the mapping](PCB_PIN_MAP.md).
 ## Triggering an update
 
 ```sh
-python3 tools/clock_link.py ota --expect 1.0.18 --wait 240
+python3 tools/clock_link.py ota --expect 1.0.20 --wait 240
 ```
 
 First publish and verify the signed newer release and `main` manifest. The tool

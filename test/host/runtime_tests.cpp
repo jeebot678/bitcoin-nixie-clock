@@ -26,17 +26,19 @@ bool receive(ResultLease&r){if(!ready)return false;r.value_=&queued;ready=false;
 ResultLease::~ResultLease(){if(value_)sent=false;}uint32_t stackRemaining(){return 4096;}
 void complete(bool ok=true,int status=200){queued={};queued.request=outstanding;queued.ok=ok;queued.status=status;queued.receivedAt=testMillis;queued.epoch=uint32_t(testEpoch);queued.quote.price=83300.0;queued.quote.usdtUsd=1;queued.quote.timestamp=uint32_t(testEpoch);
   if(outstanding.kind==Kind::SaveCache){queued.ok=ok&&savingStore->save(outstanding.window,savingSeries,savingScale,savingTime);queued.cacheEpochMs=savingTime;}
-  if(outstanding.kind==Kind::Candles){uint32_t current=btc::candleBucket(uint64_t(testEpoch)*1000,outstanding.window);for(unsigned col=0;col<21;++col)queued.candles.add(btc::candleStart(current-20+col,outstanding.window),83300,outstanding.window,uint64_t(testEpoch)*1000);}
+  if(outstanding.kind==Kind::Candles){queued.candleAttemptMask=outstanding.source==2&&outstanding.window<2?0x03:0x1F;queued.candleCoverageMask=outstanding.source==2?queued.candleAttemptMask:0;queued.candleSnapshotMs=uint64_t(testEpoch)*1000;
+    for(unsigned w=0;w<5;++w)if(queued.candleAttemptMask&(1U<<w)){uint32_t current=btc::candleBucket(uint64_t(testEpoch)*1000,w);for(unsigned col=0;col<21;++col)queued.candles[w].add(btc::candleStart(current-20+col,w),83300,w,uint64_t(testEpoch)*1000);}}
+
   if(outstanding.kind==Kind::History){uint32_t step=config::kCandleSeconds[outstanding.window];for(uint32_t close=outstanding.start+step;close<=outstanding.epoch;close+=step)assert(queued.history.add(close,83300));}
   ready=true;}
 }
 namespace ota {Status state;Status status(){return state;}bool due=false,validBoot=true;void begin(){}void healthCheck(uint32_t,bool){}bool bootConfirmed(){return validBoot;}bool checkDue(uint32_t,bool){return due;}void defer(uint32_t){due=false;}bool checkAndInstall(){return true;}}
 namespace telemetry {Snapshot last;std::vector<Command> queued;bool begin(){return true;}void publish(const Snapshot&s){last=s;}bool receive(Command&command){if(queued.empty())return false;command=queued.front();queued.erase(queued.begin());return true;}}
 namespace live {
-Tick pending;bool queued=false,healthy=false,busy=false;
+Tick pending;bool queued=false,healthy=false,busy=false,usdtAllowed=false;uint8_t connectionCount=2;
 bool begin(){return true;}bool receive(Tick& tick){if(!queued)return false;tick=pending;queued=false;return true;}
-Status status(){return Status{};}bool fresh(uint32_t){return healthy;}
-bool pauseAndWait(uint32_t){return true;}void resume(){}void httpBusy(bool value){busy=value;}
+Status status(){Status s;s.connections=healthy?connectionCount:0;s.providers=healthy?3:0;return s;}bool fresh(uint32_t){return healthy;}
+bool pauseAndWait(uint32_t){return true;}void resume(){}void httpBusy(bool value){busy=value;}void allowUsdt(bool value){usdtAllowed=value;}
 }
 #define time testTime
 #include "../../src/main.cpp"
@@ -82,7 +84,7 @@ void settingsTests(){
   market::complete();processResult(testMillis);
   display::begin();packets.clear();draw(testMillis);assert(display::startupAnimating()&&nextDrawAt==testMillis+config::kStartupFrameMs);
   testMillis+=273*config::kStartupCellMs;draw(testMillis);assert(display::startupAnimating());
-  testMillis+=273*config::kStartupCellMs;draw(testMillis);assert(!display::startupAnimating()&&nextDrawAt==testMillis+2);
+  testMillis+=273*config::kStartupCellMs;draw(testMillis);assert(!display::startupAnimating()&&nextDrawAt>testMillis&&nextDrawAt<=testMillis+1000);
   liveReady=false;live::healthy=false; // Exercise REST fallback independently of stream suppression.
   for(int setting=0;setting<5;++setting){
     testMillis+=6000;refreshDial.stable=setting;fx.usd=1;fx.receivedAt=testMillis;nextQuoteAt=testMillis;
@@ -119,7 +121,7 @@ void cacheRuntimeTests(){
   for(const auto& p:packets)if(p.bus==VSPI)for(int digit=1;digit<16;++digit)assert(p.bytes[digit]==0x80);
   assert(display::startupAnimating());testMillis+=273*config::kStartupCellMs;draw(testMillis);
   testMillis+=273*config::kStartupCellMs;packets.clear();draw(testMillis);assert(!display::startupAnimating());
-  auto frame=btc::makeCandles(candleSeries[4],candleScales[4],4,candleStore.savedTimeMs(4));auto chart=frame.plot(true);
+  auto frame=btc::makeCandles(candleSeries[4],candleScales[4],4,candleStore.savedTimeMs(4));auto chart=frame.plot();
   uint8_t registers[6][8]={};unsigned frames=0;for(const auto& p:packets)if(p.bus==HSPI){++frames;for(unsigned slot=0;slot<6;++slot)registers[config::kMaxShiftOrder[slot]][p.bytes[slot*2]-1]=p.bytes[slot*2+1];}
   assert(frames==8);for(unsigned row=0;row<13;++row)for(unsigned col=0;col<21;++col){auto p=led_matrix::mapPixel(row,col);assert(bool(registers[p.driver][p.digit]&(1U<<p.segmentBit))==btc::plotPixel(chart,row,col));}
   testEpoch=1800000120;guard=btc::PriceGuard{};guard.accept(83300,0,testMillis);guard.accept(83300,1,testMillis);lastPriceEpoch=uint32_t(testEpoch);
@@ -129,6 +131,128 @@ void cacheRuntimeTests(){
   market::complete();processResult(testMillis);assert(candleSeries[4].count(4,chartNowMs())==21);
   liveReady=true;live::healthy=true;
   std::cout<<"PASS: actual OHLC runtime persistence, instant range recall, no redundant fetches, outage backfill and saved candle chart before SNTP\n";
+}
+
+void resetCandleRuntime(){
+  assert(wifi.online()&&!wifi.portalActive()&&!market::sent&&!inflight);
+  testMillis+=6000;testEpoch=1800000180;
+  refreshDial=btc::Dial(4);timelineDial=btc::Dial(2);refreshDial.initialized=timelineDial.initialized=true;
+  adc[35]=config::kRefreshMv[4];adc[34]=config::kTimelineMv[2];
+  guard=btc::PriceGuard{};assert(guard.accept(83300,0,testMillis)&&guard.accept(83300,1,testMillis));
+  fx.usd=1;fx.receivedAt=testMillis;quotes.clear();quotes.put(83300,0,testMillis,uint32_t(testEpoch));
+  lastQuoteReceived=testMillis;lastPriceEpoch=uint32_t(testEpoch);lastChartTickAt=testMillis;chartContinuousSince=chartNowMs();
+  networkReady=liveReady=streamWarmupStarted=true;live::healthy=true;live::connectionCount=2;live::busy=false;live::queued=false;live::pending={};
+  streamWarmupUntil=testMillis;nextQuoteAt=testMillis+100000;needDifferentQuote=needConfirmation=false;
+  forceOtaPending=ota::due=false;ota::validBoot=true;matrixDiagnostics=false;testEndsAt=tubeTestEndsAt=0;
+  market::ready=false;
+  for(unsigned w=0;w<5;++w){candleSeries[w]={};candleScales[w]={};candleDirty[w]=candleBackfilled[w]=false;
+    candleReferencePrice[w]=0;nextCandleSave[w]=0;nextHistoryAt[w]=testMillis;historyErrors[w]=0;historySource[w]=2;}
+  for(auto& state:rotation.states){state.availableAt=testMillis;state.failures=0;}
+}
+void seedRuntimeBars(unsigned window){
+  uint64_t now=chartNowMs();uint32_t current=btc::candleBucket(now,window);
+  for(unsigned col=0;col<21;++col){
+    uint64_t stamp=btc::candleStart(current-20+col,window);double price=83300+col*.5;
+    assert(candleSeries[window].add(stamp,price,window,now));
+    if(stamp+3<=now){assert(candleSeries[window].add(stamp+1,price+1,window,now));
+      assert(candleSeries[window].add(stamp+2,price-1,window,now));assert(candleSeries[window].add(stamp+3,price+.25,window,now));}
+  }
+  assert(candleSeries[window].count(window,now)==21&&candleScales[window].update(candleSeries[window],window,now));
+  candleReferencePrice[window]=candleSeries[window].latestCloseCents(window);
+}
+void selectRuntimeRange(unsigned window){
+  adc[34]=config::kTimelineMv[window];nextDialsAt=testMillis;readDials(testMillis);
+  testMillis+=config::kDebounceMs+1;readDials(testMillis);assert(timelineDial.stable==int(window));
+  nextDrawAt=testMillis;draw(testMillis);
+}
+void sharedCandleRuntimeTests(){
+  resetCandleRuntime();for(unsigned w=0;w<5;++w){seedRuntimeBars(w);candleBackfilled[w]=true;}
+  auto original=candleSeries[2];auto originalScale=candleScales[2];
+  auto originalFrame=btc::makeCandles(original,originalScale,2,chartNowMs());
+  uint32_t forming=btc::candleBucket(chartNowMs(),2);unsigned calls=market::calls;
+  selectRuntimeRange(3);schedule(testMillis);assert(market::calls==calls);
+  // Market time and current candles progress while another range is selected.
+  ++testEpoch;testMillis+=1000;btc::Quote tick;tick.price=83310.4;tick.timestamp=uint32_t(testEpoch);
+  acceptQuote(tick,0,testMillis,uint32_t(testEpoch),testMillis);
+  selectRuntimeRange(2);schedule(testMillis);
+  assert(market::calls==calls&&candleScales[2].low==originalScale.low&&candleScales[2].step==originalScale.step);
+  for(const auto& bar:original.bars)if(bar.bucket!=forming)assert(!memcmp(&bar,&candleSeries[2].bars[bar.bucket%21],sizeof(bar)));
+  assert(candleSeries[2].bars[forming%21].close==8331040);
+  auto returned=btc::makeCandles(candleSeries[2],candleScales[2],2,chartNowMs());
+  assert(returned.valid==0x1FFFFF&&chartColumns==0x1FFFFF&&chartPixels>=21);
+  for(unsigned col=0;col<20;++col)assert(returned.bodies[col]==originalFrame.bodies[col]&&returned.wicks[col]==originalFrame.wicks[col]);
+
+  resetCandleRuntime();schedule(testMillis);assert(market::sent&&market::outstanding.kind==market::Kind::Candles&&market::outstanding.window==2);
+  calls=market::calls;selectRuntimeRange(3);schedule(testMillis);assert(market::calls==calls); // The request remains bound to its original range.
+  tick.price=83298;tick.timestamp=uint32_t(testEpoch);acceptQuote(tick,0,testMillis,uint32_t(testEpoch),testMillis);
+  market::complete();assert(market::queued.candleAttemptMask==0x1F&&market::queued.candleCoverageMask==0x1F);processResult(testMillis);
+  assert(timelineDial.stable==3&&!inflight&&!market::sent);
+  for(unsigned w=0;w<5;++w){assert(candleSeries[w].count(w,chartNowMs())==21&&candleBackfilled[w]);
+    auto current=btc::candleBucket(chartNowMs(),w);assert(candleSeries[w].bars[current%21].close==8329800);}
+  for(unsigned w=0;w<5;++w){selectRuntimeRange(w);schedule(testMillis);assert(market::calls==calls&&chartColumns==0x1FFFFF&&chartPixels>=21);}
+
+  // Even an inconsistent success with optimistic coverage cannot replace a
+  // retained chart with empty observations or suppress the repair request.
+  resetCandleRuntime();seedRuntimeBars(2);original=candleSeries[2];schedule(testMillis);assert(market::sent);
+  market::complete();for(auto& series:market::queued.candles)series={};market::queued.quote={};
+  market::queued.candleCoverageMask=0x1F;processResult(testMillis);
+  assert(!memcmp(&original,&candleSeries[2],sizeof(original))&&historyErrors[2]==1&&historySource[2]==0);
+  for(bool covered:candleBackfilled)assert(!covered);
+  calls=market::calls;testMillis+=1001;schedule(testMillis);
+  assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Candles&&market::outstanding.source==0&&market::outstanding.window==2);
+  market::complete();processResult(testMillis);assert(!candleBackfilled[2]); // Coinbase repair remains partial.
+
+  resetCandleRuntime();for(unsigned w=0;w<5;++w){seedRuntimeBars(w);candleBackfilled[w]=true;}
+  btc::CandleSeries retained[5];std::copy(candleSeries,candleSeries+5,retained);
+  market::outstanding={market::Kind::Candles,0,3,uint32_t(testEpoch)};market::sent=inflight=true;market::complete();
+  for(auto& series:market::queued.candles)series={};market::queued.candleCoverageMask=0;
+  assert(market::queued.candles[2].add(chartNowMs(),83310.5,2,chartNowMs()));processResult(testMillis);
+  for(unsigned w=0;w<5;++w){assert(candleBackfilled[w]&&candleSeries[w].count(w,chartNowMs())==21);
+    uint32_t current=btc::candleBucket(chartNowMs(),w);
+    for(const auto& bar:retained[w].bars)if(w!=2||bar.bucket!=current)assert(!memcmp(&bar,&candleSeries[w].bars[bar.bucket%21],sizeof(bar)));}
+  assert(candleSeries[2].bars[btc::candleBucket(chartNowMs(),2)%21].close==8331050);
+  std::cout<<"PASS: debounced 5m/30m/5m recall retains closed candles, scale and pixels; late shared replies merge all five caches; coverage avoids redundant downloads; empty/partial repairs preserve prior bars and coverage\n";
+}
+void liveFxRuntimeTests(){
+  resetCandleRuntime();for(unsigned w=0;w<5;++w)seedRuntimeBars(w);
+  btc::CandleSeries before[5];std::copy(candleSeries,candleSeries+5,before);auto priorBook=quotes;auto priorGuard=guard;
+  uint32_t accepted=acceptedQuotes,received=lastQuoteReceived,chartTick=lastChartTickAt;
+  fx.usd=NAN;live::usdtAllowed=false;live::pending={};live::pending.source=1;live::pending.receivedAt=testMillis-40;
+  live::pending.quote.timestamp=uint32_t(testEpoch);live::pending.fx=.998;live::queued=true;processLive(testMillis);
+  assert(fx.usd==.998&&fx.receivedAt==testMillis-40&&live::usdtAllowed);
+  auto unchanged=[&](){assert(acceptedQuotes==accepted&&lastQuoteReceived==received&&lastChartTickAt==chartTick);
+    assert(!memcmp(&quotes,&priorBook,sizeof(quotes))&&!memcmp(&guard,&priorGuard,sizeof(guard)));
+    assert(!memcmp(before,candleSeries,sizeof(before)));};unchanged();
+  for(unsigned invalid=0;invalid<7;++invalid){
+    fx.usd=NAN;live::usdtAllowed=false;live::pending={};live::pending.source=1;live::pending.receivedAt=testMillis;
+    live::pending.quote.timestamp=uint32_t(testEpoch);live::pending.fx=1;
+    if(invalid==0)live::pending.fx=.49;
+    if(invalid==1)live::pending.fx=1.51;
+    if(invalid==2)live::pending.fx=NAN;
+    if(invalid==3)live::pending.source=0;
+    if(invalid==4)live::pending.quote.timestamp=uint32_t(testEpoch)-config::kQuoteMaxAgeSeconds-1;
+    if(invalid==5)live::pending.receivedAt=testMillis-5001;
+    if(invalid==6)live::pending.quote.price=83310;
+    live::queued=true;processLive(testMillis);assert(std::isnan(fx.usd)&&!live::usdtAllowed);unchanged();
+  }
+  fx.usd=1;fx.receivedAt=testMillis-config::kFxMaxAgeMs-1;processLive(testMillis);assert(!live::usdtAllowed);
+  fx.receivedAt=testMillis;live::pending={};processLive(testMillis);assert(live::usdtAllowed);
+  std::cout<<"PASS: fresh Kraken FX-only ticks update conversion and USDT gating without price/chart mutation; invalid, mixed, stale and expired conversion never enables USDT\n";
+}
+void secondStreamWarmupRuntimeTests(){
+  resetCandleRuntime();live::connectionCount=1;needDifferentQuote=true;
+  market::outstanding={market::Kind::Quote,0,2,uint32_t(testEpoch)};market::sent=inflight=true;market::complete();processResult(testMillis);
+  uint32_t start=testMillis;assert(streamWarmupUntil==start+35000);unsigned calls=market::calls;
+  for(unsigned elapsed:{0U,10000U,34999U}){testMillis=start+elapsed;nextQuoteAt=nextHistoryAt[2]=testMillis;schedule(testMillis);assert(market::calls==calls);}
+  // Once both feeds are established, the second-stream grace must not hold
+  // ordinary HTTP work until a stale timer expires.
+  live::connectionCount=2;nextHistoryAt[2]=testMillis+100000;nextQuoteAt=testMillis;schedule(testMillis);
+  assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Quote);market::complete();processResult(testMillis);
+  live::connectionCount=1;streamWarmupUntil=testMillis+35000;nextQuoteAt=testMillis;needDifferentQuote=true;
+  calls=market::calls;schedule(testMillis);assert(market::calls==calls);
+  forceOtaPending=true;schedule(testMillis);assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Ota&&!forceOtaPending);
+  market::complete();processResult(testMillis);live::connectionCount=2;needDifferentQuote=false;fx.receivedAt=testMillis;
+  std::cout<<"PASS: one fresh stream gets 35 seconds for its second feed; two established feeds bypass that grace; forced signed OTA remains available during reconnect\n";
 }
 
 void soak(){
@@ -420,4 +544,4 @@ void wirelessRuntimeTests(){
   WiFi.connection=WL_CONNECTED;wifi.loop(testMillis);testMillis+=8001;wifi.loop(testMillis);assert(wifi.online()&&!wifi.portalActive());
   std::cout<<"PASS: actual dial sampling/snapshots, queued signed OTA checks bypassing schedule without interrupting in-flight HTTP, wireless matrix/tube controls and BOOT diagnostics gestures\n";
 }
-int main(){settingsTests();cacheRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();asyncCacheTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}
+int main(){settingsTests();cacheRuntimeTests();sharedCandleRuntimeTests();liveFxRuntimeTests();secondStreamWarmupRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();asyncCacheTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}

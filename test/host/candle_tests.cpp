@@ -80,13 +80,35 @@ void persistence(){
 }
 void physicalPixels(){
   unsigned w=4;auto s=populated(w);btc::CandleScale scale;scale.update(s,w,utc);auto frame=btc::makeCandles(s,scale,w,utc);
-  auto body=frame.plot(false),full=frame.plot(true);unsigned bodyPixels=0,fullPixels=0;
-  for(unsigned col=0;col<21;++col)for(unsigned row=0;row<13;++row){bodyPixels+=btc::plotPixel(body,row,col);fullPixels+=btc::plotPixel(full,row,col);}
+  auto full=frame.plot();unsigned bodyPixels=0,fullPixels=0;
+  for(unsigned col=0;col<21;++col)for(unsigned row=0;row<13;++row){bodyPixels+=bool(frame.bodies[col]&(1U<<row));fullPixels+=btc::plotPixel(full,row,col);}
   assert(bodyPixels>=21&&fullPixels>bodyPixels);
   display::begin();display::startupPlot(full,100);display::startupPlot(full,100+273*config::kStartupCellMs);packets.clear();display::startupPlot(full,100+546*config::kStartupCellMs);assert(!display::startupAnimating());
   uint8_t registers[6][8]={};for(const auto& p:packets)if(p.bus==HSPI)for(unsigned slot=0;slot<6;++slot)registers[config::kMaxShiftOrder[slot]][p.bytes[slot*2]-1]=p.bytes[slot*2+1];
   for(unsigned row=0;row<13;++row)for(unsigned col=0;col<21;++col){auto p=led_matrix::mapPixel(row,col);assert(bool(registers[p.driver][p.digit]&(1U<<p.segmentBit))==btc::plotPixel(full,row,col));}
-  packets.clear();display::plot(body);assert(!packets.empty());for(const auto& p:packets)assert(p.bus==HSPI); // PWM never touches Nixies.
+  // Full candle pixels remain on through every former PWM phase.
+  for(unsigned phase=0;phase<12;++phase){testMillis+=1;packets.clear();display::startupPlot(full,testMillis);assert(packets.empty());}
+}
+void minimumCells(){
+  for(unsigned w=0;w<5;++w){
+    btc::CandleSeries s;uint32_t current=btc::candleBucket(utc,w);
+    for(unsigned col:{2U,8U,18U}){uint64_t t=btc::candleStart(current-20+col,w);assert(s.add(t,80000+col,w,utc));assert(s.add(t+1,80001+col,w,utc));}
+    auto original=s;btc::CandleScale axis;axis.update(s,w,utc);double low=axis.low,step=axis.step;
+    auto frame=btc::makeCandles(s,axis,w,utc);auto pixels=frame.plot();assert(frame.valid==0x1FFFFF);
+    uint32_t carried=8000200;
+    for(unsigned col=0;col<21;++col){const auto& c=s.bars[(current-20+col)%21];unsigned lit=0;for(unsigned row=0;row<13;++row)lit+=btc::plotPixel(pixels,row,col);assert(lit>=1);
+      if(c.bucket==current-20+col)carried=c.close;
+      else assert(lit==1&&frame.bodies[col]==uint16_t(1U<<axis.row(carried)));
+    }
+    assert(s.count(w,utc)==3&&!memcmp(&s,&original,sizeof(s))&&axis.low==low&&axis.step==step);
+    uint32_t fallback=s.latestCloseCents(w);assert(fallback==8001900);assert(s.trim(w,utc+172800000));
+    auto stale=btc::makeCandles(s,axis,w,utc+172800000,fallback);assert(stale.valid==0x1FFFFF&&!s.count(w,utc+172800000));
+    for(unsigned col=0;col<21;++col)assert(__builtin_popcount(stale.plot().connectors[col])==1);
+    btc::CandleSeries flat;assert(flat.add(utc,80000,w,utc));auto flatFrame=btc::makeCandles(flat,axis,w,utc);
+    for(unsigned col=0;col<21;++col)assert(__builtin_popcount(flatFrame.plot().connectors[col])==1);
+    assert(!btc::makeCandles(btc::CandleSeries{},axis,w,utc).valid);assert(!btc::makeCandles(flat,axis,w,0,8000000).valid);
+  }
+  std::cout<<"PASS: every candle column has a solid minimum cell; quiet/leading/trailing gaps and expired windows carry known prices without modifying OHLC or scale\n";
 }
 std::string fixture(const char* name){std::ifstream file(std::string("test/live_fixtures/")+name);std::ostringstream content;content<<file.rdbuf();assert(file.good());return content.str();}
 void parserTests(){
@@ -113,4 +135,4 @@ void parserTests(){
   auto bar=c.bars[btc::candleBucket(now-1000,0)%21];assert(bar.open==8000100&&bar.close==8000300&&bar.low==7999900&&bar.high==8000300&&q.price==80003);
   for(const char* bad:{"[{}]","[", "{}", "[] garbage", "[{\"date\":\"1791846828\",\"tid\":\"1\",\"price\":\"NaN\"}]"}){TradeReader malformed(bad);assert(!btc::parseTradeCandles(malformed,doc,true,0,now,c,q,[](){}));}
 }
-int main(){aggregation();scaleTests();persistence();physicalPixels();parserTests();std::cout<<"PASS: fixed UTC OHLC buckets, chronological trades, stable heights, bounded panning, spike expansion, 30-minute volatility response, durable axis/candles, corruption/power loss, real fixture streaming and physical candle SPI/startup pixels\n";}
+int main(){aggregation();scaleTests();persistence();physicalPixels();minimumCells();parserTests();std::cout<<"PASS: fixed UTC OHLC buckets, chronological trades, stable heights, bounded panning, spike expansion, 30-minute volatility response, durable axis/candles, corruption/power loss, real fixture streaming and physical candle SPI/startup pixels\n";}

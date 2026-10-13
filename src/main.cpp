@@ -28,6 +28,7 @@ CandleStore candleStore;
 bool candleDirty[5]={},candleBackfilled[5]={};
 uint32_t nextCandleSave[5]={};
 uint64_t candleSavedTime[5]={};
+uint32_t candleReferencePrice[5]={};
 uint64_t chartContinuousSince=0;
 uint32_t lastChartTickAt=0;
 bool networkReady=false,inflight=false,timeStarted=false;
@@ -129,6 +130,9 @@ void publishTelemetry(uint32_t now) {
   s.range.selected=timelineDial.stable;s.range.initialized=timelineDial.initialized;
   s.interval=refreshPeriod();s.cadenceTest=cadenceTestActive;s.window=config::kWindowSeconds[timelineDial.stable];
   auto liveState=live::status();s.connections=liveState.connections;s.quotes=liveState.quotes;
+  s.streamProviders=liveState.providers;s.streamDropped=liveState.dropped;s.streamRejected=liveState.rejected;s.streamDisconnects=liveState.disconnects;
+  s.streamStack=liveState.stackFreeBytes;
+  for(unsigned source=0;source<btc::kSourceCount;++source){s.sourceQuotes[source]=liveState.quoteCounts[source];s.sourceAges[source]=liveState.quoteAges[source];}
   s.accepted=acceptedQuotes;s.frames=nixieFrames;s.quoteAge=now-lastQuoteReceived;s.frameAge=now-lastNixieAt;
   s.frameGap=lastFrameGap;s.nextFrame=uint32_t(std::max<int32_t>(0,int32_t(nextNixieAt-now)));
   s.minimumGap=minimumFrameGap;s.maximumGap=maximumFrameGap;
@@ -206,18 +210,27 @@ void acceptQuote(const btc::Quote& quote,uint8_t source,uint32_t receivedAt,uint
     uint64_t utcMs=chartNowMs();
     if(!chartContinuousSince||uint32_t(now-lastChartTickAt)>5000){chartContinuousSince=std::min(stampMs,utcMs);for(auto& filled:candleBackfilled)filled=false;}
     lastChartTickAt=now;
-    for(unsigned w=0;w<5;++w)if(candleSeries[w].add(stampMs,price,w,utcMs))markCandleDirty(w,now);
+    for(unsigned w=0;w<5;++w){
+      if(candleSeries[w].add(stampMs,price,w,utcMs))markCandleDirty(w,now);
+      uint32_t latest=candleSeries[w].latestCloseCents(w);
+      if(latest)candleReferencePrice[w]=latest;
+      else if(price<=UINT32_MAX/100.0)candleReferencePrice[w]=uint32_t(std::llround(price*100));
+    }
     nextDrawAt=now;
   } else {needConfirmation=true;nextQuoteAt=now;}
 }
 void processLive(uint32_t now) {
-  live::Tick tick;
-  for (unsigned i=0;i<2 && live::receive(tick);++i) {
+  live::Tick tick;uint32_t started=millis();
+  for(unsigned i=0;i<32&&live::receive(tick);++i){
     now=millis();
-    if (tick.source<btc::kSourceCount && wifi.online() &&
-      uint32_t(now-tick.receivedAt)<=5000 && btc::freshTimestamp(tick.quote.timestamp,uint32_t(time(nullptr))))
-    acceptQuote(tick.quote,tick.source,tick.receivedAt,tick.quote.timestamp,now);
+    bool valid=tick.source<btc::kSourceCount&&wifi.online()&&uint32_t(now-tick.receivedAt)<=5000&&btc::freshTimestamp(tick.quote.timestamp,uint32_t(time(nullptr)));
+    if(valid){
+      if(tick.source==1&&std::isfinite(tick.fx)&&tick.fx>=0.5&&tick.fx<=1.5&&!tick.quote.price){fx.usd=tick.fx;fx.receivedAt=tick.receivedAt;}
+      else if(!tick.fx)acceptQuote(tick.quote,tick.source,tick.receivedAt,tick.quote.timestamp,now);
+    }
+    if(i>=1&&uint32_t(millis()-started)>=4)break; // Drain bursts without delaying the tube timer.
   }
+  live::allowUsdt(fx.fresh(millis()));
 }
 void refreshNixies(uint32_t now) {
   if(cadenceTestActive&&btc::due(now,cadenceTestEndsAt)){cadenceTestActive=false;nextNixieAt=now;}
@@ -268,7 +281,7 @@ void processResult(uint32_t now) {
   live::httpBusy(false);
   // Every HTTP response must give missing streams time to reconnect. Without
   // this, 500 ms REST/FX/history dispatches keep busy=true indefinitely.
-  if(liveReady&&!live::fresh(now))streamWarmupUntil=now+35000;
+  if(liveReady&&(!live::fresh(now)||live::status().connections<2))streamWarmupUntil=now+35000;
   if (result.request.kind==market::Kind::Ota) { nextQuoteAt=now;return; }
   size_t source=result.request.source;
   if(result.deferred){
@@ -276,7 +289,9 @@ void processResult(uint32_t now) {
     else nextQuoteAt=now+5000;
     return; // Local RAM contention is not an exchange failure/rate limit.
   }
-  if (!result.ok) {
+  bool emptyCandles=result.request.kind==market::Kind::Candles;
+  if(emptyCandles)for(unsigned w=0;w<5;++w)if((result.candleAttemptMask&(1U<<w))&&result.candles[w].count(w,chartNowMs()))emptyCandles=false;
+  if (!result.ok||emptyCandles) {
     rotation.failure(source,now,result.status,result.retryAfterMs);
     Serial.printf("%s %s failed (HTTP %d), cooling down\n",btc::kSources[source].name,result.request.kind==market::Kind::Quote?"ticker":"history",result.status);
     if (isHistory(result.request.kind)) {
@@ -289,16 +304,20 @@ void processResult(uint32_t now) {
   }
   rotation.success(source);
   if (isHistory(result.request.kind)) {
-    uint8_t window=result.request.window;
     uint32_t epoch=uint32_t(time(nullptr));
     if(result.request.kind==market::Kind::Candles){
       uint64_t utcMs=chartNowMs();
-      if(candleSeries[window].merge(result.candles,window,utcMs))markCandleDirty(window,now);
+      // One transaction response builds each requested range independently.
+      // Merge into each retained cache, including ranges not currently selected.
+      for(unsigned w=0;w<5;++w)if(result.candleAttemptMask&(1U<<w)){
+        if(candleSeries[w].merge(result.candles[w],w,utcMs))markCandleDirty(w,now);
+        uint32_t latest=candleSeries[w].latestCloseCents(w);if(latest)candleReferencePrice[w]=latest;
+        historyErrors[w]=0;nextHistoryAt[w]=now+config::kHistoryRefreshMs[w];historySource[w]=2;
+        if(candleScales[w].update(candleSeries[w],w,utcMs))markCandleDirty(w,now);
+      }
       if(result.quote.price&&!guard.price&&btc::freshTimestamp(result.quote.timestamp,epoch))acceptQuote(result.quote,uint8_t(source),result.receivedAt,epoch,now);
-      candleBackfilled[window]=source==2; // A Coinbase page may cover only part of the requested range.
-      historyErrors[window]=0;nextHistoryAt[window]=now+config::kHistoryRefreshMs[window];historySource[window]=2;
-      if(candleScales[window].update(candleSeries[window],window,utcMs))markCandleDirty(window,now);
-      Serial.printf("%s: %u OHLC columns ready for %s\n",btc::kSources[source].name,candleSeries[window].count(window,utcMs),config::kWindowNames[window]);
+      for(unsigned w=0;w<5;++w)if((result.candleCoverageMask&(1U<<w))&&result.candles[w].count(w,utcMs))candleBackfilled[w]=true;
+      Serial.printf("%s: OHLC caches merged, attempted=%02x complete=%02x selected=%s\n",btc::kSources[source].name,result.candleAttemptMask,result.candleCoverageMask,config::kWindowNames[timelineDial.stable]);
       nextDrawAt=now;return;
     }
     return; // Close-only legacy responses never fabricate candle highs/lows.
@@ -339,7 +358,7 @@ void schedule(uint32_t now) {
     httpKind=uint8_t(market::Kind::Ota);httpSource=0;
     ota::defer(now);inflight=true;live::httpBusy(true);return;
   }
-  if(liveReady&&!live::fresh(now)&&guard.price&&!btc::due(now,streamWarmupUntil))return;
+  if(liveReady&&guard.price&&(!live::fresh(now)||live::status().connections<2)&&!btc::due(now,streamWarmupUntil))return;
   if (!guard.confirmed()) {
     if (liveReady && !btc::due(now,guard.price?streamWarmupUntil:firstQuoteFallbackAt)) return;
     if (btc::due(now,nextQuoteAt)) {
@@ -406,15 +425,14 @@ void draw(uint32_t now) {
   if(utcMs<uint64_t(config::kMinimumEpoch)*1000)utcMs=candleSavedTime[timelineDial.stable];
   unsigned window=timelineDial.stable;
   if(candleScales[window].update(candleSeries[window],window,utcMs))markCandleDirty(window,now);
-  auto frame=btc::makeCandles(candleSeries[window],candleScales[window],window,utcMs);
+  auto frame=btc::makeCandles(candleSeries[window],candleScales[window],window,utcMs,candleReferencePrice[window]);
   if(frame.valid){
-    // One-pixel-wide candle bodies stay solid. Wick-only pixels use a short
-    // 1/3-duty cycle; no inter-column connector pixels are drawn.
-    auto full=frame.plot(true);chartColumns=frame.valid;chartPixels=0;
-    for(unsigned col=0;col<21;++col)for(unsigned row=0;row<13;++row)chartPixels+=btc::plotPixel(full,row,col);
-    auto chart=frame.plot(display::startupPending()||display::startupAnimating()||now%12<4);
+    // All chart pixels are continuously on at the same driver intensity.
+    auto chart=frame.plot();chartColumns=frame.valid;chartPixels=0;
+    for(unsigned col=0;col<21;++col)for(unsigned row=0;row<13;++row)chartPixels+=btc::plotPixel(chart,row,col);
     display::startupPlot(chart,now);
-    nextDrawAt=now+(display::startupAnimating()?config::kStartupFrameMs:2);
+    uint64_t boundary=btc::candleStart(btc::candleBucket(utcMs,window)+1,window);
+    nextDrawAt=now+(display::startupAnimating()?config::kStartupFrameMs:uint32_t(std::min<uint64_t>(1000,std::max<uint64_t>(1,boundary-utcMs))));
   }else{
     chartColumns=0;chartPixels=0;
     if(utcMs<uint64_t(config::kMinimumEpoch)*1000)display::message("SYNC","CLOCK",now);
@@ -449,7 +467,7 @@ void setup() {
   Serial.printf("Firmware boot: %s\n",ota_config::kVersion);
   display::begin();
   candleStore.begin(candleSeries,candleScales);
-  for(unsigned w=0;w<5;++w)candleSavedTime[w]=candleStore.savedTimeMs(w);
+  for(unsigned w=0;w<5;++w){candleSavedTime[w]=candleStore.savedTimeMs(w);candleReferencePrice[w]=candleSeries[w].latestCloseCents(w);}
   pinMode(0,INPUT_PULLUP); pinMode(config::kRefreshPin,INPUT); pinMode(config::kTimelinePin,INPUT);
   analogReadResolution(12);
   analogSetPinAttenuation(config::kRefreshPin,ADC_11db); analogSetPinAttenuation(config::kTimelinePin,ADC_11db);

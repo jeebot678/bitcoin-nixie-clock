@@ -1,47 +1,78 @@
 # Nixie refresh and chart behavior
 
-Version 1.0.17 addresses the assembled 0.5 s / 5 min failure: sequential
-HTTP jobs could hold `busy` continuously, preventing stream reconnects and
-causing stale-price blanking. After each HTTP job, missing streams get a
-35-second reconnect grace. Ordinary HTTP requests release the secondary but
-never close the primary; a failed local RAM reservation defers without marking
-a provider failure. Quotes use filtered 2 KiB JSON, and primary Bitstamp history
-requests use at most 24 candles per page. TLS reserves two separate 18 KiB
-record allocations and 24 KiB additional context/crypto headroom under the gate.
+Firmware 1.0.20 keeps the selected display cadence independent of network
+requests and preserves a continuous supply of genuine price alternatives.
+Frequency settings are 100 / 500 / 1500 / 10000 / 60000 ms; range settings are
+30 / 60 / 300 / 1800 / 3600 seconds. Each deadline writes all six Nixie modules,
+selecting a recent validated quote even when a request is still running.
 
-Version 1.0.19 maps frequency to 100 / 500 / 1500 / 10000 / 60000 ms and
-range to 30 / 60 / 300 / 1800 / 3600 seconds. Twenty-one OHLC records per
-range replace the running point caches. Candles and per-range scale parameters
-checkpoint every 30 seconds on core 0 in separate CRC-protected files; legacy history
-files remain intact. Candle bootstrap uses individual transactions in a
-512-byte streaming JSON pool and may briefly pause the primary for its TLS
-reservation when RAM requires it. Ordinary quote/FX jobs still preserve the
-primary; the reconnect grace remains in place.
+The quote book retains up to twelve distinct rounded prices per provider for five
+seconds. Selection prefers a genuine multi-digit change, then a different
+provider and fresher receipts. Repeated receipts refresh the current entry
+rather than evicting its alternatives. Quotes can be reused within that
+lifetime, so a display change does not mean a newly executed trade. If no
+candidate changes the whole-dollar display, the timer still runs and requests
+another eligible provider asynchronously. No synthetic $1 stepping or larger
+invented change is used; all displayed values come from observed market prices.
 
-The normal price timer writes all six modules at the selected 100 ms, 500 ms,
-1.5 s, 10 s or 1 min deadline. Twelve distinct rounded prices per provider remain
-eligible for five seconds. Selection prefers genuine multi-digit changes,
-then a different provider and fresher receipts. Repeated updates refresh the
-same entry instead of evicting alternatives. If no candidate changes the
-whole-dollar display, the timer still runs and requests another provider in
-the background. No synthetic $1 stepping or larger invented change is used.
-Actual exchange prices determine how many digits differ.
+Coinbase is now the preferred primary USD stream, with Kraken preferred on
+the secondary. Kraken adds matched-trade batches and USDT/USD conversion on
+its existing TLS connection. Binance and Gemini join Bitstamp and Bitfinex
+as stream fallbacks. Both workers retain 16 actual ticks each; a burst no
+longer overwrites every intermediate price before the main loop can inspect
+it. The main loop drains up to 32 ticks with a four-millisecond work budget
+so burst processing does not delay the display timer. FX-only ticks update
+conversion without counting as Bitcoin prices or masking stale Bitcoin data.
+See [verified endpoints, public quotas and payloads](SOURCES.md).
 
-The matrix has 21 fixed UTC candles and 13 rows. Bodies are solid; wick-only
-pixels are dimmed. Every validated live quote contributes real highs/lows
-across all five ranges. Closed candles retain their boundaries and scroll by
-one column. Each range keeps its own price scale, with one-row panning at
-most every five seconds, prompt expansion for significant spikes and a
-30-minute smoothing period for routine volatility changes. See
-[candle behavior, persistence and testing](CANDLE_CHART.md).
+HTTP dispatch holds new handshakes but preserves established subscriptions.
+Only a real data-RAM reservation can release the secondary. Routine quote/FX
+requests defer rather than close the primary. OTA and infrequent candle
+bootstrap jobs may pause it when necessary. After HTTP work, missing feeds
+receive a bounded 35-second reconnect grace, including a missing secondary
+while the primary remains healthy. TLS still reserves two separate 18 KiB
+record allocations plus 24 KiB context/crypto headroom under the shared gate.
+This fixes the pattern where requests for a different price repeatedly tore
+down the second stream and left a sparse fallback as the only live source.
 
-Wireless diagnostics now report the active HTTP kind/source, last HTTP status,
-requested differing quote, cached candle count/epoch, chart anchor mask and
-rendered pixel count, alongside usable data-RAM and frame timing. Per-deadline transition, changed-price
-and multi-digit-change counters observe every 100 ms frame even when LAN
-sampling is slower. A 30-second
-`cadence-test` temporarily selects the normal 500 ms live-price path, marks
+The matrix has 21 fixed UTC candles and 13 rows. Body and wick pixels are
+fully on or off, without pulse dimming. Each displayed column has at least
+one lit cell once a price is available. An observed candle includes its
+open-to-close body and high-to-low wick; an unobserved column displays a
+flat close hold without adding synthetic trades to its stored OHLC data.
+Every validated live quote contributes highs/lows across all five ranges,
+independently of the selected view and Nixie frequency. Bootstrap responses
+also merge into every attempted range rather than replacing the selected
+cache. Switching ranges preserves each cache and its scale.
+
+Closed candles retain their UTC boundaries and scroll one column at a time.
+Each range keeps its own price scale, with one-row panning at most every five
+seconds, prompt expansion for significant spikes and a 30-minute smoothing
+period for routine volatility changes. Candles and scale parameters
+checkpoint at most every 30 seconds through immutable core-0 background
+writes into separate CRC-protected files. Legacy history remains intact.
+See [candle behavior, persistence and testing](CANDLE_CHART.md).
+
+Wireless diagnostics report active feed providers, cumulative source quote
+counts and receipt ages, queue overflows, rejected payloads and disconnects.
+They also report HTTP kind/source/status, a requested differing quote, cached
+candle count/epoch, chart columns/pixels, usable data-RAM and frame timing.
+Per-deadline transition, changed-price and multi-digit-change counters observe
+every 100 ms frame even when LAN collection is slower. The 30-second
+`cadence-test` temporarily selects the normal 500 ms live-price path, sets
 `cadence_test=true`, and restores the mechanical setting automatically.
+
+The separate 2026-10-13 computer test used Coinbase USD ticker plus Kraken
+USD BBO ticker and a JavaScript replica of the firmware selector. During a
+60-second run, after five seconds of warmup, it received 325 Coinbase and
+832 Kraken prices and emitted 547 frames. All 546 transitions changed the
+whole-dollar value, including 516 multi-digit changes, with no empty frames
+and 99–102 ms timer gaps. The test used observed quotes and the same
+12-entry/five-second selection policy. This is evidence that the preferred
+pair supplied sufficient alternatives in that sample, not an ESP32 timing
+measurement or a promise of new market executions at every deadline.
+See [the computer report](../test/usd_pair_frames_report.json). Device
+acceptance is recorded separately for each installed release.
 
 The 1.0.18 assembled LAN measurement averaged 100.007 ms but found
 33–167 ms individual gaps during synchronous checkpoints. The result is
@@ -66,7 +97,10 @@ The new starvation regression checks the missing coverage explicitly.
 Run `python3 tools/run_tests.py` and `pio run`. Tests exercise actual firmware
 sources with modeled network/hardware, address/undefined-behavior sanitizers,
 all five refresh intervals, real-price selection and duplicate/stale handling,
-HTTP reconnect grace and allocation deferral, bounded transaction parsing, fixed OHLC candles, stable scales, outage gaps, saved candles/backfill, OTA and TLS checks.
+stream burst preservation, FX-only freshness, fallback schemas/backoff, HTTP
+reconnect grace and memory deferral, bounded transaction parsing, fixed OHLC
+candles, stable scales, full-brightness pixels and close holds, saved
+candles/backfill, range switching, OTA and TLS checks.
 LAN timing and pixels measure firmware commands; visible tubes/matrix still
 require inspection because eXixe provides no MISO/cathode feedback.
 

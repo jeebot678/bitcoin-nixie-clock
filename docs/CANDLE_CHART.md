@@ -1,10 +1,12 @@
 # Candle matrix and stable scale
 
-Firmware 1.0.19 uses the physical 21×13 matrix for 21 OHLC candles. Each
-column holds an open-to-close body and a high-to-low wick. Bodies stay lit;
-wick-only pixels use a 1/3-duty, 12 ms cycle on the monochrome matrix. The
-startup fill/unfill preserves the complete body and wick mask, then resumes
-normal wick dimming. There are no diagonal connectors between columns.
+Firmware 1.0.20 uses the physical 21×13 matrix for 21 candle columns. Each
+observed candle holds an open-to-close body and a high-to-low wick. Every
+chart column has at least one continuously lit cell, including candles with
+zero movement or movement smaller than a display row. All body and wick
+pixels use the same full brightness: MAX7219 intensity 15, with no per-cell
+dimming or software PWM. The startup fill/unfill preserves the complete
+body and wick mask. There are no diagonal connectors between columns.
 
 | Range | Duration per candle |
 | --- | --- |
@@ -20,7 +22,17 @@ these rational boundaries avoids accumulating rounding errors or reshaping
 closed candles every time the window advances. The rightmost candle is
 forming; a new bucket scrolls the preceding candles one column left. The
 visible window ends at the forming candle's scheduled close. Only observed
-prices are aggregated. Empty buckets remain empty through outages.
+prices are aggregated into the retained OHLC data.
+
+Quiet or missing buckets render a flat, one-cell placeholder at the preceding
+observed close. Leading gaps use the first visible candle's open. If all
+observations age out, the last known close remains available as a flat
+display reference. These carried-price placeholders exist only in the
+rendered frame: they never become trades, stored candles, bootstrap coverage
+or input to scale and volatility calculations. `chart_columns_mask` therefore
+describes 21 rendered columns, while `history_candles` still counts actual
+observed candles. Wi-Fi setup, initial clock/price/chart status messages and
+the requested startup animation continue to take priority over chart frames.
 
 Each candle stores earliest open, latest close, and every accepted high and
 low, to USD-cent precision. Stream timestamps preserve milliseconds where
@@ -44,13 +56,22 @@ clipped for several seconds while panning catches up; large spikes widen
 immediately. After a spike the scale contracts gradually.
 
 All five live ranges collect candles independently of the Nixie frequency
-dial. The selected range bootstraps from Bitstamp minute/hour transactions;
-Coinbase's newest 1,000 trades provide a bounded partial-history fallback.
-A healthy continuous stream avoids repeated history downloads after
+dial. Bootstrap uses Bitstamp minute/hour transactions; Coinbase's newest
+1,000 trades provide a bounded partial-history fallback. Each response is
+parsed once into every applicable range, retaining independent OHLC buckets:
+a Bitstamp minute response updates both short ranges, while an hour response
+or Coinbase fallback updates all five. Coverage is determined separately for
+each range from genuine response timestamps reaching its first visible
+bucket. An empty or wholly expired response is not a bootstrap. A partial
+Bitstamp response cannot mark a range complete merely because the request
+succeeded, and Coinbase's bounded page remains explicitly partial.
+
+A healthy continuous stream avoids repeated history downloads after verified
 bootstrap. A reception gap resets coverage, allowing a later bootstrap to
 repair real gaps. Public transaction APIs can return overlapping data; only
-the relevant buckets are merged. They do not support arbitrary time-suffix
-requests, and a Coinbase page may cover less than the selected range.
+the relevant observed buckets are merged. They do not support arbitrary
+time-suffix requests, and a Coinbase page may cover less than the selected
+range. Rendered placeholders do not suppress backfill requests.
 
 Onboard `/candles-RANGE-SLOT.bin` snapshots retain all OHLC values, exact
 UTC snapshot time and scale parameters. Two alternating, CRC-covered
@@ -75,7 +96,11 @@ widths, closed-candle stability/scrolling, row-bounded panning, spikes,
 30-minute scale response, exact cache/axis restoration, interrupted writes
 and every corrupted byte, stale data, streaming real trades against an
 independent reference, physical matrix register mapping and startup masks.
-Runtime tests exercise actual cache scheduling, all five Nixie intervals,
-reconnects and a two-hour run across timer rollover. These verify generated
-commands; visible brightness and tube/matrix wiring require inspection of
-the physical device.
+It also checks minimum one-cell columns across all ranges, zero movement,
+leading/interior/trailing gaps, expired-window references and unchanged OHLC
+data during placeholder rendering. Hardware tests check the full-intensity
+register command. Runtime and HTTP tests exercise shared multi-range
+bootstrap, independent coverage, empty/partial/expired responses, actual
+cache scheduling, all five Nixie intervals, reconnects and a two-hour run
+across timer rollover. These verify generated commands; visible brightness
+and tube/matrix wiring require inspection of the physical device.
