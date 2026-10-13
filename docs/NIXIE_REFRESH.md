@@ -49,6 +49,15 @@ preserved in [the report](../test/device_release_1.0.18_report.json) as a failed
 timing check. Version 1.0.19 moves immutable checkpoint writes to the existing
 background worker without pausing streams or changing source cooldowns.
 
+The 1.0.19 assembled repeat passed: 1,798 frames over 179.737 seconds
+averaged 99.965 ms, with individual 89–111 ms gaps, no connection errors,
+19–21 populated candle columns and advancing cache checkpoints. Of those
+transitions, 1,423 changed the rounded price and 1,112 changed multiple digits.
+The report retains these counts rather than treating every hardware refresh
+as a new market price. See [the device report](../test/device_release_1.0.19_report.json).
+Visible-output verification remains false because there is no feedback from
+the display hardware.
+
 The prior 1.0.15 bare-ESP32 measurement passed its 30-second diagnostic but did
 not exercise ongoing minute-history requests on the assembled 5-minute range.
 It is preserved in [that release report](../test/device_release_1.0.15_report.json).
