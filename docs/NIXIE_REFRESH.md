@@ -118,6 +118,25 @@ ten-dollar band. Its [report](../test/device_release_1.0.22_report.json)
 retains this unmet variation target. Bitfinex book diversity and consistent
 chart venue selection address that remaining requirement in 1.0.23.
 
+The 1.0.23 device was installed by signed main-branch OTA and boot-confirmed.
+Its continuous collector measured 333.029 seconds of steady operation after
+the scheduled startup update check: 3,330 frames averaged 100.009 ms; all
+3,330 transitions changed the price and multiple digits. Coinbase plus
+Bitfinex stayed connected, receiving 2,985 prices (8.96/s), without failures,
+queue drops or rejected messages. All 21 matrix columns remained displayed;
+the chart stayed on Coinbase while the Nixies selected both actual trades
+and genuine book midpoints. Flash checkpoints advanced, minimum usable
+data heap was 13,812 bytes, and no synthetic price offsets were used.
+See [the passing device report](../test/device_release_1.0.23_report.json).
+
+The scheduled startup OTA manifest check did temporarily pause both feeds
+for its conservative TLS reservation. This is retained separately in
+[the startup report](../test/device_release_1.0.23_startup_report.json); its
+100 ms command timer continued, but fresh-price changes paused until feeds
+reconnected. Steady performance is not a claim of uninterrupted market
+reception during startup, firmware checks, network outages or installation.
+These reports measure commands and firmware state, not visible cathode light.
+
 The 1.0.18 assembled LAN measurement averaged 100.007 ms but found
 33–167 ms individual gaps during synchronous checkpoints. The result is
 preserved in [the report](../test/device_release_1.0.18_report.json) as a failed

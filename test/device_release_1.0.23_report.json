@@ -1,0 +1,111 @@
+{
+  "version": "1.0.23",
+  "device_id": "08576da50528",
+  "transport": "LAN telemetry after signed GitHub/main OTA",
+  "checked_at_utc": "2026-10-13T19:26:00.026486+00:00",
+  "duration_ms": 333029,
+  "samples": 561,
+  "connection_errors": [],
+  "frames": 3330,
+  "average_frame_ms": 100.00870870870871,
+  "min_frame_gap_ms": 84,
+  "max_frame_gap_ms": 116,
+  "transitions": 3330,
+  "price_changes": 3330,
+  "multi_digit_changes": 3330,
+  "changed_fraction": 1.0,
+  "multi_digit_fraction": 1.0,
+  "stream_quotes": 2985,
+  "stream_quotes_per_second": 8.963183386431812,
+  "accepted_quotes_per_second": 8.963183386431812,
+  "source_quote_deltas": [
+    2211,
+    0,
+    0,
+    0,
+    774,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "source_masks": [
+    17
+  ],
+  "stream_connections_min": 2,
+  "max_quote_age_ms": 956,
+  "source_failure_deltas": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "final_stream_slots": [
+    {
+      "source": 0,
+      "phase": "online",
+      "reason_source": 0,
+      "last_reason": "memory-reservation",
+      "http_status": 0,
+      "tls_error": 0,
+      "reason_age_ms": 376850
+    },
+    {
+      "source": 4,
+      "phase": "online",
+      "reason_source": 4,
+      "last_reason": "memory-reservation",
+      "http_status": 0,
+      "tls_error": 0,
+      "reason_age_ms": 376871
+    }
+  ],
+  "stream_disconnects": 0,
+  "stream_dropped": 0,
+  "stream_rejected": 0,
+  "minimum_chart_columns": 21,
+  "minimum_actual_candles": 20,
+  "chart_pixels_min": 21,
+  "chart_pixels_max": 30,
+  "chart_sources": [
+    "Coinbase"
+  ],
+  "display_quote_kinds": [
+    "bbo-midpoint",
+    "last-trade"
+  ],
+  "max_chart_quote_age_ms": 1114,
+  "scale_steps": [
+    12.48557252,
+    13.14270791,
+    13.83442938,
+    14.56255724,
+    15.32900762,
+    16.1357975,
+    16.98505
+  ],
+  "lowest_data_heap": 13812,
+  "lowest_http_stack_remaining": 2636,
+  "lowest_stream_stack_remaining": 3968,
+  "boot_confirmed": true,
+  "history_checkpoint_advanced": true,
+  "visible_output_verified": false,
+  "pass": true,
+  "scope": "Continuous LAN collector; steady operation after startup and the scheduled startup OTA check. No visible-output feedback is available.",
+  "source_commit": "dc23a08db8815cf3b9d45196a6059f4f789b7224",
+  "rollout_commit": "2d3668bf3978f239c9c1d794aa1e054b259ab9bc",
+  "source_ci_run": 38453209168,
+  "rollout_ci_run": 38453700650,
+  "public_manifest_signature_and_binary_verified": true,
+  "release_url": "https://github.com/jeebot678/bitcoin-nixie-clock/releases/tag/v1.0.23",
+  "startup_ota_check_temporarily_paused_feeds": true
+}
