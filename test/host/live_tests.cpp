@@ -124,6 +124,47 @@ int main(int argc,char** argv){
   steps();testMillis=501;for(auto& slot:slots)if(slot.source==1)slot.socket->emit(WStype_TEXT,kraken);
   assert(live::fresh(testMillis));
   testMillis+=35001;steps();assert(!live::status().connected);
+  // The pinned library begins with lastPing=0 and pongReceived=false. A
+  // connected feed must not time out before its first scheduled ping, nor
+  // lose a healthy data stream merely because control PONGs are delayed.
+  for(auto& slot:slots){slot.close();slot.nextProvider=slot.index;for(auto& state:slot.cooldown)state.availableAt=testMillis;}
+  steps();uint32_t heartbeatStart=testMillis;
+  for(auto& slot:slots)assert(slot.socket&&slot.connected&&slot.socket->misses==0&&slot.socket->pong==10000);
+  testMillis=heartbeatStart+11001;steps();assert(live::status().connections==2);
+  for(unsigned i=0;i<9;++i){
+    testMillis+=5000;
+    for(auto& slot:slots)slot.socket->emit(WStype_TEXT,slot.source==0?coinbase:kraken);
+    steps();assert(live::status().connections==2);
+  }
+  testMillis+=35001;steps();assert(!live::status().connected);
+  assert(live::status().slots[0].reason==live::Reason::NoMessages);
+  // Silent TLS connect failures expose the exact negative error before the
+  // next library iteration can delete the SSL object. They release the gate
+  // immediately, keeping the other worker free to establish its connection.
+  for(auto& slot:slots){slot.close();slot.nextProvider=slot.index;for(auto& state:slot.cooldown)state.availableAt=testMillis;}
+  {btc::TlsLease held;assert(held.acquire());steps();}
+  slots[0].socket->tlsFailure(-32512);slots[0].step();
+  auto diagnosis=live::status();
+  assert(!slots[0].socket&&!slots[0].handshake&&diagnosis.slots[0].reason==live::Reason::Tls&&diagnosis.slots[0].reasonSource==0&&diagnosis.slots[0].tlsError==-32512&&diagnosis.failures[0]>0);
+  slots[1].step();assert(slots[1].connected);
+  slots[0].step();assert(slots[0].source!=0&&live::status().slots[0].reasonSource==0); // Failure identity survives provider changes.
+  // A sparse fallback reclaims an eligible preferred feed after 30 seconds,
+  // while another connection keeps delivering prices. A reserved upgrade
+  // prevents both workers from dropping their fallbacks together.
+  for(auto& slot:slots){slot.close();for(auto& state:slot.cooldown)state.availableAt=testMillis;}
+  slots[0].nextProvider=3;slots[1].nextProvider=4;live::allowUsdt(false);steps();
+  assert(slots[0].source==2&&slots[1].source==4);
+  uint32_t fallbackStart=testMillis;testMillis=fallbackStart+30001;
+  {btc::TlsLease held;assert(held.acquire());slots[0].step();
+    assert(!slots[0].connected&&slots[0].source==0&&slots[1].connected&&recoveryOwner==1);
+    slots[1].step();assert(slots[1].connected&&slots[1].source==4&&recoveryOwner==1);
+  }
+  slots[0].step();assert(slots[0].connected&&slots[0].source==0&&!recoveryOwner);
+  assert(live::status().slots[0].reason==live::Reason::PreferredRecovery&&live::status().slots[0].reasonSource==2);
+  slots[1].step();assert(slots[1].source==1&&slots[1].connected); // Peer preferred ownership is respected.
+  // With only one live fallback, retain it while the idle worker recovers.
+  slots[0].close();slots[1].close();slots[0].nextProvider=3;slots[0].step();
+  assert(slots[0].connected&&slots[0].source==2);testMillis+=30001;slots[0].step();assert(slots[0].connected&&slots[0].source==2);
   // Independently captured public trade payloads validate schema/timestamps.
   for(uint8_t provider:{uint8_t(2),uint8_t(4)}){
     StaticJsonDocument<2048> captured;assert(!deserializeJson(captured,readFile(directory+(provider==2?"/bitstamp_stream.json":"/bitfinex_stream.json"))));

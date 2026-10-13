@@ -3,12 +3,30 @@
 
 namespace live {
 struct Tick { btc::Quote quote; uint32_t receivedAt=0; uint8_t source=0; double fx=0; };
+enum class Phase:uint8_t {Paused,WaitHttp,WaitMemory,WaitTls,Handshake,Online,Backoff};
+enum class Reason:uint8_t {None,Transport,HeaderTimeout,Http,Protocol,PongTimeout,WriteFailure,ServerReconnect,SubscriptionError,NoMessages,NoQuotes,HandshakeDeadline,Tls,Reservation,Pause,Wifi,Clock,FxExpired,PreferredRecovery};
+inline const char* phaseName(Phase phase){
+  const char* names[]={"paused","waiting-http","waiting-memory","waiting-tls","handshake","online","backoff"};
+  unsigned index=unsigned(phase);return index<sizeof(names)/sizeof(names[0])?names[index]:"unknown";
+}
+inline const char* reasonName(Reason reason){
+  const char* names[]={"none","transport","header-timeout","http","protocol","pong-timeout","write-failure","server-reconnect","subscription-error","no-messages","no-quotes","handshake-deadline","tls","memory-reservation","pause","wifi","clock","fx-expired","preferred-recovery"};
+  unsigned index=unsigned(reason);return index<sizeof(names)/sizeof(names[0])?names[index]:"unknown";
+}
+struct SlotStatus {
+  uint8_t source=255,reasonSource=255;
+  Phase phase=Phase::Paused;Reason reason=Reason::None;
+  int16_t httpStatus=0;int32_t tlsError=0;
+  uint32_t reasonAgeMs=UINT32_MAX;
+};
 struct Status {
   bool connected=false, paused=true;
   uint32_t quotes=0, receivedAt=0, stackFreeBytes=0,dropped=0,rejected=0,disconnects=0;
   uint8_t connections=0;
   uint16_t providers=0;
   uint32_t quoteCounts[btc::kSourceCount]={},quoteAges[btc::kSourceCount]={};
+  uint16_t failures[btc::kSourceCount]={};
+  SlotStatus slots[2];
 };
 bool begin();
 bool receive(Tick& tick);

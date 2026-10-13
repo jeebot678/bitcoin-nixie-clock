@@ -17,7 +17,7 @@ WebServer telemetryWeb(8080);
 char controlToken[33]={};
 bool listening=false,mdns=false;
 uint32_t stackRemaining=0;
-StaticJsonDocument<JSON_OBJECT_SIZE(68)+2*JSON_OBJECT_SIZE(7)+2*JSON_ARRAY_SIZE(5)+JSON_OBJECT_SIZE(7)+2*JSON_ARRAY_SIZE(btc::kSourceCount)+280> telemetryJson;
+StaticJsonDocument<JSON_OBJECT_SIZE(70)+4*JSON_OBJECT_SIZE(7)+2*JSON_ARRAY_SIZE(5)+JSON_OBJECT_SIZE(7)+3*JSON_ARRAY_SIZE(btc::kSourceCount)+JSON_ARRAY_SIZE(2)+280> telemetryJson;
 const char kTelemetryPage[] PROGMEM=R"HTML(<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bitcoin Clock diagnostics</title>
 <style>body{font:16px system-ui;background:#15191c;color:#eee;max-width:760px;margin:30px auto;padding:0 18px}table{width:100%;border-collapse:collapse}td,th{padding:10px;text-align:left;border-bottom:1px solid #555}button{padding:12px;margin:6px 4px 6px 0;font:inherit}pre{white-space:pre-wrap}#message{min-height:24px}</style>
 <h1>Clock diagnostics</h1><p>Rotate one switch at a time. A held/default setting with an invalid input can explain a frozen display. Voltages are measured at the ESP32 inputs.</p>
@@ -57,6 +57,15 @@ void state() {
   telemetryJson["stream_stack_remaining"]=s.streamStack;
   JsonArray sourceQuotes=telemetryJson.createNestedArray("stream_source_quotes"),sourceAges=telemetryJson.createNestedArray("stream_source_age_ms");
   for(unsigned i=0;i<btc::kSourceCount;++i){sourceQuotes.add(s.sourceQuotes[i]);sourceAges.add(s.sourceQuotes[i]?s.sourceAges[i]:UINT32_MAX);}
+  JsonArray failures=telemetryJson.createNestedArray("stream_source_failures");
+  for(auto count:s.sourceFailures)failures.add(count);
+  JsonArray slots=telemetryJson.createNestedArray("stream_slots");
+  for(const auto& slot:s.streamSlots){
+    JsonObject out=slots.createNestedObject();out["source"]=slot.source;
+    out["phase"]=live::phaseName(slot.phase);out["reason_source"]=slot.reasonSource;
+    out["last_reason"]=live::reasonName(slot.reason);out["http_status"]=slot.httpStatus;
+    out["tls_error"]=slot.tlsError;out["reason_age_ms"]=slot.reasonAgeMs;
+  }
   telemetryJson["streams"]=s.connections;telemetryJson["stream_quotes"]=s.quotes;telemetryJson["accepted_quotes"]=s.accepted;
   telemetryJson["quote_age_ms"]=s.accepted?s.quoteAge:UINT32_MAX;telemetryJson["confirmed"]=s.confirmed;
   telemetryJson["market_price"]=s.marketPrice;telemetryJson["display_quote"]=s.displayPrice;telemetryJson["display_digits"]=s.digits;

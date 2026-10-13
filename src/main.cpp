@@ -132,7 +132,8 @@ void publishTelemetry(uint32_t now) {
   auto liveState=live::status();s.connections=liveState.connections;s.quotes=liveState.quotes;
   s.streamProviders=liveState.providers;s.streamDropped=liveState.dropped;s.streamRejected=liveState.rejected;s.streamDisconnects=liveState.disconnects;
   s.streamStack=liveState.stackFreeBytes;
-  for(unsigned source=0;source<btc::kSourceCount;++source){s.sourceQuotes[source]=liveState.quoteCounts[source];s.sourceAges[source]=liveState.quoteAges[source];}
+  for(unsigned source=0;source<btc::kSourceCount;++source){s.sourceQuotes[source]=liveState.quoteCounts[source];s.sourceAges[source]=liveState.quoteAges[source];s.sourceFailures[source]=liveState.failures[source];}
+  for(unsigned i=0;i<2;++i)s.streamSlots[i]=liveState.slots[i];
   s.accepted=acceptedQuotes;s.frames=nixieFrames;s.quoteAge=now-lastQuoteReceived;s.frameAge=now-lastNixieAt;
   s.frameGap=lastFrameGap;s.nextFrame=uint32_t(std::max<int32_t>(0,int32_t(nextNixieAt-now)));
   s.minimumGap=minimumFrameGap;s.maximumGap=maximumFrameGap;

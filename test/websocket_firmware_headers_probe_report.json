@@ -1,0 +1,365 @@
+{
+  "checked_at_utc": "2026-10-13T18:23:53.019Z",
+  "duration_ms": 50000,
+  "scope": "computer-only independent TLS/WebSocket probe; does not establish ESP32 acceptance",
+  "subscriptions": {
+    "Coinbase": [
+      {
+        "type": "subscribe",
+        "product_ids": [
+          "BTC-USD"
+        ],
+        "channels": [
+          "ticker",
+          "heartbeat"
+        ]
+      }
+    ],
+    "Kraken": [
+      {
+        "method": "subscribe",
+        "params": {
+          "channel": "ticker",
+          "symbol": [
+            "BTC/USD",
+            "USDT/USD"
+          ],
+          "event_trigger": "bbo",
+          "snapshot": true
+        }
+      },
+      {
+        "method": "subscribe",
+        "params": {
+          "channel": "trade",
+          "symbol": [
+            "BTC/USD"
+          ],
+          "snapshot": false
+        }
+      }
+    ]
+  },
+  "results": [
+    {
+      "provider": "Coinbase",
+      "mode": "normal",
+      "endpoint": "wss://ws-feed.exchange.coinbase.com/",
+      "request_headers": {
+        "Host": "ws-feed.exchange.coinbase.com",
+        "Connection": "Upgrade",
+        "Upgrade": "websocket",
+        "Sec-WebSocket-Version": "13",
+        "User-Agent": "BitcoinClockProbe/1.0"
+      },
+      "certificate_validation": "embedded Mozilla PEM, rejectUnauthorized=true, TLS hostname validation",
+      "protocol": null,
+      "extensions": null,
+      "ping_interval_ms": 20000,
+      "pong_timeout_ms": 5000,
+      "upgrade_status": 101,
+      "open_at_ms": 263,
+      "messages": 301,
+      "message_types": {
+        "subscriptions": 1,
+        "ticker": 250,
+        "heartbeat": 50
+      },
+      "btc_quotes": 250,
+      "fx_quotes": 0,
+      "invalid_quotes": 0,
+      "pings_sent": 2,
+      "pongs_received": 2,
+      "server_pings": 0,
+      "pong_rtt_ms": [
+        32,
+        33
+      ],
+      "errors": [],
+      "sample_quotes": [
+        {
+          "at_ms": 305,
+          "price": 83019.87,
+          "timestamp_ms": 1791915832831
+        },
+        {
+          "at_ms": 1074,
+          "price": 83019.87,
+          "timestamp_ms": 1791915834123
+        },
+        {
+          "at_ms": 1125,
+          "price": 83019.87,
+          "timestamp_ms": 1791915834172
+        },
+        {
+          "at_ms": 1349,
+          "price": 83019.87,
+          "timestamp_ms": 1791915834396
+        },
+        {
+          "at_ms": 2232,
+          "price": 83019.87,
+          "timestamp_ms": 1791915835280
+        }
+      ],
+      "max_quote_gap_ms": 1210,
+      "last_quote_at_ms": 49388,
+      "unexpected_disconnect": false,
+      "tls_authorized": true,
+      "tls_version": "TLSv1.3",
+      "response_headers": {
+        "upgrade": "websocket",
+        "connection": "upgrade",
+        "server": "cloudflare",
+        "date": "Tue, 13 Oct 2026 18:23:53 GMT"
+      },
+      "finished_reason": "duration-complete",
+      "elapsed_ms": 50001,
+      "connected_at_end": true,
+      "final_quote_age_ms": 613
+    },
+    {
+      "provider": "Coinbase",
+      "mode": "firmware",
+      "endpoint": "wss://ws-feed.exchange.coinbase.com/",
+      "request_headers": {
+        "Host": "ws-feed.exchange.coinbase.com:443",
+        "Connection": "Upgrade",
+        "Upgrade": "websocket",
+        "Sec-WebSocket-Version": "13",
+        "User-Agent": "arduino-WebSocket-Client",
+        "Origin": "file://"
+      },
+      "certificate_validation": "embedded Mozilla PEM, rejectUnauthorized=true, TLS hostname validation",
+      "protocol": null,
+      "extensions": null,
+      "ping_interval_ms": 20000,
+      "pong_timeout_ms": 5000,
+      "upgrade_status": 101,
+      "open_at_ms": 196,
+      "messages": 301,
+      "message_types": {
+        "subscriptions": 1,
+        "ticker": 250,
+        "heartbeat": 50
+      },
+      "btc_quotes": 250,
+      "fx_quotes": 0,
+      "invalid_quotes": 0,
+      "pings_sent": 2,
+      "pongs_received": 2,
+      "server_pings": 0,
+      "pong_rtt_ms": [
+        20,
+        29
+      ],
+      "errors": [],
+      "sample_quotes": [
+        {
+          "at_ms": 416,
+          "price": 83019.87,
+          "timestamp_ms": 1791915832831
+        },
+        {
+          "at_ms": 1028,
+          "price": 83019.87,
+          "timestamp_ms": 1791915834123
+        },
+        {
+          "at_ms": 1074,
+          "price": 83019.87,
+          "timestamp_ms": 1791915834172
+        },
+        {
+          "at_ms": 1299,
+          "price": 83019.87,
+          "timestamp_ms": 1791915834396
+        },
+        {
+          "at_ms": 2183,
+          "price": 83019.87,
+          "timestamp_ms": 1791915835280
+        }
+      ],
+      "max_quote_gap_ms": 1214,
+      "last_quote_at_ms": 49342,
+      "unexpected_disconnect": false,
+      "tls_authorized": true,
+      "tls_version": "TLSv1.3",
+      "response_headers": {
+        "upgrade": "websocket",
+        "connection": "upgrade",
+        "server": "cloudflare",
+        "date": "Tue, 13 Oct 2026 18:23:53 GMT"
+      },
+      "finished_reason": "duration-complete",
+      "elapsed_ms": 50001,
+      "connected_at_end": true,
+      "final_quote_age_ms": 659
+    },
+    {
+      "provider": "Kraken",
+      "mode": "normal",
+      "endpoint": "wss://ws.kraken.com/v2",
+      "request_headers": {
+        "Host": "ws.kraken.com",
+        "Connection": "Upgrade",
+        "Upgrade": "websocket",
+        "Sec-WebSocket-Version": "13",
+        "User-Agent": "BitcoinClockProbe/1.0"
+      },
+      "certificate_validation": "embedded Mozilla PEM, rejectUnauthorized=true, TLS hostname validation",
+      "protocol": null,
+      "extensions": null,
+      "ping_interval_ms": 20000,
+      "pong_timeout_ms": 5000,
+      "upgrade_status": 101,
+      "open_at_ms": 1296,
+      "messages": 480,
+      "message_types": {
+        "status/update": 1,
+        "subscribe": 3,
+        "ticker/snapshot": 2,
+        "ticker/update": 395,
+        "heartbeat/undefined": 48,
+        "trade/update": 31
+      },
+      "btc_quotes": 404,
+      "fx_quotes": 41,
+      "invalid_quotes": 0,
+      "pings_sent": 2,
+      "pongs_received": 2,
+      "server_pings": 0,
+      "pong_rtt_ms": [
+        107,
+        115
+      ],
+      "errors": [],
+      "sample_quotes": [
+        {
+          "at_ms": 1415,
+          "price": 83019.2,
+          "timestamp_ms": 1791915833917
+        },
+        {
+          "at_ms": 1431,
+          "price": 83019.2,
+          "timestamp_ms": 1791915834506
+        },
+        {
+          "at_ms": 1560,
+          "price": 83019.2,
+          "timestamp_ms": 1791915834634
+        },
+        {
+          "at_ms": 1665,
+          "price": 83019.2,
+          "timestamp_ms": 1791915834737
+        },
+        {
+          "at_ms": 1824,
+          "price": 83019.2,
+          "timestamp_ms": 1791915834737
+        }
+      ],
+      "max_quote_gap_ms": 1885,
+      "last_quote_at_ms": 49938,
+      "unexpected_disconnect": false,
+      "tls_authorized": true,
+      "tls_version": "TLSv1.3",
+      "response_headers": {
+        "upgrade": "websocket",
+        "connection": "upgrade",
+        "server": "cloudflare",
+        "date": "Tue, 13 Oct 2026 18:23:54 GMT"
+      },
+      "finished_reason": "duration-complete",
+      "elapsed_ms": 50001,
+      "connected_at_end": true,
+      "final_quote_age_ms": 63
+    },
+    {
+      "provider": "Kraken",
+      "mode": "firmware",
+      "endpoint": "wss://ws.kraken.com/v2",
+      "request_headers": {
+        "Host": "ws.kraken.com:443",
+        "Connection": "Upgrade",
+        "Upgrade": "websocket",
+        "Sec-WebSocket-Version": "13",
+        "User-Agent": "arduino-WebSocket-Client",
+        "Origin": "file://"
+      },
+      "certificate_validation": "embedded Mozilla PEM, rejectUnauthorized=true, TLS hostname validation",
+      "protocol": null,
+      "extensions": null,
+      "ping_interval_ms": 20000,
+      "pong_timeout_ms": 5000,
+      "upgrade_status": 101,
+      "open_at_ms": 1437,
+      "messages": 480,
+      "message_types": {
+        "status/update": 1,
+        "subscribe": 3,
+        "ticker/snapshot": 2,
+        "ticker/update": 394,
+        "heartbeat/undefined": 49,
+        "trade/update": 31
+      },
+      "btc_quotes": 403,
+      "fx_quotes": 41,
+      "invalid_quotes": 0,
+      "pings_sent": 2,
+      "pongs_received": 2,
+      "server_pings": 0,
+      "pong_rtt_ms": [
+        104,
+        103
+      ],
+      "errors": [],
+      "sample_quotes": [
+        {
+          "at_ms": 1538,
+          "price": 83019.2,
+          "timestamp_ms": 1791915834506
+        },
+        {
+          "at_ms": 1546,
+          "price": 83019.2,
+          "timestamp_ms": 1791915834634
+        },
+        {
+          "at_ms": 1646,
+          "price": 83019.2,
+          "timestamp_ms": 1791915834737
+        },
+        {
+          "at_ms": 1804,
+          "price": 83019.2,
+          "timestamp_ms": 1791915834737
+        },
+        {
+          "at_ms": 1931,
+          "price": 83019.2,
+          "timestamp_ms": 1791915834737
+        }
+      ],
+      "max_quote_gap_ms": 1890,
+      "last_quote_at_ms": 49921,
+      "unexpected_disconnect": false,
+      "tls_authorized": true,
+      "tls_version": "TLSv1.3",
+      "response_headers": {
+        "upgrade": "websocket",
+        "connection": "upgrade",
+        "server": "cloudflare",
+        "date": "Tue, 13 Oct 2026 18:23:54 GMT"
+      },
+      "finished_reason": "duration-complete",
+      "elapsed_ms": 50000,
+      "connected_at_end": true,
+      "final_quote_age_ms": 79
+    }
+  ]
+}

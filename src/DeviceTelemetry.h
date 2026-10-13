@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include "OtaUpdate.h"
 #include "PriceSources.h"
+#include "LivePrice.h"
 
 namespace telemetry {
 enum class Command : uint8_t { Ota, Tubes, Readings, Chart, Cadence };
@@ -17,6 +18,8 @@ struct Snapshot {
   uint16_t streamProviders=0;
   uint32_t streamDropped=0,streamRejected=0,streamDisconnects=0,streamStack=0;
   uint32_t sourceQuotes[btc::kSourceCount]={},sourceAges[btc::kSourceCount]={};
+  uint16_t sourceFailures[btc::kSourceCount]={};
+  live::SlotStatus streamSlots[2];
   uint32_t chartColumns=0,historySavedAt=0;
   uint16_t chartPixels=0,historyCandles=0;
   int httpStatus=0;

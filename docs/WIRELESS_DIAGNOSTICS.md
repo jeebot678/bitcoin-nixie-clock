@@ -37,6 +37,12 @@ quotes and their receipt ages. An unseen provider has age `UINT32_MAX`.
 failures and the lowest measured stream-task stack headroom. FX ticks do not
 increment BTC quote counts. Compare these counters with `price_changes` to
 separate incoming-data throughput from the display's selected refresh period.
+Version 1.0.21 adds `stream_slots`, identifying each worker's current source,
+connection phase and last stop reason, the source of that reason, HTTP/TLS
+code and age. `stream_source_failures` counts failures separately for every
+provider. Source 255 means none and reason age `UINT32_MAX` means no stop has
+been recorded. These fields distinguish exchange refusal, TLS failure,
+header/heartbeat timeouts, RAM waiting and deliberate HTTP/OTA reservations.
 The chart mask now contains every displayed candle column, including one-cell
 carried-price markers for quiet or missing buckets. `history_candles` counts
 only retained real OHLC buckets; placeholders are neither stored nor used to
@@ -95,7 +101,7 @@ both switches run from POS5 to POS1. See [the mapping](PCB_PIN_MAP.md).
 ## Triggering an update
 
 ```sh
-python3 tools/clock_link.py ota --expect 1.0.20 --wait 240
+python3 tools/clock_link.py ota --expect 1.0.21 --wait 240
 ```
 
 First publish and verify the signed newer release and `main` manifest. The tool

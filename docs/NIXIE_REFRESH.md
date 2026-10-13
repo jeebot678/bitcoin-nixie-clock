@@ -1,6 +1,6 @@
 # Nixie refresh and chart behavior
 
-Firmware 1.0.20 keeps the selected display cadence independent of network
+Firmware 1.0.21 keeps the selected display cadence independent of network
 requests and preserves a continuous supply of genuine price alternatives.
 Frequency settings are 100 / 500 / 1500 / 10000 / 60000 ms; range settings are
 30 / 60 / 300 / 1800 / 3600 seconds. Each deadline writes all six Nixie modules,
@@ -34,6 +34,15 @@ while the primary remains healthy. TLS still reserves two separate 18 KiB
 record allocations plus 24 KiB context/crypto headroom under the shared gate.
 This fixes the pattern where requests for a different price repeatedly tore
 down the second stream and left a sparse fallback as the only live source.
+
+Version 1.0.21 arms the heartbeat timer only after the WebSocket upgrade
+completes. A delayed PONG does not disconnect a feed that is delivering
+valid messages; the independent 35-second message and 120-second Bitcoin
+quote deadlines still detect dead or silent connections. Negative TLS
+connection failures release the handshake gate immediately and retain their
+error code for LAN diagnostics. A fallback can retry a preferred USD feed
+after 30 seconds when another feed remains established, with exclusive
+provider and recovery ownership preserving the other connection.
 
 The matrix has 21 fixed UTC candles and 13 rows. Body and wick pixels are
 fully on or off, without pulse dimming. Each displayed column has at least
@@ -73,6 +82,14 @@ pair supplied sufficient alternatives in that sample, not an ESP32 timing
 measurement or a promise of new market executions at every deadline.
 See [the computer report](../test/usd_pair_frames_report.json). Device
 acceptance is recorded separately for each installed release.
+
+The first 1.0.20 assembled OTA run exposed further feed disconnects: its
+100 ms timer was accurate, but only 46.3% of 1,797 transitions changed the
+price, with 6.12 incoming prices/s and a 28-second quote gap. All 21 columns
+remained displayed. The run includes startup and is retained as failed in
+[the device report](../test/device_release_1.0.20_report.json). A follow-up
+fix and another device measurement are required; the computer proof alone
+is insufficient to accept this behavior.
 
 The 1.0.18 assembled LAN measurement averaged 100.007 ms but found
 33–167 ms individual gaps during synchronous checkpoints. The result is
