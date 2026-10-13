@@ -1,0 +1,249 @@
+{
+  "checked_at_utc": "2026-10-13T21:24:13.006Z",
+  "duration_ms": 60000,
+  "warmup_ms": 10000,
+  "measurement": "computer_verified_TLS_actual_compiled_firmware_headers",
+  "scope": "Computer probe: three bound timestamped Bitfinex depth-one books on one socket plus Coinbase on one socket. Actual C++ firmware parsers, guard and sequence selector consume direct and converted BBO ticks; independent JS level reconstruction measures leg validity/diversity. Frame fallback/liveness orchestration is modeled; no ESP32/device/SPI acceptance.",
+  "target_frame_period_ms": 100,
+  "source_hashes": {
+    "include/QuoteBook.h": "078ccc8c480a874f6c00f1b14045a6c5458623238620c08c5ed921605d02c4d9",
+    "include/StreamParsers.h": "0b0a3e95486f8d88276ba2bd6ad6d0cba830866316bb31a7d917b05e9092eb23",
+    "include/ClockCore.h": "19e6491ca50be6b51822c8674958dfc1fbb76c720fa0a892d969cd2eb68abd2a",
+    "tools/anti_repeat_quote_probe.cpp": "a5a8196537fd37694de5e2b1d76368e27c26446fc5910750446d079ba027e97a"
+  },
+  "results": [
+    {
+      "provider": "Coinbase",
+      "source": 0,
+      "endpoint": "wss://ws-feed.exchange.coinbase.com/",
+      "request_headers": {
+        "Host": "ws-feed.exchange.coinbase.com:443",
+        "Connection": "Upgrade",
+        "Upgrade": "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Origin": "file://",
+        "User-Agent": "arduino-WebSocket-Client"
+      },
+      "certificate_validation": "embedded Mozilla PEM with hostname validation and rejectUnauthorized=true",
+      "subscriptions": [
+        {
+          "type": "subscribe",
+          "product_ids": [
+            "BTC-USD"
+          ],
+          "channels": [
+            "ticker",
+            "heartbeat"
+          ]
+        }
+      ],
+      "upgrade_status": 101,
+      "tls_version": "TLSv1.2",
+      "tls_authorized": true,
+      "open_at_ms": 173,
+      "messages": 453,
+      "pings_sent": 2,
+      "pongs_received": 2,
+      "server_pings": 0,
+      "pong_rtt_ms": [
+        28,
+        118
+      ],
+      "errors": [],
+      "unexpected_disconnect": false,
+      "cipher": "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+      "finished_reason": "duration-complete",
+      "elapsed_ms": 60014,
+      "connected_at_end": true
+    },
+    {
+      "provider": "Bitfinex",
+      "source": 4,
+      "endpoint": "wss://api-pub.bitfinex.com/ws/2",
+      "request_headers": {
+        "Host": "api-pub.bitfinex.com:443",
+        "Connection": "Upgrade",
+        "Upgrade": "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Origin": "file://",
+        "User-Agent": "arduino-WebSocket-Client"
+      },
+      "certificate_validation": "embedded Mozilla PEM with hostname validation and rejectUnauthorized=true",
+      "subscriptions": [
+        {
+          "event": "conf",
+          "flags": 32768
+        },
+        {
+          "event": "subscribe",
+          "channel": "book",
+          "symbol": "tBTCUSD",
+          "prec": "P0",
+          "freq": "F0",
+          "len": "1"
+        },
+        {
+          "event": "subscribe",
+          "channel": "book",
+          "symbol": "tBTCUST",
+          "prec": "P0",
+          "freq": "F0",
+          "len": "1"
+        },
+        {
+          "event": "subscribe",
+          "channel": "book",
+          "symbol": "tUSTUSD",
+          "prec": "P0",
+          "freq": "F0",
+          "len": "1"
+        }
+      ],
+      "upgrade_status": 101,
+      "tls_version": "TLSv1.2",
+      "tls_authorized": true,
+      "open_at_ms": 498,
+      "messages": 416,
+      "pings_sent": 2,
+      "pongs_received": 2,
+      "server_pings": 0,
+      "pong_rtt_ms": [
+        124,
+        126
+      ],
+      "errors": [],
+      "unexpected_disconnect": false,
+      "cipher": "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+      "finished_reason": "duration-complete",
+      "elapsed_ms": 60014,
+      "connected_at_end": true
+    }
+  ],
+  "quote_counts": {
+    "Coinbase": {
+      "validated_quotes": 392,
+      "accepted_quotes": 392,
+      "distinct_rounded_values": 28
+    },
+    "Bitfinex": {
+      "validated_quotes": 212,
+      "accepted_quotes": 212,
+      "distinct_rounded_values": 35
+    }
+  },
+  "selector": {
+    "frames": 501,
+    "transitions": 500,
+    "whole_dollar_changes": 500,
+    "multi_digit_changes": 444,
+    "holds": 0,
+    "changed_fraction": 1,
+    "multi_digit_fraction": 0.888,
+    "independent_distinct_sequence_ABA": 0,
+    "firmware_policy_reversals": 0,
+    "blank_frames": 0,
+    "selected_sources": [
+      0,
+      4
+    ],
+    "distinct_displayed_values": 52,
+    "max_selected_receipt_age_ms": 14491,
+    "expired_receipt_current_book_frames": 0,
+    "frame_gap_ms": {
+      "min": 97,
+      "max": 103,
+      "mean": 100.002
+    },
+    "expired_receipt_current_converted_book_frames": 17,
+    "displayed_quote_kinds": [
+      "last-trade",
+      "bbo-midpoint",
+      "converted-bbo-midpoint"
+    ]
+  },
+  "guard_rejected_quotes": 0,
+  "raw_artifacts": "Ignored test/.build/anti-repeat-three-books retains every input event/command and every output quote/frame. Re-run this script to regenerate.",
+  "visible_output_verified": false,
+  "pass": true,
+  "coinbase_product_tickers": {
+    "BTC-USD": {
+      "ticker_receipts": 392,
+      "distinct_trade_ids": 392,
+      "first_trade_age_ms": 113,
+      "minimum_trade_age_ms": -11,
+      "maximum_trade_age_ms": 113,
+      "receipts_with_trade_age_at_most_5s": 392,
+      "first_trade": {
+        "at_ms": 307,
+        "price": 83276.87,
+        "timestamp_ms": 1791926653200,
+        "trade_id": 1105620729,
+        "execution_age_ms": 113
+      },
+      "last_trade": {
+        "at_ms": 59676,
+        "price": 83243.14,
+        "timestamp_ms": 1791926712691,
+        "trade_id": 1105621120,
+        "execution_age_ms": -8
+      }
+    }
+  },
+  "validation": {
+    "all_frames": 600,
+    "all_nonblank_frames": 597,
+    "frames_not_traceable_to_real_accepted_quote": 0,
+    "incorrect_rounding_frames": 0,
+    "all_observed_distinct_sequence_ABA": 0,
+    "startup_blank_frames": 3
+  },
+  "quote_kinds": {
+    "last-trade": 392,
+    "converted-bbo-midpoint": 40,
+    "bbo-midpoint": 172
+  },
+  "cross_book_feasibility": {
+    "frames": 501,
+    "all_three_current_distinct_rounded_frames": 501,
+    "minimum_distinct_rounded_prices": 3,
+    "distinct_converted_rounded_values": 13,
+    "book_results": {
+      "tBTCUST": {
+        "channel": 828166,
+        "updates": 71,
+        "valid_bbo_quotes": 34,
+        "distinct_midpoints": 24,
+        "heartbeats": 4,
+        "final_bid": 83314,
+        "final_ask": 83320,
+        "max_incoming_publication_age_ms": 135,
+        "max_observed_receipt_age_ms": 14592,
+        "max_observed_publication_age_ms": 14644
+      },
+      "tUSTUSD": {
+        "channel": 829121,
+        "updates": 8,
+        "valid_bbo_quotes": 8,
+        "distinct_midpoints": 1,
+        "heartbeats": 4,
+        "final_bid": 1,
+        "final_ask": 1.0001,
+        "max_incoming_publication_age_ms": 44,
+        "max_observed_receipt_age_ms": 38543,
+        "max_observed_publication_age_ms": 38581
+      },
+      "tBTCUSD": {
+        "channel": 829145,
+        "updates": 320,
+        "valid_bbo_quotes": 172,
+        "distinct_midpoints": 40,
+        "heartbeats": 4,
+        "final_bid": 83324,
+        "final_ask": 83338,
+        "max_incoming_publication_age_ms": 140,
+        "max_observed_receipt_age_ms": 1546,
+        "max_observed_publication_age_ms": 1584
+      }
+    }
+  }
+}

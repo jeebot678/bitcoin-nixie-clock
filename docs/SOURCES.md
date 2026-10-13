@@ -5,7 +5,11 @@ Verified on 2026-10-10 using HTTP/1.0, identity encoding and the same Mozilla ro
 These exchanges can report different last-trade prices. Firmware retains up to
 twelve real whole-dollar alternatives per provider for five seconds and prefers
 a quote that changes multiple displayed digits. Repeated receipts refresh an
-entry rather than erasing other prices. The Nixie deadline runs independently
+entry rather than erasing other prices. Selection remembers the last eight
+distinct displayed numbers, excludes a return to the previous distinct number
+and ranks least-recent values before digit changes. Equal choices use fresh
+entropy without favoring duplicate entries or a provider. Holding a number
+does not erase that history. The Nixie deadline runs independently
 of fetching; a selected cached quote is a recently observed market price, not a
 claim that another trade occurred at that deadline. From firmware 1.0.24, the
 latest BBO midpoint has the live-book exception described below; older book
@@ -16,8 +20,10 @@ paid plans are required. See [exact refresh behavior](NIXIE_REFRESH.md).
 
 ## Device live streams
 
-Firmware 1.0.24 prefers Coinbase on the primary verified TLS connection and
-Bitfinex depth-one USD book on the secondary. Kraken, Binance, Bitstamp and
+Firmware 1.0.25 prefers Coinbase on the primary verified TLS connection and
+Bitfinex depth-one books on the secondary. Direct BTC/USD and an implied
+BTC/USDT × USDT/USD midpoint provide separate real USD display candidates.
+All three Bitfinex books share the same socket. Kraken, Binance, Bitstamp and
 Gemini provide fallbacks; only two connections run concurrently. A provider can belong to
 only one worker. Each worker retains a nonblocking 16-tick FIFO so a batch of
 real prices reaches the quote selector and candle builder. Overflow discards
@@ -38,7 +44,7 @@ The TLS gate and conservative memory budget remain enabled.
 | Kraken | `wss://ws.kraken.com/v2`; `ticker` for `BTC/USD` and `USDT/USD`, `event_trigger:bbo`, snapshot enabled; separate `trade` subscription for `BTC/USD`, snapshot disabled | Both subscriptions share one TLS connection. BBO ticker updates can repeat the last price; matched-trade batches retain validated rows and fence duplicate trade IDs. FX ticks update conversion without counting as Bitcoin prices or making an inactive Bitcoin feed look fresh. About 150 connection attempts/rolling 10 minutes/IP; reconnect no faster than five seconds after downtime. [Ticker](https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/ticker), [trades](https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/trade), [connection rules](https://docs.kraken.com/exchange/guides/websockets/introduction). |
 | Binance | `wss://data-stream.binance.vision/ws/btcusdt@aggTrade`; raw market-data-only stream, no subscription message needed | Real aggregate execution price and millisecond trade time; exact `BTCUSDT` symbol and increasing aggregate ID required. Eligible only with fresh USDT/USD conversion. Five incoming control/ping/pong messages/s, 300 connection attempts/5 min/IP, at most 1,024 streams/connection. The client uses one stream and infrequent heartbeat frames. [Official stream and quota documentation](https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md). |
 | Bitstamp | `wss://ws.bitstamp.net`; `live_trades_btcusd` | Real USD trade price, microtimestamp and increasing ID; honor reconnect events. No numeric public subscription quota established from retrieved docs; one subscription and conservative retries. [Official documentation](https://www.bitstamp.net/websocket/v2/). |
-| Bitfinex | `wss://api-pub.bitfinex.com/ws/2`; `conf` flag `32768` followed by `book`, `tBTCUSD`, `prec:P0`, `freq:F0`, `len:"1"` | Current best-bid/ask midpoint in USD; publication timestamp is appended outside the book array. Bind the exact acknowledged instrument, precision, frequency and length, reconstruct snapshots/deletions, reject crossed or excessively wide quotes, stale/future/backward publication times and malformed rows. Lost/malformed frames require a fresh snapshot through reconnect. Heartbeats never pretend to be new book prices. Public limit 20 connections/min; documentation lists both 25 and 30 channels, so the conservative allowance is 25. Firmware uses one book channel. [Book schema and real-time F0](https://docs.bitfinex.com/reference/ws-public-books), [timestamp configuration](https://docs.bitfinex.com/docs/ws-general), [public limits](https://docs.bitfinex.com/docs/requirements-and-limitations). |
+| Bitfinex | `wss://api-pub.bitfinex.com/ws/2`; `conf` flag `32768`, then three `book` subscriptions for `tBTCUSD`, `tBTCUST`, `tUSTUSD`, each `prec:P0`, `freq:F0`, `len:"1"` | Current direct USD midpoint and USD-converted midpoint from two current books. Publication timestamp is appended outside the book array. Bind each exact instrument, precision, frequency, length and distinct channel, reconstruct snapshots/deletions, reject crossed or excessively wide quotes, stale/future/backward publication times and malformed rows. Lost/malformed frames require a fresh snapshot through reconnect. Heartbeats never pretend to be new book prices. Public limit 20 connections/min; documentation lists both 25 and 30 channels, so the conservative allowance is 25. Firmware uses three channels on one socket. [Book schema and real-time F0](https://docs.bitfinex.com/reference/ws-public-books), [timestamp configuration](https://docs.bitfinex.com/docs/ws-general), [public limits](https://docs.bitfinex.com/docs/requirements-and-limitations). |
 | Gemini | `wss://ws.gemini.com`; `{"id":"1","method":"subscribe","params":["btcusd@trade"]}` | Public USD trade-only stream; exact instrument, execution nanoseconds and increasing trade ID required. Integer timestamp parsing preserves millisecond precision. The verified connection's `conninfo` advertised request weight 7,000/10 s and 300 connection attempts/5 min; these are observed live allowances, not a permanent promise. One subscription and conservative retries remain far below them. JSON status 429 receives at least a minute of backoff. [Production endpoint](https://developer.gemini.com/trading/websocket/introduction), [trade schema](https://developer.gemini.com/trading/websocket/streams), [connection-info method](https://developer.gemini.com/trading/websocket/playground). |
 
 All six feeds were reached by computer probes. The 2026-10-13 added-feed
@@ -78,15 +84,47 @@ Canonical chart-source selection is independent of Nixie quote diversity so
 that venue spread does not become chart volatility. See
 [refresh and chart semantics](NIXIE_REFRESH.md).
 
+Bitfinex's `UST` identifies Tether USDt, verified against its
+[official currency label map](https://api-pub.bitfinex.com/v2/conf/pub:map:currency:label).
+`BTCUSD`, `BTCUST` and `USTUSD` were present in the
+[public exchange pair list](https://api-pub.bitfinex.com/v2/conf/pub:list:pair:exchange)
+on 2026-10-13. The implied USD quote multiplies the current BTC/USDT midpoint
+by the current USDT/USD midpoint. Both complete bound books must have a spread
+of at most 1%, and the FX levels must lie within 0.5–1.5 USD. Their publication
+and receipt times remain separately stored. A genuine data update in either
+leg may publish a `ConvertedBboMidpoint` with the latest actual leg publication
+timestamp; heartbeat messages publish no quote. Its value is an implied current
+quoted midpoint, never an executed trade or an invented price offset. Converted
+quotes are display candidates only and never add observations to the canonical
+USD candle chart.
+
+The initial two-feed anti-repeat computer probe produced zero A→B→A reversals
+but held 213/788 transitions when no permitted real alternative existed.
+It is preserved in [its report](../test/anti_repeat_quote_probe_report.json).
+The subsequent three-book probe uses the actual C++ parsers, guard and selector,
+with the same two verified TLS sockets; its full measurement and source hashes
+are in [the three-book report](../test/anti_repeat_three_books_probe_report.json).
+Its 500 measured transitions all changed whole dollars, including 444
+multi-digit changes, with no reversals or holds. All 597 nonblank frames,
+including startup, traced to accepted real quotes and nearest-dollar rounding.
+Run `node tools/probe_anti_repeat.mjs --bitfinex-cross` to repeat it. These
+computer observations do not establish ESP32 timing or visible output.
+
 An unchanged subscribed book remains current while the ordered connection is
 healthy. Firmware publishes a `current_books_mask` only after the timestamp
 configuration, exact subscription acknowledgement and complete snapshot are
 validated, and both best prices form an uncrossed spread of at most 1%.
-The quote selector may retain only that provider's latest `BboMidpoint` entry
+The quote selector may retain only that provider's latest direct and converted
+book heads under their respective live-validity masks
 beyond the usual five-second receipt lifetime. Older entries never gain this
 exception. Missing sides, crossed or excessive spreads, malformed/stale data,
-unsubscribe, disconnect, pause or more than 35 seconds without an incoming
-message clear the mask. A later valid complete BBO can restore it.
+unsubscribe, disconnect, pause or more than 35 seconds without a message on that
+book's own channel clear the mask. A later valid complete BBO can restore it.
+Converted eligibility is published separately as `current_converted_books_mask`;
+both component channels must remain valid and live. Activity on a different
+channel or a socket PONG cannot hide an inactive conversion leg. A small ledger
+preserves the latest direct and converted book heads independently of the
+historical quote ring.
 
 Book heartbeats maintain connection liveness without generating price ticks
 or changing receipt time, publication time or quote counters. Thus telemetry

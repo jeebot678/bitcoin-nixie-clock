@@ -16,12 +16,16 @@ class BitfinexBook {
       !root["flags"].is<uint32_t>()||!(root["flags"].as<uint32_t>()&32768U))return false;
     timestamps=true;return true;
   }
-  bool bind(JsonVariantConst root){
+  bool bind(JsonVariantConst root,const char* symbol="tBTCUSD"){
     double length=0;
     if(!equals(root["event"],"subscribed")||!equals(root["channel"],"book")||
-      !equals(root["symbol"],"tBTCUSD")||!equals(root["prec"],"P0")||!equals(root["freq"],"F0")||
+      !equals(root["symbol"],symbol)||!equals(root["prec"],"P0")||!equals(root["freq"],"F0")||
       !number(root["len"],length)||length!=1||!root["chanId"].is<uint32_t>()||!root["chanId"].as<uint32_t>())return false;
     channel=root["chanId"].as<uint32_t>();ready=corrupted=false;bid=ask=0;publishedAt=0;return true;
+  }
+  bool valid() const{
+    return timestamps&&channel&&ready&&!corrupted&&validPrice(bid)&&validPrice(ask)&&
+      ask>=bid&&(ask-bid)/((ask+bid)/2)<=.01;
   }
   bool apply(JsonVariantConst root,uint32_t epoch,Quote& quote){
     quote={};

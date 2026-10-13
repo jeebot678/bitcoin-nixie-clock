@@ -1,21 +1,47 @@
 # Nixie refresh and chart behavior
 
-Firmware 1.0.24 keeps the selected display cadence independent of network
-requests and preserves a continuous supply of genuine price alternatives.
+Firmware 1.0.25 keeps the selected display cadence independent of network
+requests and selects genuine price alternatives without two-price reversals.
 Frequency settings are 100 / 500 / 1500 / 10000 / 60000 ms; range settings are
 30 / 60 / 300 / 1800 / 3600 seconds. Each deadline writes all six Nixie modules,
 selecting a current book midpoint or recent validated quote even when a
 request is still running.
 
-The quote book retains up to twelve distinct rounded prices per provider for five
-seconds. Older book midpoints and trade quotes retain this five-second limit.
-Only the latest midpoint of a synchronized, valid and healthy live book can
-remain selectable beyond it. Selection prefers a genuine multi-digit change, then a different
-provider and fresher receipts. Repeated receipts refresh the current entry
-rather than evicting its alternatives. Quotes can be reused within that
-lifetime, or while the latest live book remains current, so a display change
-does not mean a newly executed trade. If no
-candidate changes the whole-dollar display, the timer still runs. Version
+The quote book retains up to twelve distinct rounded prices per provider for
+five seconds. Older book midpoints and trade quotes retain this five-second
+limit. Only the latest direct or converted midpoint of synchronized, valid
+and healthy live books can remain selectable beyond it. Repeated receipts refresh the current
+entry rather than evicting its alternatives. Quotes can be reused within
+that lifetime, or while the latest live book remains current, so a display
+change does not mean a newly executed trade.
+
+Version 1.0.25 remembers the last eight changes of rounded whole-dollar
+display values. A return from B to the preceding distinct value A is
+ineligible until a third value has been displayed. An A → B → B → A sequence
+is therefore blocked just like A → B → A: unchanged frames, decimal-only
+updates and provider changes do not erase the preceding distinct value.
+This hard rule applies both to cached quote selection and to the guard
+fallback, so the fallback cannot reintroduce an A/B loop.
+
+Among eligible quotes, selection first favors unseen values or those least
+recently displayed, then the greatest number of changed digits. An
+`esp_random()`-derived tie score selects between remaining distinct rounded
+prices. The score depends on the dollar value, so duplicate entries or
+multiple providers reporting the same rounded number do not add weight.
+Randomness selects an existing validated quote; it never adds a price offset
+or invents a trade. Original quote timestamps, receipt ages, five-second TTLs
+and the current-book exception are unchanged. Display selection does not
+alter candle observations, range settings or scale parameters.
+
+If there are only two usable real values, rejecting a reversal can leave the
+last value displayed until a third arrives. Every scheduled deadline still
+writes all six Nixie modules during this hold. A held fallback keeps its
+original receipt time and is limited by the usual stale deadline of
+`max(30 seconds, 3 × selected interval)`; a synchronized current book follows
+its separate healthy-book validity rules. The firmware does not extend an
+old trade's TTL to force movement. Lower price diversity can therefore produce
+fewer visible changes while preserving the 100 ms command cadence. If no
+usable candidate changes the whole-dollar display, the timer still runs. Version
 1.0.22 lets healthy streams supply alternatives before requesting another
 eligible HTTP provider: an unchanged run must last at least five seconds,
 or the selected display interval if longer. A genuine change resets that
@@ -39,16 +65,44 @@ so burst processing does not delay the display timer. FX-only ticks update
 conversion without counting as Bitcoin prices or masking stale Bitcoin data.
 See [verified endpoints, public quotas and payloads](SOURCES.md).
 
-Version 1.0.24 keeps that latest midpoint eligible when bid and ask stay
-unchanged. Current-book validity requires the acknowledged `tBTCUSD`
-`P0/F0`, depth-one channel, a completed snapshot with both valid levels, no
-corruption, a non-crossed spread of at most 1%, an established connection,
-and an incoming channel message or book heartbeat within 35 seconds. New level publications still pass
+Version 1.0.25 subscribes to three `P0/F0`, depth-one Bitfinex books on that
+same TLS connection: `tBTCUSD`, `tBTCUST` and `tUSTUSD`. `UST` is USDT in
+these symbols. The direct quote is the BTC/USD best-bid/ask midpoint. The
+additional converted USD quote multiplies the BTC/USDT midpoint by the
+USDT/USD midpoint. Both conversion books must have acknowledged, distinct
+channel IDs, valid snapshots and levels, acceptable spreads, no corruption,
+and their own channel message or heartbeat within 35 seconds. Both FX book
+levels must remain within 0.5–1.5 USD per USDT. Coinbase and all three
+Bitfinex subscriptions still occupy only two TLS connections.
+
+A converted quote is emitted only when an actual level publication is
+processed on either conversion leg. Its publication timestamp is the
+later of the two actual leg publication times; its receipt is the time that
+real event was processed. Both books retain their own publication times.
+Channel heartbeats produce no quote, accepted-price count or fresh receipt.
+The main loop accepts a validated converted midpoint for tube selection and
+price counters, but never adds it to canonical chart OHLC, alters range
+caches or treats it as an executed BTC/USD trade.
+
+The selector retains separate current direct-USD and converted-USD heads
+alongside its historical ring. These two records use 48 bytes, and updates
+on one product cannot evict the other quiet, valid product. Historic ring
+entries keep the ordinary five-second TTL. Each current head retains the
+original publication and receipt timestamps; separate validity masks govern
+the direct book and both conversion legs.
+
+Version 1.0.24 introduced eligibility for an unchanged latest midpoint;
+1.0.25 extends it to the converted head when both legs remain valid.
+Current-book validity requires the acknowledged matching `P0/F0`, depth-one
+channel, a completed snapshot with both valid levels, no corruption, a
+non-crossed spread of at most 1%, an established connection, and that
+channel's own message or book heartbeat within 35 seconds. Neither unrelated
+book traffic nor a transport PONG renews a channel's health. New level publications still pass
 timestamp validation; heartbeats do not manufacture a new publication.
 Removal of a required level, invalid data, a subscription reset, corruption,
 disconnect or missed message-health deadline removes eligibility. Historical
-entries never gain this exemption: only the latest cached BBO midpoint for
-that current book can outlive the receipt-age limit.
+entries never gain this exemption: only the latest retained direct or
+converted BBO midpoint for its valid current books can outlive the receipt-age limit.
 
 The selector preserves the original publication and receipt timestamps when
 reusing a current midpoint. Heartbeats update transport health without
@@ -104,15 +158,20 @@ See [candle behavior, persistence and testing](CANDLE_CHART.md).
 
 Wireless diagnostics report active feed providers, cumulative source quote
 counts and receipt ages, queue overflows, rejected payloads and disconnects.
-`current_books_mask` identifies validated live books that remain current;
-Bitfinex uses bit 4 (`16`). `display_quote_age_ms` reports the actual selected
-quote's receipt age, even when it exceeds five seconds for a current book.
+`current_books_mask` identifies current direct-USD books;
+`current_converted_books_mask` identifies current converted-book quotes.
+Bitfinex uses bit 4 (`16`) in each. `display_quote_kind` distinguishes
+`last-trade`, `bbo-midpoint` and `converted-bbo-midpoint`.
+`display_quote_age_ms` reports the actual selected quote's receipt age,
+even when it exceeds five seconds for a current book.
 An advancing age with unchanged source quote counts is expected during a
 healthy quiet book and does not indicate a fabricated price receipt.
 They also report HTTP kind/source/status, a requested differing quote, cached
 candle count/epoch, chart columns/pixels, usable data-RAM and frame timing.
 Per-deadline transition, changed-price and multi-digit-change counters observe
-every 100 ms frame even when LAN collection is slower. The 30-second
+every 100 ms frame even when LAN collection is slower. `price_reversals` and
+`selection_holds` distinguish real variety from repeated A/B changes and
+intentional holds. The 30-second
 `cadence-test` temporarily selects the normal 500 ms live-price path, sets
 `cadence_test=true`, and restores the mechanical setting automatically.
 
@@ -211,6 +270,42 @@ as a new market price. See [the device report](../test/device_release_1.0.19_rep
 Visible-output verification remains false because there is no feedback from
 the display hardware.
 
+Earlier passing change-rate reports do not test the distinct-change rule:
+alternating two genuine venue prices can raise both changed-price and
+multi-digit counters on every frame. Version 1.0.25 specifically prevents
+that return to the preceding distinct value and selects less recently used
+eligible prices before comparing digit changes. Its assembled-device
+measurement is pending; the new report must record reversals and holds
+alongside timing, quote age, connected sources and actual variation.
+
+The separate 90-second computer probe using the original Coinbase and direct
+Bitfinex pair ran the actual compiled C++ parser, guard and selector with
+modeled reception/frame fallback. After warmup, 575 of 788 transitions
+changed the rounded value (73%), with 378 multi-digit changes, 213 holds and
+zero distinct-value A → B → A reversals. Every displayed price was traceable
+to a real accepted quote. See [the two-source report](../test/anti_repeat_quote_probe_report.json).
+This shows why a third real quote is useful when the reversal rule blocks
+two-price oscillation. It is not evidence of final three-book ESP32 timing or
+visible output; that device measurement remains pending.
+
+The final 60-second three-book computer run passed with the actual compiled
+C++ parsers, guard and selector. After ten seconds of warmup, all 500
+transitions changed the rounded price; 444 changed multiple digits (88.8%),
+with zero reversals, holds or blanks. Frame gaps averaged 100.002 ms and
+ranged from 97 to 103 ms. Both TLS connections stayed established without
+errors and supplied 392 Coinbase trades, 172 direct USD book quotes and 40
+converted book quotes. All 597 nonblank frames, including startup, were
+traceable to an accepted real value with exact nearest-dollar rounding.
+There were three startup blank frames before usable data arrived.
+
+The current converted-head exception was exercised in 17 frames whose real
+receipt age exceeded five seconds, reaching 14.491 seconds. Heartbeats did
+not create new quotes or reset those ages. See [the three-book computer report](../test/anti_repeat_three_books_probe_report.json).
+The full host suite and ESP32 build passed. This probe models reception and
+frame orchestration on the computer; 1.0.25 installation and assembled-device
+cadence, feed stability and visible appearance still require their own
+measurement.
+
 The prior 1.0.15 bare-ESP32 measurement passed its 30-second diagnostic but did
 not exercise ongoing minute-history requests on the assembled 5-minute range.
 It is preserved in [that release report](../test/device_release_1.0.15_report.json).
@@ -219,8 +314,12 @@ The new starvation regression checks the missing coverage explicitly.
 Run `python3 tools/run_tests.py` and `pio run`. Tests exercise actual firmware
 sources with modeled network/hardware, address/undefined-behavior sanitizers,
 all five refresh intervals, real-price selection and duplicate/stale handling,
+distinct-change reversal rules across holds and decimal/provider updates,
+tie selection without duplicate weighting, guard fallback and hold expiry,
 quiet synchronized books with unchanged timestamps/counters, removal and
 corruption invalidation, message-health expiry and historical quote TTLs,
+separate direct/converted heads, both-leg conversion validity and independent
+channel health, original leg timestamps and heartbeat silence,
 stream burst preservation, FX-only freshness, fallback schemas/backoff, HTTP
 reconnect grace and memory deferral, bounded transaction parsing, fixed OHLC
 candles, stable scales, full-brightness pixels and close holds, saved

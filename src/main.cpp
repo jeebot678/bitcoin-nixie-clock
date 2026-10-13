@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_system.h>
 #include <time.h>
 #include "ClockCore.h"
 #include "Display.h"
@@ -22,6 +23,7 @@ btc::Rotation rotation;
 btc::FxRate fx;
 btc::PriceGuard guard;
 btc::QuoteBook quotes;
+btc::QuoteSequence priceSequence;
 btc::CandleSeries candleSeries[5];
 btc::CandleScale candleScales[5];
 CandleStore candleStore;
@@ -48,10 +50,12 @@ btc::QuoteKind shownQuoteKind=btc::QuoteKind::LastTrade,lastAcceptedKind=btc::Qu
 uint8_t chartSource=255;
 uint32_t chartQuoteReceived=0;
 uint32_t shownQuoteReceived=0;
+uint32_t shownQuoteTimestamp=0;
 uint32_t shownDigits=0;
 uint32_t nextNixieAt=0,nixieFrames=0,lastNixieAt=0,acceptedQuotes=0;
 uint32_t lastFrameGap=0,lastFramePeriod=0,minimumFrameGap=0,maximumFrameGap=0;
 uint32_t priceTransitions=0,priceChanges=0,multiDigitChanges=0;
+uint32_t priceReversals=0,selectionHolds=0;
 uint32_t nextTelemetryAt=0,nextRawAt=0;
 uint16_t frequencyMv=0,rangeMv=0,frequencyRaw=0,rangeRaw=0;
 int frequencyDecoded=-1,rangeDecoded=-1;
@@ -136,6 +140,7 @@ void publishTelemetry(uint32_t now) {
   auto liveState=live::status();s.connections=liveState.connections;s.quotes=liveState.quotes;
   s.streamProviders=liveState.providers;s.streamDropped=liveState.dropped;s.streamRejected=liveState.rejected;s.streamDisconnects=liveState.disconnects;
   s.currentBooks=liveState.currentBooks;
+  s.currentConvertedBooks=liveState.currentConvertedBooks;
   s.streamStack=liveState.stackFreeBytes;
   for(unsigned source=0;source<btc::kSourceCount;++source){s.sourceQuotes[source]=liveState.quoteCounts[source];s.sourceAges[source]=liveState.quoteAges[source];s.sourceFailures[source]=liveState.failures[source];}
   for(unsigned i=0;i<2;++i)s.streamSlots[i]=liveState.slots[i];
@@ -143,6 +148,7 @@ void publishTelemetry(uint32_t now) {
   s.frameGap=lastFrameGap;s.nextFrame=uint32_t(std::max<int32_t>(0,int32_t(nextNixieAt-now)));
   s.minimumGap=minimumFrameGap;s.maximumGap=maximumFrameGap;
   s.transitions=priceTransitions;s.priceChanges=priceChanges;s.multiChanges=multiDigitChanges;
+  s.priceReversals=priceReversals;s.selectionHolds=selectionHolds;
   s.marketPrice=guard.price;s.displayPrice=shownPrice;s.digits=shownDigits;s.source=shownSource;
   s.quoteKind=shownQuoteKind;s.displayQuoteAge=shownPrice?now-shownQuoteReceived:UINT32_MAX;
   s.chartSource=chartSource;s.chartQuoteAge=chartSource<btc::kSourceCount?now-chartQuoteReceived:UINT32_MAX;
@@ -209,7 +215,7 @@ void acceptQuote(const btc::Quote& quote,uint8_t source,uint32_t receivedAt,uint
   if (source>=btc::kSourceCount) return;
   double price;
   if (!fx.normalize(quote.price,btc::kSources[source].usdt,now,price)) {
-    if(quote.kind==btc::QuoteKind::BboMidpoint)quotes.invalidateCurrentBook(source);
+    if(quote.kind==btc::QuoteKind::BboMidpoint||quote.kind==btc::QuoteKind::ConvertedBboMidpoint)quotes.invalidateCurrentBook(source,quote.kind);
     nextQuoteAt=now+500;return;
   }
   if (guard.accept(price,source,now)) {
@@ -218,6 +224,7 @@ void acceptQuote(const btc::Quote& quote,uint8_t source,uint32_t receivedAt,uint
     if (needConfirmation) nextQuoteAt=now; // Confirmation never waits for a slow display dial.
     lastAcceptedSource=source;lastAcceptedKind=quote.kind;
     quotes.put(price,source,receivedAt,lastPriceEpoch,quote.kind);
+    if(quote.kind==btc::QuoteKind::ConvertedBboMidpoint)return; // Additional USD display quote, never a canonical chart observation.
     // Keep one venue's chart observations consistent. The tubes may select
     // other genuine quotes, including book midpoints with a venue premium.
     uint16_t providers=liveReady?live::status().providers:0;
@@ -242,7 +249,7 @@ void acceptQuote(const btc::Quote& quote,uint8_t source,uint32_t receivedAt,uint
     }
     nextDrawAt=now;
   } else {
-    if(quote.kind==btc::QuoteKind::BboMidpoint)quotes.invalidateCurrentBook(source);
+    if(quote.kind==btc::QuoteKind::BboMidpoint||quote.kind==btc::QuoteKind::ConvertedBboMidpoint)quotes.invalidateCurrentBook(source,quote.kind);
     needConfirmation=true;nextQuoteAt=now;
   }
 }
@@ -255,7 +262,7 @@ void processLive(uint32_t now) {
       if(tick.source==1&&std::isfinite(tick.fx)&&tick.fx>=0.5&&tick.fx<=1.5&&!tick.quote.price){fx.usd=tick.fx;fx.receivedAt=tick.receivedAt;}
       else if(!tick.fx)acceptQuote(tick.quote,tick.source,tick.receivedAt,tick.quote.timestamp,now);
     }
-    else if(tick.quote.kind==btc::QuoteKind::BboMidpoint)quotes.invalidateCurrentBook(tick.source);
+    else if(tick.quote.kind==btc::QuoteKind::BboMidpoint||tick.quote.kind==btc::QuoteKind::ConvertedBboMidpoint)quotes.invalidateCurrentBook(tick.source,tick.quote.kind);
     if(i>=1&&uint32_t(millis()-started)>=4)break; // Drain bursts without delaying the tube timer.
   }
   live::allowUsdt(fx.fresh(millis()));
@@ -267,11 +274,12 @@ void refreshNixies(uint32_t now) {
     shownPrice=0;nextNixieAt=now;return;
   }
   tubeTestEndsAt=0;
-  if (!wifi.online()) {quotes.clear();shownPrice=0;nextNixieAt=now;return;}
+  if (!wifi.online()) {quotes.clear();priceSequence.clear();shownPrice=0;nextNixieAt=now;return;}
   if (!guard.price) {display::setupZero(now);shownPrice=0;return;}
-  const uint16_t currentBooks=liveReady?live::status().currentBooks:0;
+  const auto liveState=liveReady?live::status():live::Status{};
+  const uint16_t currentBooks=liveState.currentBooks,currentConvertedBooks=liveState.currentConvertedBooks;
   const bool stale=uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(refreshPeriod());
-  if (stale&&!currentBooks) {
+  if (stale&&!currentBooks&&!currentConvertedBooks) {
     display::blankPrice();shownPrice=0;return;
   }
   if (!shownPrice || btc::due(now,nextNixieAt)) {
@@ -279,19 +287,31 @@ void refreshNixies(uint32_t now) {
     const uint32_t previousDigits=shownDigits;
     const uint32_t period=refreshPeriod();
     btc::DisplayQuote selected{guard.price,lastQuoteReceived,lastPriceEpoch,lastAcceptedSource,lastAcceptedKind};
-    bool selectedQuote=quotes.choose(now,firstFrame?0:shownDigits,shownSource,guard.price,fx.fresh(now),selected,currentBooks);
-    if(stale&&!selectedQuote){display::blankPrice();shownPrice=0;return;}
+    bool selectedQuote=quotes.choose(now,firstFrame?0:shownDigits,shownSource,guard.price,fx.fresh(now),selected,currentBooks,&priceSequence,esp_random(),currentConvertedBooks);
+    uint32_t fallbackDigits=uint32_t(std::floor(selected.price+0.5));
+    if(!selectedQuote&&(stale||priceSequence.reverses(fallbackDigits)||
+       (btc::kSources[lastAcceptedSource].usdt&&!fx.fresh(now)))){
+      // A guard fallback must obey the same sequence rule. Preserve the last
+      // real display and its actual timestamp while requesting more diversity.
+      if(!needDifferentQuote)differentQuoteSince=now;
+      needDifferentQuote=true;
+      if(!shownPrice||uint32_t(now-shownQuoteReceived)>btc::staleAfterMs(period)||
+         std::abs(shownPrice/guard.price-1)>0.05){display::blankPrice();shownPrice=0;return;}
+      selected={shownPrice,shownQuoteReceived,shownQuoteTimestamp,shownSource,shownQuoteKind};
+    }
     uint32_t digits=uint32_t(std::floor(selected.price+0.5));
     bool previousNeedDifferent=needDifferentQuote;
     needDifferentQuote=!firstFrame&&digits==shownDigits;
     if(!needDifferentQuote)differentQuoteSince=0;
     else if(!previousNeedDifferent)differentQuoteSince=now;
     shownDigits=digits;
+    bool reversal=priceSequence.reverses(digits);
+    priceSequence.record(digits);
     shownQuoteKind=selected.kind;
-    display::price(double(shownDigits),true);shownPrice=selected.price;shownSource=selected.source;shownQuoteReceived=selected.receivedAt;++nixieFrames;
+    display::price(double(shownDigits),true);shownPrice=selected.price;shownSource=selected.source;shownQuoteReceived=selected.receivedAt;shownQuoteTimestamp=selected.timestamp;++nixieFrames;
     lastFrameGap=now-lastNixieAt;
-    if(lastFramePeriod!=period||firstFrame){minimumFrameGap=maximumFrameGap=0;lastFramePeriod=period;priceTransitions=priceChanges=multiDigitChanges=0;}
-    else {++priceTransitions;priceChanges+=shownDigits!=previousDigits;multiDigitChanges+=btc::QuoteBook::changedDigits(previousDigits,shownDigits)>=2;if(!minimumFrameGap||lastFrameGap<minimumFrameGap)minimumFrameGap=lastFrameGap;if(lastFrameGap>maximumFrameGap)maximumFrameGap=lastFrameGap;}
+    if(lastFramePeriod!=period||firstFrame){minimumFrameGap=maximumFrameGap=0;lastFramePeriod=period;priceTransitions=priceChanges=multiDigitChanges=priceReversals=selectionHolds=0;}
+    else {++priceTransitions;priceChanges+=shownDigits!=previousDigits;multiDigitChanges+=btc::QuoteBook::changedDigits(previousDigits,shownDigits)>=2;priceReversals+=reversal;selectionHolds+=shownDigits==previousDigits;if(!minimumFrameGap||lastFrameGap<minimumFrameGap)minimumFrameGap=lastFrameGap;if(lastFrameGap>maximumFrameGap)maximumFrameGap=lastFrameGap;}
     if (logNixies || nixieFrames==1) Serial.printf("Nixie frame at %lu ms: %.2f interval=%lu ms gap=%lu ms quoteAge=%lu ms source=%s digits=%lu cosmetic=%s\n",(unsigned long)now,shownPrice,
       (unsigned long)period,(unsigned long)uint32_t(now-lastNixieAt),(unsigned long)uint32_t(now-shownQuoteReceived),btc::kSources[shownSource].name,(unsigned long)shownDigits,"no");
     lastNixieAt=now;
@@ -438,8 +458,9 @@ void draw(uint32_t now) {
   nextDrawAt=now+(setupDisplay?config::kSetupFrameMs:display::startupAnimating()?config::kStartupFrameMs:1000);
   if (testEndsAt && !btc::due(now,testEndsAt)) { display::selfTest(uint8_t((4500-(testEndsAt-now))/750)); return; }
   testEndsAt=0;
+  const auto liveState=liveReady?live::status():live::Status{};
   bool stale=!guard.price || (uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(config::kRefreshMs[refreshDial.stable])&&
-    !(liveReady&&live::status().currentBooks));
+    !liveState.currentBooks&&!liveState.currentConvertedBooks);
   const bool testingTubes=tubeTestEndsAt && !btc::due(now,tubeTestEndsAt);
   if (setupDisplay) {
     display::setupStatus(wifi.setupState(),now);

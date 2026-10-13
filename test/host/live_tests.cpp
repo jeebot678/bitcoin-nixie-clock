@@ -118,6 +118,49 @@ void currentBookStatusTests(){
   open();snapshot();emit("{\"event\":\"unsubscribed\",\"chanId\":77}");assert(!live::status().currentBooks);slot.step();assert(!slot.connected&&live::status().slots[1].reason==live::Reason::SubscriptionError);
   open();snapshot();slot.socket->emit(WStype_DISCONNECTED,"connection lost");assert(!live::status().currentBooks);slot.close();
 }
+void convertedBookStatusTests(){
+  for(auto& slot:slots){slot.close();live::Tick ignored;while(xQueueReceive(slot.ticks,&ignored,0)==pdTRUE){}}
+  auto& slot=slots[1];live::Tick tick;uint64_t stamp=uint64_t(testEpoch)*1000;
+  auto emit=[&](const std::string& value){slot.socket->emit(WStype_TEXT,value);};
+  auto ack=[&](const char* symbol,unsigned channel){emit("{\"event\":\"subscribed\",\"channel\":\"book\",\"symbol\":\""+std::string(symbol)+"\",\"prec\":\"P0\",\"freq\":\"F0\",\"len\":\"1\",\"chanId\":"+std::to_string(channel)+"}");};
+  auto packet=[&](unsigned channel,const std::string& data,uint64_t published){emit("["+std::to_string(channel)+","+data+","+std::to_string(published)+"]");};
+  auto open=[&](){
+    slot.close();while(live::receive(tick)){}
+    slot.nextProvider=1;for(auto& state:slot.cooldown)state.availableAt=testMillis;slot.step();
+    assert(slot.source==4&&slot.socket->sent.size()==4&&slot.socket->sent[2].find("tBTCUST")!=std::string::npos&&slot.socket->sent[3].find("tUSTUSD")!=std::string::npos);
+    emit("{\"event\":\"conf\",\"status\":\"OK\",\"flags\":32768}");ack("tBTCUSD",77);ack("tBTCUST",78);ack("tUSTUSD",79);
+    assert(!live::status().currentBooks&&!live::status().currentConvertedBooks);
+  };
+  auto complete=[&](){
+    packet(77,"[[83050,1,0.1],[83060,1,-0.1]]",stamp);assert(live::receive(tick)&&tick.quote.kind==btc::QuoteKind::BboMidpoint);
+    packet(78,"[[83200,1,0.1],[83220,1,-0.1]]",stamp+3);assert(!live::receive(tick)&&!live::status().currentConvertedBooks);
+    packet(79,"[[1,1,100],[1.0001,1,-100]]",stamp+5);assert(live::receive(tick)&&tick.source==4&&tick.quote.kind==btc::QuoteKind::ConvertedBboMidpoint&&std::abs(tick.quote.price-83210*1.00005)<1e-6&&tick.quote.timestampMs==stamp+5&&tick.quote.timestamp==testEpoch);
+    assert(live::status().currentBooks==16&&live::status().currentConvertedBooks==16);
+  };
+  open();complete();uint32_t received=slot.receivedAt,quotes=slot.quotes;
+  for(unsigned i=0;i<9;++i){
+    testMillis+=15000;for(unsigned channel:{77U,78U,79U})packet(channel,"\"hb\"",stamp+5);slot.step();
+    assert(live::status().currentBooks==16&&live::status().currentConvertedBooks==16&&live::fresh(testMillis));
+    assert(slot.receivedAt==received&&slot.quotes==quotes&&!live::receive(tick)&&slot.usdtBook.publishedAt==stamp+3&&slot.fxBook.publishedAt==stamp+5);
+  }
+  // Socket/PONG and other channels cannot hide a dead conversion leg.
+  for(unsigned i=0;i<3;++i){testMillis+=12000;packet(77,"\"hb\"",stamp+5);packet(78,"\"hb\"",stamp+5);slot.socket->emit(WStype_PONG,"");slot.step();}
+  assert(slot.connected&&live::status().currentBooks==16&&!live::status().currentConvertedBooks);
+  packet(78,"[83210,1,0.1]",stamp+6);assert(!live::receive(tick));
+  packet(79,"\"hb\"",stamp+5);assert(live::status().currentConvertedBooks==16&&slot.receivedAt==received&&slot.quotes==quotes&&!live::receive(tick));
+  packet(79,"[1,0,1]",stamp+7);assert(!live::status().currentConvertedBooks&&live::status().currentBooks==16&&!live::receive(tick));
+  packet(79,"\"hb\"",stamp+7);assert(!live::status().currentConvertedBooks);
+  packet(79,"[1,1,100]",stamp+8);assert(live::receive(tick)&&tick.quote.kind==btc::QuoteKind::ConvertedBboMidpoint&&tick.quote.timestampMs==stamp+8);
+  packet(79,"[0.9999,1,-100]",stamp+9);assert(!live::status().currentConvertedBooks&&!live::receive(tick));
+  packet(79,"[1.0001,1,-100]",stamp+10);assert(live::receive(tick)&&live::status().currentConvertedBooks==16);
+  packet(79,"[[0.1,1,100],[0.10001,1,-100]]",stamp+11);assert(!live::status().currentConvertedBooks&&!live::receive(tick));
+  packet(79,"[[1,1,100],[1.0001,1,-100]]",stamp+12);assert(live::receive(tick)&&live::status().currentConvertedBooks==16);
+  ack("tBTCUST",78);assert(!live::status().currentConvertedBooks&&live::status().currentBooks==16);packet(78,"\"hb\"",stamp+12);assert(!live::status().currentConvertedBooks);
+  packet(78,"[[83200,1,0.1],[83220,1,-0.1]]",stamp+13);assert(live::receive(tick)&&tick.quote.timestampMs==stamp+13);
+  packet(79,"[1,1]",stamp+14);assert(!live::status().currentBooks&&!live::status().currentConvertedBooks);slot.step();assert(!slot.connected);
+  open();complete();packet(79,"[1,1,100]",stamp-6000);assert(!live::status().currentConvertedBooks&&!live::status().currentBooks&&!live::receive(tick));slot.step();assert(!slot.connected);
+  open();ack("tUSTUSD",78);assert(slot.failed&&!live::status().currentConvertedBooks);slot.close();
+}
 int main(int argc,char** argv){
   assert(argc==2);std::string directory=argv[1];
   bookTests(directory);
@@ -283,6 +326,7 @@ int main(int argc,char** argv){
     assert(!btc::parseStreamQuote(provider,captured.as<JsonVariantConst>(),epoch,quote));
   }
   currentBookStatusTests();
+  convertedBookStatusTests();
   for(auto& slot:slots){slot.close();vQueueDelete(slot.ticks);slot.ticks=nullptr;}assert(!queues&&!liveSockets());
   std::cout<<"PASS: dual live workers, bounded burst queues, USD/USDT parsers, channel binding/deduplication, current-book liveness without synthetic quotes, HTTP memory reservation, uninterrupted primary, failover/backoff, Wi-Fi/SNTP, OTA pause and rollover\n";
 }

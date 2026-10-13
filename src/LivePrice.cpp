@@ -36,7 +36,7 @@ class StreamSocket : public WebSocketsClient {
 };
 struct Slot {
   QueueHandle_t ticks=nullptr;
-  std::atomic<bool> paused{true},connected{false},bookValid{false};
+  std::atomic<bool> paused{true},connected{false},bookValid{false},convertedBookValid{false};
   std::atomic<uint32_t> quotes{0},receivedAt{0},stackFreeBytes{0},dropped{0},rejected{0},disconnects{0};
   std::atomic<uint32_t> sourceQuotes[btc::kSourceCount],sourceReceived[btc::kSourceCount];
   std::atomic<uint16_t> sourceFailures[btc::kSourceCount];
@@ -56,13 +56,25 @@ struct Slot {
   int failureStatus=0;
   uint32_t openedAt=0,lastValidQuoteAt=0,channel=0;
   std::atomic<uint32_t> lastMessageAt{0};
+  std::atomic<uint32_t> bookMessageAt[3];
   uint64_t lastTrade=0;
-  btc::BitfinexBook book;
-  bool currentBook(uint32_t now) const {return source==4&&connected&&bookValid&&uint32_t(now-lastMessageAt.load())<=35000;}
+  btc::BitfinexBook book,usdtBook,fxBook;
+  bool currentBook(uint32_t now) const {return source==4&&connected&&bookValid&&uint32_t(now-bookMessageAt[0].load())<=35000;}
+  bool currentConvertedBook(uint32_t now) const{
+    return source==4&&connected&&convertedBookValid&&uint32_t(now-bookMessageAt[1].load())<=35000&&uint32_t(now-bookMessageAt[2].load())<=35000;
+  }
   void publishBookValidity(){
-    bookValid=!failed&&book.timestamps&&book.channel&&book.ready&&!book.corrupted&&
-      btc::validPrice(book.bid)&&btc::validPrice(book.ask)&&book.ask>=book.bid&&
-      (book.ask-book.bid)/((book.ask+book.bid)/2)<=0.01;
+    bookValid=!failed&&book.valid();
+    convertedBookValid=!failed&&usdtBook.valid()&&fxBook.valid()&&fxBook.bid>=.5&&fxBook.ask<=1.5;
+  }
+  void enqueueConverted(uint32_t now){
+    if(!currentConvertedBook(now))return;
+    live::Tick tick;
+    tick.quote.price=(usdtBook.bid+usdtBook.ask)/2*((fxBook.bid+fxBook.ask)/2);
+    tick.quote.timestampMs=std::max(usdtBook.publishedAt,fxBook.publishedAt);
+    tick.quote.timestamp=uint32_t(tick.quote.timestampMs/1000);
+    tick.quote.kind=btc::QuoteKind::ConvertedBboMidpoint;
+    if(btc::validPrice(tick.quote.price))enqueue(tick,now);
   }
   void record(live::Reason cause,uint32_t now,int code=0,int tls=0){
     reasonSource=source.load();diagnosticStatus=int16_t(code);diagnosticTls=tls;reasonAt=now;reason=cause;
@@ -79,7 +91,7 @@ struct Slot {
     cooldown[source].failures=0;
   }
   void close(bool releaseRecovery=true) {
-    bookValid=false;
+    bookValid=convertedBookValid=false;
     closing=true;socket.reset();closing=false;connected=false;
     handshake.release();
     uint8_t owner=uint8_t(index+1);owners[source].compare_exchange_strong(owner,0);
@@ -89,7 +101,7 @@ struct Slot {
     if (closing) return;
     uint32_t now=millis();
     if (type==WStype_CONNECTED) {
-      bookValid=false;
+      bookValid=convertedBookValid=false;
       connected=true;lastMessageAt=now;
       socket->armHeartbeat(now);phase=live::Phase::Online;
       uint8_t owner=uint8_t(index+1);recoveryOwner.compare_exchange_strong(owner,0);
@@ -101,6 +113,10 @@ struct Slot {
         : source==3 ? "{\"id\":\"1\",\"method\":\"subscribe\",\"params\":[\"btcusd@trade\"]}":nullptr;
       if(source==4)socket->sendTXT("{\"event\":\"conf\",\"flags\":32768}");
       if(subscription)socket->sendTXT(subscription);
+      if(source==4){
+        socket->sendTXT("{\"event\":\"subscribe\",\"channel\":\"book\",\"symbol\":\"tBTCUST\",\"prec\":\"P0\",\"freq\":\"F0\",\"len\":\"1\"}");
+        socket->sendTXT("{\"event\":\"subscribe\",\"channel\":\"book\",\"symbol\":\"tUSTUSD\",\"prec\":\"P0\",\"freq\":\"F0\",\"len\":\"1\"}");
+      }
       if(source==1)socket->sendTXT("{\"method\":\"subscribe\",\"params\":{\"channel\":\"trade\",\"symbol\":[\"BTC/USD\"],\"snapshot\":false}}");
       Serial.printf("Live stream %u connected: %s\n",index,btc::kSources[source].name);
     } else if (type==WStype_DISCONNECTED || type==WStype_ERROR) {
@@ -112,11 +128,11 @@ struct Slot {
         strstr(reason,"handshake")?live::Reason::Protocol:live::Reason::Transport;
       record(cause,now,failureStatus,socket->tlsError());
       Serial.printf("Stream %u disconnected: %s (%s)\n",index,btc::kSources[source].name,reason);
-      bookValid=false;connected=false;failed=true;++disconnects;
+      bookValid=convertedBookValid=false;connected=false;failed=true;++disconnects;
     } else if (type==WStype_TEXT && length) {
-      if(length>8192){++rejected;if(source==4){bookValid=false;failed=true;record(live::Reason::Protocol,now);}return;}
+      if(length>8192){++rejected;if(source==4){bookValid=convertedBookValid=false;failed=true;record(live::Reason::Protocol,now);}return;}
       document.clear();
-      if (deserializeJson(document,payload,length,DeserializationOption::NestingLimit(8))) {++rejected;if(source==4){bookValid=false;failed=true;record(live::Reason::Protocol,now);}return;}
+      if (deserializeJson(document,payload,length,DeserializationOption::NestingLimit(8))) {++rejected;if(source==4){bookValid=convertedBookValid=false;failed=true;record(live::Reason::Protocol,now);}return;}
       lastMessageAt=now;
       JsonVariantConst root=document.as<JsonVariantConst>();
       if (btc::equals(root["type"],"error") || btc::equals(root["event"],"error") ||
@@ -125,26 +141,38 @@ struct Slot {
           (source==3 && !root["error"].isNull())) {
         if(source==3)failureStatus=root["status"].as<int>();
         record(btc::equals(root["event"],"bts:request_reconnect")?live::Reason::ServerReconnect:live::Reason::SubscriptionError,now,failureStatus);
-        bookValid=false;failed=true;return;
+        bookValid=convertedBookValid=false;failed=true;return;
       }
       live::Tick tick;
       uint32_t epoch=uint32_t(time(nullptr));
       if(source==4){
         if(btc::equals(root["event"],"conf")||btc::equals(root["event"],"subscribed")){
-          bookValid=false;
-          bool bound=btc::equals(root["event"],"conf")?book.configure(root):book.bind(root);
+          bool bound=false;
+          if(btc::equals(root["event"],"conf"))bound=book.configure(root)&&usdtBook.configure(root)&&fxBook.configure(root);
+          else if(btc::equals(root["symbol"],"tBTCUSD")){bookValid=false;uint32_t id=root["chanId"].as<uint32_t>();bound=id!=usdtBook.channel&&id!=fxBook.channel&&book.bind(root);}
+          else if(btc::equals(root["symbol"],"tBTCUST")){convertedBookValid=false;uint32_t id=root["chanId"].as<uint32_t>();bound=id!=book.channel&&id!=fxBook.channel&&usdtBook.bind(root,"tBTCUST");}
+          else if(btc::equals(root["symbol"],"tUSTUSD")){convertedBookValid=false;uint32_t id=root["chanId"].as<uint32_t>();bound=id!=book.channel&&id!=usdtBook.channel&&fxBook.bind(root,"tUSTUSD");}
           if(!bound){failed=true;record(live::Reason::SubscriptionError,now);}
+          publishBookValidity();
           return;
         }
         if(btc::equals(root["event"],"info")&&(root["code"]==20051||root["code"]==20060||root["code"]==20061)){
-          bookValid=false;failed=true;record(live::Reason::ServerReconnect,now);return;
+          bookValid=convertedBookValid=false;failed=true;record(live::Reason::ServerReconnect,now);return;
         }
         if(btc::equals(root["event"],"unsubscribed")){
-          bookValid=false;failed=true;record(live::Reason::SubscriptionError,now);return;
+          bookValid=convertedBookValid=false;failed=true;record(live::Reason::SubscriptionError,now);return;
         }
-        if(book.apply(root,epoch,tick.quote))enqueue(tick,now);
-        if(book.corrupted){++rejected;failed=true;record(live::Reason::Protocol,now);}
+        if(!root.is<JsonArrayConst>()||!root[0].is<uint32_t>())return;
+        uint32_t id=root[0].as<uint32_t>();btc::BitfinexBook* selected=nullptr;unsigned position=0;
+        if(book.channel&&id==book.channel)selected=&book;
+        else if(usdtBook.channel&&id==usdtBook.channel){selected=&usdtBook;position=1;}
+        else if(fxBook.channel&&id==fxBook.channel){selected=&fxBook;position=2;}
+        if(!selected)return;
+        bookMessageAt[position]=now;
+        bool updated=selected->apply(root,epoch,tick.quote);
+        if(selected->corrupted){++rejected;failed=true;record(live::Reason::Protocol,now);}
         publishBookValidity();
+        if(updated){if(position==0)enqueue(tick,now);else enqueueConverted(now);}
         return; // Trade/ticker payloads cannot masquerade as a current BBO.
       }
       if(source==1 && btc::parseKrakenFx(root,epoch,tick.fx)) {
@@ -203,7 +231,9 @@ struct Slot {
       }
       if (eligible<0){phase=live::Phase::Backoff;return;}
       nextProvider=unsigned(eligible);source=providers[nextProvider];
-      failed=false;failureStatus=0;channel=0;lastTrade=0;book.reset();openedAt=lastMessageAt=lastValidQuoteAt=now;
+      failed=false;failureStatus=0;channel=0;lastTrade=0;book.reset();usdtBook.reset();fxBook.reset();
+      for(auto& messageAt:bookMessageAt)messageAt=now;
+      openedAt=lastMessageAt=lastValidQuoteAt=now;
       Serial.printf("Stream %u starting: %s, dataHeap=%lu dataBlock=%lu\n",index,btc::kSources[source].name,(unsigned long)network_memory::freeBytes(),(unsigned long)network_memory::largestBlock());
       socket.reset(new StreamSocket());socket->onEvent([this](WStype_t type,uint8_t* data,size_t size){event(type,data,size);});
       const char* host=source==1?"ws.kraken.com":source==0?"ws-feed.exchange.coinbase.com":source==2?"ws.bitstamp.net":source==4?"api-pub.bitfinex.com":source==3?"ws.gemini.com":"data-stream.binance.vision";
@@ -230,7 +260,7 @@ struct Slot {
       if(!connected&&tls<0){failed=true;record(live::Reason::Tls,millis(),socket->httpStatus(),tls);}
     } else socket->loop();
     now=millis();
-    if (failed || uint32_t(now-lastMessageAt)>35000 || (uint32_t(now-lastValidQuoteAt)>120000&&!currentBook(now)) ||
+    if (failed || uint32_t(now-lastMessageAt)>35000 || (uint32_t(now-lastValidQuoteAt)>120000&&!currentBook(now)&&!currentConvertedBook(now)) ||
         (!connected && uint32_t(now-openedAt)>25000)) {
       int code=failureStatus?failureStatus:socket->httpStatus();auto& state=cooldown[source];
       if(!failed)record(uint32_t(now-lastMessageAt)>35000?live::Reason::NoMessages:
@@ -301,6 +331,7 @@ Status status() {
     result.connections+=slot.connected?1:0;result.quotes+=slot.quotes;
     if(slot.connected)result.providers|=uint16_t(1U<<slot.source.load());
     if(slot.currentBook(millis()))result.currentBooks|=uint16_t(1U<<slot.source.load());
+    if(slot.currentConvertedBook(millis()))result.currentConvertedBooks|=uint16_t(1U<<slot.source.load());
     result.dropped+=slot.dropped;result.rejected+=slot.rejected;result.disconnects+=slot.disconnects;
     for(unsigned source=0;source<btc::kSourceCount;++source){
       result.quoteCounts[source]+=slot.sourceQuotes[source];
@@ -318,7 +349,7 @@ Status status() {
   return result;
 }
 bool fresh(uint32_t now) {
-  for (auto& slot:slots) if(slot.currentBook(now)||(slot.connected&&slot.quotes&&uint32_t(now-slot.receivedAt.load())<5000))return true;
+  for (auto& slot:slots) if(slot.currentBook(now)||slot.currentConvertedBook(now)||(slot.connected&&slot.quotes&&uint32_t(now-slot.receivedAt.load())<5000))return true;
   return false;
 }
 bool pauseAndWait(uint32_t timeoutMs) {

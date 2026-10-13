@@ -1,0 +1,158 @@
+{
+  "checked_at_utc": "2026-10-13T21:10:11.994Z",
+  "duration_ms": 90000,
+  "warmup_ms": 10000,
+  "measurement": "computer_verified_TLS_actual_compiled_firmware_headers",
+  "scope": "Two computer TLS connections with embedded roots and exact firmware upgrade headers. Actual C++ StreamParsers, PriceGuard, QuoteSequence and QuoteBook; modeled frame fallback/liveness, no ESP32/device/SPI acceptance.",
+  "target_frame_period_ms": 100,
+  "source_hashes": {
+    "include/QuoteBook.h": "d53277a71844dd508618979bc604d8e4f887b29efb2a9b7a8b45555dfb22b2dc",
+    "include/StreamParsers.h": "e6789134e3b3e45449a735c05821f1c0df43878567115541201edcb40b52a10c",
+    "include/ClockCore.h": "469e40f995e6acb3148c11fef55b271d6563b64d2b84aa95953f6de8824f046c",
+    "tools/anti_repeat_quote_probe.cpp": "827b311374a83ff16fbfa43ddfa9bab7959e9c60957e84e946abbd4ea9d684e4"
+  },
+  "results": [
+    {
+      "provider": "Coinbase",
+      "source": 0,
+      "endpoint": "wss://ws-feed.exchange.coinbase.com/",
+      "request_headers": {
+        "Host": "ws-feed.exchange.coinbase.com:443",
+        "Connection": "Upgrade",
+        "Upgrade": "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Origin": "file://",
+        "User-Agent": "arduino-WebSocket-Client"
+      },
+      "certificate_validation": "embedded Mozilla PEM with hostname validation and rejectUnauthorized=true",
+      "subscriptions": [
+        {
+          "type": "subscribe",
+          "product_ids": [
+            "BTC-USD"
+          ],
+          "channels": [
+            "ticker",
+            "heartbeat"
+          ]
+        }
+      ],
+      "upgrade_status": 101,
+      "tls_version": "TLSv1.2",
+      "tls_authorized": true,
+      "open_at_ms": 178,
+      "messages": 531,
+      "pings_sent": 4,
+      "pongs_received": 4,
+      "server_pings": 0,
+      "pong_rtt_ms": [
+        30,
+        24,
+        26,
+        31
+      ],
+      "errors": [],
+      "unexpected_disconnect": false,
+      "cipher": "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+      "finished_reason": "duration-complete",
+      "elapsed_ms": 90019,
+      "connected_at_end": true
+    },
+    {
+      "provider": "Bitfinex",
+      "source": 4,
+      "endpoint": "wss://api-pub.bitfinex.com/ws/2",
+      "request_headers": {
+        "Host": "api-pub.bitfinex.com:443",
+        "Connection": "Upgrade",
+        "Upgrade": "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Origin": "file://",
+        "User-Agent": "arduino-WebSocket-Client"
+      },
+      "certificate_validation": "embedded Mozilla PEM with hostname validation and rejectUnauthorized=true",
+      "subscriptions": [
+        {
+          "event": "conf",
+          "flags": 32768
+        },
+        {
+          "event": "subscribe",
+          "channel": "book",
+          "symbol": "tBTCUSD",
+          "prec": "P0",
+          "freq": "F0",
+          "len": "1"
+        }
+      ],
+      "upgrade_status": 101,
+      "tls_version": "TLSv1.2",
+      "tls_authorized": true,
+      "open_at_ms": 473,
+      "messages": 217,
+      "pings_sent": 4,
+      "pongs_received": 4,
+      "server_pings": 0,
+      "pong_rtt_ms": [
+        129,
+        128,
+        128,
+        132
+      ],
+      "errors": [],
+      "unexpected_disconnect": false,
+      "cipher": "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+      "finished_reason": "duration-complete",
+      "elapsed_ms": 90020,
+      "connected_at_end": true
+    }
+  ],
+  "quote_counts": {
+    "Coinbase": {
+      "validated_quotes": 440,
+      "accepted_quotes": 440,
+      "distinct_rounded_values": 14
+    },
+    "Bitfinex": {
+      "validated_quotes": 161,
+      "accepted_quotes": 161,
+      "distinct_rounded_values": 14
+    }
+  },
+  "selector": {
+    "frames": 789,
+    "transitions": 788,
+    "whole_dollar_changes": 575,
+    "multi_digit_changes": 378,
+    "holds": 213,
+    "changed_fraction": 0.7296954314720813,
+    "multi_digit_fraction": 0.4796954314720812,
+    "independent_distinct_sequence_ABA": 0,
+    "firmware_policy_reversals": 0,
+    "blank_frames": 0,
+    "selected_sources": [
+      4,
+      0
+    ],
+    "distinct_displayed_values": 28,
+    "max_selected_receipt_age_ms": 4994,
+    "expired_receipt_current_book_frames": 0,
+    "frame_gap_ms": {
+      "min": 99,
+      "max": 103,
+      "mean": 101.37944162436548
+    }
+  },
+  "guard_rejected_quotes": 0,
+  "raw_artifacts": "Ignored test/.build/anti-repeat-probe retains every input event/command and every output quote/frame. Re-run this script to regenerate.",
+  "visible_output_verified": false,
+  "pass": true,
+  "validation": {
+    "all_frames": 887,
+    "all_nonblank_frames": 885,
+    "frames_not_traceable_to_real_accepted_quote": 0,
+    "incorrect_rounding_frames": 0,
+    "all_observed_distinct_sequence_ABA": 0,
+    "startup_blank_frames": 2
+  }
+}

@@ -187,7 +187,7 @@ void currentBookCoreTests(){
   book.put(80017.2,4,300,published+2,btc::QuoteKind::BboMidpoint); // Same rounded price replaces the head.
   assert(book.choose(30100,80017,4,80010,false,selected,current)&&selected.price==80017.2&&selected.receivedAt==300&&selected.timestamp==published+2);
   book.put(80030,4,400,published+3,btc::QuoteKind::LastTrade);
-  assert(!book.choose(30100,80010,0,80010,false,selected,current)); // LastTrade head cannot grant older BBO slots an exception.
+  assert(book.choose(30100,80010,0,80010,false,selected,current)&&selected.price==80017.2&&selected.kind==btc::QuoteKind::BboMidpoint); // A trade event cannot erase the independent, still-valid native book ledger.
   book.clear();book.put(80017,0,100,published,btc::QuoteKind::LastTrade);
   assert(!book.choose(30100,80010,0,80010,false,selected,1U<<0));
   book.clear();book.put(80017,5,100,published,btc::QuoteKind::BboMidpoint);
@@ -207,6 +207,85 @@ void currentBookCoreTests(){
   book.clear();book.put(80015,0,100,published,btc::QuoteKind::LastTrade);book.invalidateCurrentBook(0);
   assert(book.choose(101,80010,4,80010,false,selected)&&selected.price==80015); // Invalidating book state cannot remove a genuine trade head.
   std::cout<<"PASS: only a validated current latest BBO head outlives its original 5 s cache TTL; historical BBO/trades, original timestamps, FX, spread bounds and rollover remain enforced\n";
+}
+void quoteSequenceCoreTests(){
+  const double real[4]={83111.25,83222.25,83333.25,83444.25};const uint32_t published=1800000000;
+  btc::QuoteBook book;btc::DisplayQuote selected;btc::QuoteSequence sequence;
+  for(unsigned i=0;i<4;++i)book.put(real[i],i,100,published,btc::QuoteKind::LastTrade);
+  auto frozen=book;sequence.record(83111);std::set<uint32_t> tieWinners;
+  for(uint32_t entropy=0;entropy<256;++entropy){
+    assert(book.choose(200,83111,0,83333,false,selected,0,&sequence,entropy));
+    uint32_t digits=uint32_t(std::floor(selected.price+.5));assert(digits!=83111);tieWinners.insert(digits);
+    assert(selected.source<4&&selected.price==real[selected.source]&&selected.receivedAt==100&&selected.timestamp==published);
+  }
+  assert(tieWinners.size()==3&&!memcmp(&frozen,&book,sizeof(book))); // Entropy resolves genuine equal-recency ties without mutating market data.
+  sequence.clear();uint32_t last=0,previous=0;uint8_t source=0;std::set<uint32_t> visited;
+  for(uint32_t frame=0;frame<64;++frame){
+    assert(book.choose(200,last,source,83333,false,selected,0,&sequence,frame*2654435761U));
+    uint32_t digits=uint32_t(std::floor(selected.price+.5));assert(digits!=last&&digits!=previous);
+    if(last)previous=last;last=digits;source=selected.source;sequence.record(digits);visited.insert(digits);
+    if(frame==3)assert(visited.size()==4);
+    assert(selected.price==real[selected.source]&&selected.receivedAt==100&&selected.timestamp==published);
+  }
+  assert(!memcmp(&frozen,&book,sizeof(book)));
+  // Previous DISTINCT remains forbidden through repeated holds; with only two
+  // eligible values the actual current quote is held until a third arrives.
+  book.clear();sequence.clear();book.put(83111.25,0,100,published);book.put(83222.25,1,100,published);
+  sequence.record(83111);assert(book.choose(200,83111,0,83333,false,selected,0,&sequence,1)&&selected.price==83222.25);sequence.record(83222);
+  for(unsigned frame=0;frame<20;++frame){
+    assert(book.choose(200,83222,1,83333,false,selected,0,&sequence,frame)&&selected.price==83222.25);
+    sequence.record(83222);assert(sequence.reverses(83111)&&sequence.latest()==83222&&selected.receivedAt==100);
+  }
+  assert(!book.choose(5201,83222,1,83333,false,selected,0,&sequence,1)); // Sequence policy never resurrects expired trades.
+  book.put(83333.25,2,5200,published+5);assert(book.choose(5201,83222,1,83333,false,selected,0,&sequence,1)&&selected.price==83333.25);
+  // Unseen real values outrank a larger-digit move to a recently used price.
+  book.clear();sequence.clear();sequence.record(84191);sequence.record(84176);sequence.record(84299);
+  book.put(84191,0,100,published);book.put(84176,1,100,published);book.put(84299,2,100,published);book.put(84298,3,100,published);
+  assert(book.choose(200,84299,2,84299,false,selected,0,&sequence,1)&&selected.price==84298);
+  book.clear();sequence.clear();sequence.record(83111);book.put(83333.25,4,100,published,btc::QuoteKind::BboMidpoint);
+  assert(book.choose(30100,83111,0,83333,false,selected,1U<<4,&sequence,1)&&selected.source==4&&selected.receivedAt==100&&selected.timestamp==published);
+  assert(!book.choose(30100,83111,0,83333,false,selected,0,&sequence,1));
+  book.invalidateCurrentBook(4);assert(!book.choose(30100,83111,0,83333,false,selected,1U<<4,&sequence,1));
+  book.put(83333.25,5,100,published,btc::QuoteKind::BboMidpoint);
+  assert(!book.choose(30100,83111,0,83333,false,selected,1U<<5,&sequence,1));
+  assert(book.choose(30100,83111,0,83333,true,selected,1U<<5,&sequence,1));
+  assert(!book.choose(30100,83111,0,160000,true,selected,1U<<5,&sequence,1));
+  book.clear();book.put(83333.25,4,UINT32_MAX-100,published,btc::QuoteKind::BboMidpoint);
+  assert(book.choose(6000,83111,0,83333,false,selected,1U<<4,&sequence,1)&&selected.receivedAt==UINT32_MAX-100&&selected.timestamp==published);
+  std::cout<<"PASS: nonreversing real-price sequences, distinct-history holds, randomized genuine ties, unused-price preference, immutable timestamps and unchanged TTL/current-book/FX/spread/rollover checks\n";
+}
+void convertedBookCoreTests(){
+  const uint16_t source4=1U<<4;const uint32_t epoch=1800000000;btc::QuoteBook book;btc::DisplayQuote selected;
+  book.put(80017.2,4,100,epoch,btc::QuoteKind::BboMidpoint);
+  book.put(80017.4,4,200,epoch+1,btc::QuoteKind::ConvertedBboMidpoint); // Same rounded value, different genuine provenance.
+  assert(book.choose(30100,80000,0,80000,false,selected,source4,nullptr,0,0)&&selected.kind==btc::QuoteKind::BboMidpoint&&selected.price==80017.2&&selected.receivedAt==100&&selected.timestamp==epoch);
+  assert(book.choose(30100,80000,0,80000,false,selected,0,nullptr,0,source4)&&selected.kind==btc::QuoteKind::ConvertedBboMidpoint&&selected.price==80017.4&&selected.receivedAt==200&&selected.timestamp==epoch+1);
+  assert(!book.choose(30100,80000,0,80000,false,selected,0,nullptr,0,1U<<0)); // Exact provider/type mask, not any connected-book bit.
+  assert(!book.choose(30100,80000,0,80000,false,selected));
+  book.invalidateCurrentBook(4,btc::QuoteKind::ConvertedBboMidpoint);
+  assert(!book.choose(30100,80000,0,80000,false,selected,0,nullptr,0,source4));
+  assert(book.choose(30100,80000,0,80000,false,selected,source4,nullptr,0,source4)&&selected.kind==btc::QuoteKind::BboMidpoint&&selected.receivedAt==100);
+  book.put(80018.4,4,300,epoch+2,btc::QuoteKind::ConvertedBboMidpoint);book.invalidateCurrentBook(4);
+  assert(book.choose(30100,80000,0,80000,false,selected,source4,nullptr,0,source4)&&selected.kind==btc::QuoteKind::ConvertedBboMidpoint&&selected.receivedAt==300);
+  // More than a full historical ring of events on one product must not evict
+  // the other quiet product's actual current publication or alter its date.
+  for(unsigned active=0;active<2;++active){
+    book.clear();book.put(80017.2,4,100,epoch,btc::QuoteKind::BboMidpoint);book.put(80027.4,4,200,epoch+1,btc::QuoteKind::ConvertedBboMidpoint);
+    auto kind=active?btc::QuoteKind::BboMidpoint:btc::QuoteKind::ConvertedBboMidpoint;
+    for(unsigned i=0;i<btc::QuoteBook::kDepth*3;++i)book.put(80040.25+i,4,300+i,epoch+2+i,kind);
+    auto frozen=book;uint16_t nativeMask=active?0:source4,convertedMask=active?source4:0;
+    assert(book.choose(30100,80000,0,80000,false,selected,nativeMask,nullptr,0,convertedMask));
+    assert(selected.kind==(active?btc::QuoteKind::ConvertedBboMidpoint:btc::QuoteKind::BboMidpoint));
+    assert(selected.price==(active?80027.4:80017.2)&&selected.receivedAt==(active?200U:100U)&&selected.timestamp==epoch+active);
+    btc::QuoteSequence sequence;sequence.record(80000);
+    assert(book.choose(30100,80000,0,80000,false,selected,nativeMask,&sequence,42,convertedMask));
+    assert(selected.receivedAt==(active?200U:100U)&&selected.timestamp==epoch+active&&!memcmp(&frozen,&book,sizeof(book)));
+  }
+  book.clear();book.put(80027.4,4,UINT32_MAX-100,epoch,btc::QuoteKind::ConvertedBboMidpoint);
+  assert(book.choose(6000,80000,0,80000,false,selected,0,nullptr,0,source4)&&selected.receivedAt==UINT32_MAX-100&&selected.timestamp==epoch);
+  assert(!book.choose(6000,80000,0,160000,false,selected,0,nullptr,0,source4));
+  book.clear();assert(!book.choose(6000,80000,0,80000,false,selected,source4,nullptr,0,source4));
+  std::cout<<"PASS: native/converted current-book ledgers preserve exact provenance independently through same-dollar quotes, per-kind invalidation, 36-event history eviction, mask separation, original timestamps, spread checks and rollover\n";
 }
 void fixtures(const std::string& directory,uint32_t now,uint32_t historyEpoch) {
   const char* names[]={"coinbase","kraken","bitstamp","gemini","bitfinex","binance","okx","kucoin","gate","bitget","mexc"};
@@ -244,4 +323,4 @@ void otaTests(){
   ota::Manifest manifest;assert(ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));assert(ota::canonical(manifest).find("1.0.1\n")==0);
   doc["size"]=0;assert(!ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));doc["size"]=2048;doc["board"]="esp32s3";assert(!ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));doc["board"]=ota_config::kBoard;doc["url"]="https://github.com/attacker/clock/releases/download/v1.0.1/firmware.bin";assert(!ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));
 }
-int main(int argc,char**argv){assert(argc==4);coreTests();currentBookCoreTests();fixtures(argv[1],uint32_t(strtoul(argv[2],nullptr,10)),uint32_t(strtoul(argv[3],nullptr,10)));otaTests();std::cout<<"PASS: core, all live quote/history fixtures, malformed input, OTA manifest rules\n";}
+int main(int argc,char**argv){assert(argc==4);coreTests();currentBookCoreTests();quoteSequenceCoreTests();convertedBookCoreTests();fixtures(argv[1],uint32_t(strtoul(argv[2],nullptr,10)),uint32_t(strtoul(argv[3],nullptr,10)));otaTests();std::cout<<"PASS: core, all live quote/history fixtures, malformed input, OTA manifest rules\n";}

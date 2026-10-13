@@ -33,6 +33,8 @@ int main(){
   snapshot.sourceFailures[0]=2;snapshot.streamSlots[0].source=1;snapshot.streamSlots[0].phase=live::Phase::Online;
   snapshot.quoteKind=btc::QuoteKind::BboMidpoint;snapshot.chartSource=0;snapshot.chartQuoteAge=250;
   snapshot.currentBooks=16;snapshot.displayQuoteAge=12345;
+  snapshot.priceReversals=0;snapshot.selectionHolds=7;
+  snapshot.currentConvertedBooks=16;
   snapshot.streamSlots[0].reasonSource=0;snapshot.streamSlots[0].reason=live::Reason::Tls;
   snapshot.streamSlots[0].tlsError=-0x2700;snapshot.streamSlots[0].reasonAgeMs=7000;
   snapshot.chartColumns=0x1FFFFF;snapshot.chartPixels=42;snapshot.historyCandles=6;snapshot.historySavedAt=1800000000;
@@ -66,6 +68,8 @@ int main(){
   assert(response["history_candles"]==6&&response["history_saved_epoch"]==1800000000);
   assert(response["display_quote_kind"]=="bbo-midpoint"&&response["chart_source"]=="Coinbase"&&response["chart_quote_age_ms"]==250);
   assert(response["current_books_mask"]==16&&response["display_quote_age_ms"]==12345);
+  assert(response["price_reversals"]==0&&response["selection_holds"]==7);
+  assert(response["current_converted_books_mask"]==16);
   assert(telemetryWeb.body.value.find("token")==std::string::npos&&telemetryWeb.body.value.find("password")==std::string::npos&&telemetryWeb.body.value.find("ssid")==std::string::npos);
   telemetryWeb.request("/",HTTP_GET);assert(telemetryWeb.statusCode==200&&telemetryWeb.body.value.find("Check for update now")!=std::string::npos);
   telemetryWeb.request("/control-token",HTTP_GET);assert(!deserializeJson(response,telemetryWeb.body.c_str()));std::string token=response["token"].as<const char*>();assert(token.size()==32);
