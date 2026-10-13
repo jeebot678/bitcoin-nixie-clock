@@ -95,7 +95,8 @@ void settingsTests(){
   refreshDial.stable=4;testMillis+=61000;nextQuoteAt=testMillis+200000;fx.receivedAt=testMillis-61000;
   schedule(testMillis);assert(market::outstanding.kind==market::Kind::Fx);double oldPrice=guard.price;uint32_t oldReceived=lastQuoteReceived;
   market::complete();market::queued.quote.price=90000;processResult(testMillis);assert(guard.price==oldPrice&&lastQuoteReceived==oldReceived);
-  display::price(guard.price);packets.clear();lastQuoteReceived=testMillis-btc::staleAfterMs(config::kRefreshMs[4])-1;draw(testMillis);assert(!packets.empty());
+  display::price(guard.price);packets.clear();lastQuoteReceived=testMillis-btc::staleAfterMs(config::kRefreshMs[4])-1;nextDrawAt=testMillis;draw(testMillis);
+  for(const auto& packet:packets)assert(packet.bus==HSPI); // Stale chart drawing cannot blank or replace a known price.
   // A large quote waits for another provider rather than lighting an outlier.
   market::outstanding={market::Kind::Quote,3,1,uint32_t(testEpoch)};market::sent=true;inflight=true;market::complete();market::queued.quote.price=150000;processResult(testMillis);assert(guard.price==oldPrice);
 }
@@ -287,6 +288,65 @@ void assertPriceFrame(double value){
       if(p.bytes[digit]!=expected)std::cerr<<"SPI price mismatch: expected="<<value<<" shown="<<shownPrice<<" digits="<<shownDigits<<" at="<<testMillis<<" sequence="<<priceSequence.latest()<<" module="<<module<<" field="<<digit<<"\n";
       assert(p.bytes[digit]==expected);}}
 }
+void assertBoundedPriceFrame(double reference,uint32_t previous,uint32_t prior){
+  const uint32_t center=uint32_t(std::floor(reference+.5));
+  const uint32_t radius=std::max<uint32_t>(2,std::min<uint32_t>(10,uint32_t(std::floor(reference*.0001+.5))));
+  assertPriceFrame(shownDigits);
+  assert(shownDigits>=std::max<uint32_t>(1,center-radius)&&shownDigits<=std::min<uint32_t>(999999,center+radius));
+  assert(std::abs(double(shownDigits)-reference)<=radius);
+  assert(shownDigits!=previous&&(!prior||shownDigits!=prior));
+}
+void boundedDisplayMotionRuntimeTests(){
+  // An unchanged or expired real quote still anchors every selected display
+  // deadline. Rendering must neither walk away from that anchor nor fabricate
+  // accepted market quotes, timestamps, chart observations or cache writes.
+  for(unsigned frequency=0;frequency<5;++frequency){
+    resetCandleRuntime();refreshDial.stable=frequency;
+    for(unsigned w=0;w<5;++w)seedRuntimeBars(w);
+    const double reference=83310.4;const uint32_t start=testMillis,period=config::kRefreshMs[frequency];
+    guard=btc::PriceGuard{};assert(guard.accept(reference,0,start)&&guard.accept(reference,1,start));
+    quotes.clear();quotes.put(reference,0,start,uint32_t(testEpoch));
+    lastAcceptedSource=0;lastAcceptedKind=btc::QuoteKind::LastTrade;lastQuoteReceived=start;lastPriceEpoch=uint32_t(testEpoch);
+    shownPrice=0;priceSequence.clear();nextNixieAt=start;
+    auto beforeBook=quotes;auto beforeGuard=guard;
+    btc::CandleSeries bars[5];std::copy(candleSeries,candleSeries+5,bars);
+    btc::CandleScale axes[5];std::copy(candleScales,candleScales+5,axes);
+    uint32_t accepted=acceptedQuotes,writes=fsMock().writes,frames=nixieFrames,estimated=estimatedFrames;
+    packets.clear();refreshNixies(start);assertPriceFrame(83310);assert(!displayEstimated);
+    uint32_t previous=shownDigits,prior=0;
+    const unsigned frameCount=frequency==0?400:120;
+    for(unsigned frame=1;frame<=frameCount;++frame){
+      if(frame==60){quotes.clear();beforeBook=quotes;} // No retained quote is necessary after a genuine first price.
+      if(frame==80){WiFi.connection=0;live::healthy=false;}
+      if(frame==100){WiFi.connection=WL_CONNECTED;live::healthy=true;}
+      testMillis=start+frame*period-1;packets.clear();refreshNixies(testMillis);assert(packets.empty()&&nixieFrames==frames+frame);
+      ++testMillis;refreshNixies(testMillis);assertBoundedPriceFrame(reference,previous,prior);
+      prior=previous;previous=shownDigits;
+      assert(nixieFrames==frames+frame+1&&nextNixieAt==testMillis+period);
+      assert(shownPrice==reference&&shownQuoteReceived==start&&shownQuoteTimestamp==lastPriceEpoch);
+      if(uint32_t(testMillis-start)>btc::staleAfterMs(period)||!wifi.online())assert(displayEstimated);
+      if(displayEstimated)++estimated;
+      assert(estimatedFrames==estimated);
+      assert(lastQuoteReceived==start&&guard.price==reference&&acceptedQuotes==accepted&&fsMock().writes==writes);
+      assert(!memcmp(&beforeBook,&quotes,sizeof(quotes))&&!memcmp(&beforeGuard,&guard,sizeof(guard)));
+      assert(!memcmp(bars,candleSeries,sizeof(bars)));assertSameScales(axes,candleScales);
+      if((frame>=80&&frame<100)||(uint32_t(testMillis-start)>btc::staleAfterMs(period)&&frame%20==0)){
+        packets.clear();nextDrawAt=testMillis;draw(testMillis);
+        for(const auto& packet:packets)assert(packet.bus==HSPI); // Offline/stale drawing cannot overwrite the known-price frame.
+      }
+    }
+    assert(priceTransitions==frameCount&&priceChanges==frameCount&&!priceReversals&&!selectionHolds);
+    assert(minimumFrameGap==period&&maximumFrameGap==period);
+    // A new genuine price wins on the next deadline and becomes the new fixed
+    // center; cosmetic rendering from the old reference never enters OHLC.
+    testMillis+=period;btc::Quote fresh;fresh.price=83342.25;fresh.timestamp=uint32_t(testEpoch);
+    acceptQuote(fresh,0,testMillis,uint32_t(testEpoch),testMillis);
+    if(guard.price!=fresh.price)acceptQuote(fresh,1,testMillis,uint32_t(testEpoch),testMillis); // A >10-minute outage needs independent guard confirmation.
+    packets.clear();refreshNixies(testMillis);assertPriceFrame(83342);assert(!displayEstimated);
+    assert(shownPrice==fresh.price&&shownQuoteReceived==testMillis&&shownQuoteTimestamp==fresh.timestamp&&acceptedQuotes==accepted+1);
+  }
+  std::cout<<"PASS: bounded display-only motion at all five cadences with unchanged, expired, absent and offline quotes, no random walk/reversals or fake market/cache updates, and exact genuine-price recovery\n";
+}
 void nixieCadenceTests(){
   assert(wifi.online()&&!wifi.portalActive());
   uint32_t initial=testMillis;
@@ -304,32 +364,31 @@ void nixieCadenceTests(){
     packets.clear();refreshNixies(testMillis);assert(packets.empty()&&nixieFrames==frames);
     testMillis=start+period-1;refreshNixies(testMillis);assert(packets.empty());
     testMillis=start+period;refreshNixies(testMillis);assertPriceFrame(83342);assert(nixieFrames==frames+1);
-    packets.clear();testMillis=start+2*period;refreshNixies(testMillis);assertPriceFrame(83342);assert(nixieFrames==frames+2); // Every cadence writes the real rounded value, even unchanged.
+    packets.clear();testMillis=start+2*period;refreshNixies(testMillis);assertBoundedPriceFrame(83342,83342,83300);assert(nixieFrames==frames+2); // Repeated real quotes receive bounded display-only motion at this deadline.
     inflight=false;market::sent=false;needDifferentQuote=false;
   }
   // A dial change takes effect immediately even with a network request active.
   testMillis+=100;refreshDial.stable=4;refreshDial.candidate=-1;nextDialsAt=testMillis;
   inflight=true;adc[35]=1774;readDials(testMillis);testMillis+=151;readDials(testMillis);assert(refreshDial.stable==0&&nextNixieAt==testMillis);
-  lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(83342);assert(nextNixieAt==testMillis+100);inflight=false;refreshDial.stable=1;
+  lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(shownDigits);assert(nextNixieAt==testMillis+100);inflight=false;refreshDial.stable=1;
   // Once a stream is fresh, REST traffic is only needed for confirmation or fallback.
   needConfirmation=false;needDifferentQuote=false;live::healthy=true;fx.usd=1;fx.receivedAt=testMillis;nextQuoteAt=testMillis;for(auto&deadline:nextHistoryAt)deadline=testMillis+100000;
   unsigned calls=market::calls;schedule(testMillis);assert(market::calls==calls);
   live::healthy=false;for(auto&state:rotation.states)state.availableAt=testMillis;schedule(testMillis);assert(market::calls==calls+1&&live::busy);
   market::complete();processResult(testMillis);assert(!live::busy);
-  // Cadence and stale blanking remain correct across millis rollover.
+  // Cadence and bounded motion from a stale actual reference survive rollover.
   testMillis=UINT32_MAX-249;lastQuoteReceived=fx.receivedAt=testMillis;shownPrice=0;priceSequence.clear();packets.clear();refreshNixies(testMillis);assertPriceFrame(guard.price);
   packets.clear();testMillis=249;refreshNixies(testMillis);assert(packets.empty());
-  testMillis=250;refreshNixies(testMillis);assertPriceFrame(guard.price);
-  packets.clear();testMillis+=btc::staleAfterMs(500)+1;refreshNixies(testMillis);assert(shownPrice==0&&packets.size()==6);
-  for(auto&p:packets)for(unsigned digit=1;digit<16;++digit)assert(p.bytes[digit]==0x80);
-  lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(guard.price);
+  testMillis=250;refreshNixies(testMillis);assertBoundedPriceFrame(guard.price,uint32_t(std::floor(guard.price+.5)),0);
+  uint32_t previous=shownDigits;packets.clear();testMillis+=btc::staleAfterMs(500)+1;refreshNixies(testMillis);assertBoundedPriceFrame(guard.price,previous,0);assert(displayEstimated&&shownPrice==guard.price);
+  lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assert(packets.empty()); // Same deadline cannot produce a second frame.
   // A late loop emits one current frame, without fake catch-up frames or timer drift.
-  uint32_t deadline=nextNixieAt;testMillis=deadline+1005;lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(guard.price);assert(nextNixieAt==deadline+1500);
+  uint32_t deadline=nextNixieAt;testMillis=deadline+1005;lastQuoteReceived=testMillis;packets.clear();refreshNixies(testMillis);assertPriceFrame(shownDigits);assert(nextNixieAt==deadline+1500);
   // Confirming the default detent must not emit an early same-frequency frame.
   deadline=nextNixieAt;refreshDial.initialized=false;refreshDial.candidate=-1;
   nextDialsAt=testMillis;adc[35]=1328;readDials(testMillis);testMillis+=151;readDials(testMillis);
   assert(refreshDial.initialized&&refreshDial.stable==1&&nextNixieAt==deadline);
-  std::cout<<"PASS: actual Nixie SPI frames at all five selected intervals, unchanged digits, newest stream values, blocked history/TLS, immediate dial changes, REST fallback, outage blanking and millis rollover\n";
+  std::cout<<"PASS: actual Nixie SPI frames at all five selected intervals, bounded repeated/stale rendering, newest stream values, blocked history/TLS, immediate dial changes, REST fallback and millis rollover\n";
 }
 void quoteSelectionRuntimeTests(){
   testMillis+=6000;refreshDial.stable=1;guard=btc::PriceGuard{};quotes.clear();priceSequence.clear();shownPrice=0;
@@ -339,14 +398,14 @@ void quoteSelectionRuntimeTests(){
   packets.clear();refreshNixies(testMillis);assertPriceFrame(80018);
   testMillis+=500;tick(1,80017.6);packets.clear();refreshNixies(testMillis);assertPriceFrame(80010);
   assert(shownSource==0&&shownPrice==80010.25&&guard.price==80017.6&&lastPriceEpoch==uint32_t(testEpoch));
-  testMillis+=500;tick(1,80017.6);packets.clear();refreshNixies(testMillis);assertPriceFrame(80010); // Hold instead of returning to the prior distinct number.
-  assert(priceReversals==0&&selectionHolds==1);
-  testMillis+=500;tick(2,80024.2);packets.clear();refreshNixies(testMillis);assertPriceFrame(80024); // A third genuine number breaks the two-value hold.
+  testMillis+=500;tick(1,80017.6);packets.clear();refreshNixies(testMillis);assertBoundedPriceFrame(shownPrice,80010,80018);
+  assert(priceReversals==0&&selectionHolds==0&&displayEstimated);
+  testMillis+=500;tick(2,80024.2);packets.clear();refreshNixies(testMillis);assertPriceFrame(80024); // A new genuine number replaces the estimate.
   // Expired alternative quotes cannot be used to create apparent movement.
   testMillis+=5000;tick(1,80017.6);packets.clear();refreshNixies(testMillis);assertPriceFrame(80018);
   assert(guard.price==80017.6&&shownPrice==80017.6&&lastPriceEpoch==uint32_t(testEpoch));
   quotes.clear();
-  std::cout<<"PASS: actual runtime/SPI source rotation survives burst overwrite, holds through two-number scarcity without reversing, resumes on a third real number, and never invents prices or renews expired timestamps\n";
+  std::cout<<"PASS: actual runtime/SPI source rotation survives burst overwrite, estimates through two-number scarcity without reversing, resumes exact genuine prices, and preserves market prices/publication timestamps\n";
 }
 void sequencedPriceRuntimeTests(){
   const double realQuotes[4]={83111.25,83222.25,83333.25,83444.25};
@@ -494,36 +553,39 @@ void quietCurrentBookRuntimeTests(){
   testMillis=start+100;incoming(4,84567,btc::QuoteKind::BboMidpoint);
   uint32_t publishedAt=testMillis,publishedEpoch=uint32_t(testEpoch),acceptedAtPublication=acceptedQuotes,calls=market::calls;
   packets.clear();refreshNixies(testMillis);assertPriceFrame(84567);
+  uint32_t previous=84567,prior=83310;
   for(unsigned frame=2;frame<=300;++frame){
     testMillis=start+frame*100;testEpoch=startEpoch+frame/10;incoming(0,83310.4,btc::QuoteKind::LastTrade);
     uint32_t actualAccepted=acceptedQuotes;btc::CandleSeries beforeRender[5];std::copy(candleSeries,candleSeries+5,beforeRender);
-    packets.clear();refreshNixies(testMillis);assertPriceFrame(84567);
+    packets.clear();refreshNixies(testMillis);assertBoundedPriceFrame(shownPrice,previous,prior);
+    prior=previous;previous=shownDigits;
     assert(acceptedQuotes==actualAccepted&&!memcmp(beforeRender,candleSeries,sizeof(beforeRender)));
     assert(chartSource==0&&chartQuoteReceived==testMillis&&acceptedQuotes==acceptedAtPublication+frame-1);
     if(shownSource==4){assert(shownQuoteKind==btc::QuoteKind::BboMidpoint&&shownQuoteReceived==publishedAt);
       btc::DisplayQuote current;assert(quotes.choose(testMillis,83310,0,guard.price,true,current,live::currentBookMask));
       assert(current.source==4&&current.receivedAt==publishedAt&&current.timestamp==publishedEpoch&&current.price==84567);}
     for(unsigned w=0;w<5;++w)for(const auto& bar:candleSeries[w].bars)if(bar.bucket)assert(bar.high<=8331100);
-    schedule(testMillis);assert(market::calls<=calls+1&&needDifferentQuote&&priceReversals==0);
+    schedule(testMillis);assert(market::calls<=calls+1&&priceReversals==0);
   }
-  assert(priceTransitions==300&&priceChanges==1&&multiDigitChanges==1&&selectionHolds==299&&minimumFrameGap==100&&maximumFrameGap==100);
-  assert(market::calls==calls+1&&inflight); // One bounded variety request remains in flight while tube deadlines continue.
-  market::complete(false);market::queued.deferred=true;processResult(testMillis);calls=market::calls;
+  assert(priceTransitions==300&&priceChanges==300&&multiDigitChanges>1&&!selectionHolds&&minimumFrameGap==100&&maximumFrameGap==100);
+  if(inflight){market::complete(false);market::queued.deferred=true;processResult(testMillis);}calls=market::calls;
   // Invalidating the producer's book state immediately removes its expired
   // publication from selection; neither reconnection nor fake receipt refresh
-  // can resurrect it. The last real display may hold only until its original
-  // stale deadline; it cannot fall back to the forbidden prior distinct value.
+  // can resurrect it. Display-only estimates can continue from the actual
+  // remaining reference without putting expired publications back in the book.
   live::currentBookMask=0;testMillis+=100;incoming(0,83310.4,btc::QuoteKind::LastTrade);
   uint32_t lastAccepted=acceptedQuotes,realReceipt=lastQuoteReceived;
-  packets.clear();refreshNixies(testMillis);assertPriceFrame(84567);
-  assert(shownSource==4&&shownQuoteReceived==publishedAt&&shownQuoteTimestamp==publishedEpoch&&needDifferentQuote);
+  packets.clear();refreshNixies(testMillis);assertBoundedPriceFrame(shownPrice,previous,prior);
+  prior=previous;previous=shownDigits;
+  assert(shownSource==0&&shownQuoteReceived==realReceipt&&shownQuoteTimestamp==uint32_t(testEpoch));
   btc::DisplayQuote selected;assert(quotes.choose(testMillis,83310,0,guard.price,true,selected,0)&&selected.source==0);
-  testMillis+=100;packets.clear();refreshNixies(testMillis);assert(!shownPrice&&packets.size()==6); // The held receipt is now older than 30 s, despite fresh forbidden A.
-  for(const auto& packet:packets)for(unsigned digit=1;digit<16;++digit)assert(packet.bytes[digit]==0x80);
-  // Existing stale blanking and provider cooldowns continue to apply when
-  // neither the canonical feed nor a valid current book remains available.
+  testMillis+=100;packets.clear();refreshNixies(testMillis);assertBoundedPriceFrame(shownPrice,previous,prior);
+  prior=previous;previous=shownDigits;
+  // A stale reference still drives rendering, while provider cooldowns and
+  // publication age retain their original meaning for network recovery.
   live::healthy=false;testMillis=realReceipt+btc::staleAfterMs(100)+1;packets.clear();refreshNixies(testMillis);
-  assert(!shownPrice&&packets.empty()&&acceptedQuotes==lastAccepted); // Already-blank tubes do not need duplicate SPI writes.
+  assertBoundedPriceFrame(guard.price,previous,prior);
+  assert(displayEstimated&&shownQuoteReceived==realReceipt&&acceptedQuotes==lastAccepted);
   fx.receivedAt=testMillis;streamWarmupUntil=testMillis;nextQuoteAt=testMillis;
   for(auto& deadline:nextHistoryAt)deadline=testMillis+100000;
   for(auto& state:rotation.states)state.availableAt=testMillis+10000;
@@ -532,7 +594,7 @@ void quietCurrentBookRuntimeTests(){
   assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Quote&&market::outstanding.source==0);
   market::complete();processResult(testMillis);assert(acceptedQuotes==lastAccepted+1&&!live::busy);
   live::healthy=true;live::currentBookMask=0;live::providerMask=3;live::pending={};
-  std::cout<<"PASS: two real values hold the current live book at every 100 ms deadline without A-B-A reversal, timestamp renewal, fake counters or chart observations; one bounded variety request, book invalidation, truthful stale blanking and provider backoff remain enforced\n";
+  std::cout<<"PASS: two real values plus bounded display estimates change every 100 ms without A-B-A reversal, timestamp renewal, fake counters or chart observations; current-book invalidation, stale provenance and provider backoff remain enforced\n";
 }
 void rejectedBookRuntimeTests(){
   resetCandleRuntime();refreshDial.stable=0;live::providerMask=(1U<<0)|(1U<<4);live::currentBookMask=1U<<4;
@@ -550,7 +612,7 @@ void rejectedBookRuntimeTests(){
   incoming(4,150000,btc::QuoteKind::BboMidpoint); // Valid transport data, rejected market outlier.
   assert(acceptedQuotes==accepted&&guard.price==83310.4&&needConfirmation&&!memcmp(canonical,candleSeries,sizeof(canonical)));
   assert(quotes.choose(testMillis,83310,0,guard.price,true,selected,live::currentBookMask)&&selected.source==0);
-  packets.clear();refreshNixies(testMillis);assertPriceFrame(84567);assert(shownSource==4&&shownQuoteReceived==start+100&&selectionHolds==1); // Truthful last-known hold; the old head is no longer eligible.
+  packets.clear();refreshNixies(testMillis);assertBoundedPriceFrame(83310.4,84567,83310);assert(shownSource==0&&shownQuoteReceived==testMillis&&displayEstimated&&!selectionHolds); // Rejected books cannot anchor a synthetic display.
   testMillis=start+6200;incoming(4,84572,btc::QuoteKind::BboMidpoint);
   assert(acceptedQuotes==accepted+1&&!needConfirmation&&!memcmp(canonical,candleSeries,sizeof(canonical)));
   packets.clear();refreshNixies(testMillis);assertPriceFrame(84572);assert(shownSource==4&&shownQuoteReceived==testMillis);
@@ -569,7 +631,8 @@ void varietyHoldoffRuntimeTests(){
     testMillis=at;btc::Quote tick;tick.price=price;tick.timestamp=uint32_t(testEpoch);
     acceptQuote(tick,0,at,uint32_t(testEpoch),at);
     quotes.clear();quotes.put(price,0,at,uint32_t(testEpoch));
-    packets.clear();refreshNixies(at);assertPriceFrame(price);
+    packets.clear();refreshNixies(at);assertPriceFrame(shownDigits);
+    assert(shownPrice==price&&std::abs(double(shownDigits)-price)<=btc::DisplayMotion::radius(price));
   };
   auto prepare=[&](unsigned frequency,uint32_t start){
     resetCandleRuntime();testMillis=start;refreshDial.stable=frequency;cadenceTestActive=false;
@@ -639,13 +702,13 @@ void startupAndDialRegressionTests(){
   auto tick=[&](double price){live::pending.quote.price=price;live::pending.quote.timestamp=uint32_t(testEpoch);live::pending.receivedAt=testMillis;live::pending.source=0;live::queued=true;processLive(testMillis);};
   tick(80000.25);assert(guard.price==80000.25&&!guard.confirmed()&&needConfirmation);
   packets.clear();refreshNixies(testMillis);assertPriceFrame(80000);assert(nextNixieAt==testMillis+100);
-  testMillis+=500;tick(80000.25);packets.clear();refreshNixies(testMillis);assertPriceFrame(80000);
-  testMillis+=500;tick(80000.25);packets.clear();refreshNixies(testMillis);assertPriceFrame(80000);
-  uint32_t received=lastQuoteReceived;uint32_t last=shownDigits;
+  testMillis+=500;tick(80000.25);packets.clear();refreshNixies(testMillis);assertBoundedPriceFrame(80000.25,80000,0);
+  uint32_t last=shownDigits,prior=80000;
+  testMillis+=500;tick(80000.25);packets.clear();refreshNixies(testMillis);assertBoundedPriceFrame(80000.25,last,prior);prior=last;last=shownDigits;
+  uint32_t received=lastQuoteReceived;
   for(unsigned frame=0;frame<24;++frame){ // 12-second reconnect, no fabricated input ticks.
-    testMillis+=500;packets.clear();refreshNixies(testMillis);assert(shownDigits==last);
-    assertPriceFrame(shownDigits);assert(std::abs(double(shownDigits)-80000.25)<=0.5);
-    assert(lastQuoteReceived==received&&shownQuoteReceived==received&&guard.price==80000.25);last=shownDigits;
+    testMillis+=500;packets.clear();refreshNixies(testMillis);assertBoundedPriceFrame(80000.25,last,prior);
+    assert(lastQuoteReceived==received&&shownQuoteReceived==received&&guard.price==80000.25);prior=last;last=shownDigits;
   }
   // Replay the fresh lowest-detent measurements after a stable 1-hour
   // setting. The assembled frequency switch is reversed; all voltages in
@@ -655,16 +718,16 @@ void startupAndDialRegressionTests(){
     adc[35]=measured;readDials(testMillis);testMillis+=25;
   }
   assert(refreshDial.initialized&&refreshDial.stable==0&&nextNixieAt==testMillis-25);
-  tick(80000.25);packets.clear();refreshNixies(testMillis);assertPriceFrame(80000);
+  tick(80000.25);packets.clear();refreshNixies(testMillis);assertBoundedPriceFrame(80000.25,last,prior);prior=last;last=shownDigits;
   uint32_t deadline=nextNixieAt;assert(deadline==testMillis+75);
   testMillis=deadline-1;packets.clear();refreshNixies(testMillis);assert(packets.empty());
-  testMillis=deadline;tick(80000.25);refreshNixies(testMillis);assertPriceFrame(80000);
+  testMillis=deadline;tick(80000.25);refreshNixies(testMillis);assertBoundedPriceFrame(80000.25,last,prior);
   // Background confirmation must leave a previously lit value usable.
   btc::Quote independent;independent.price=80005;independent.timestamp=uint32_t(testEpoch);
   acceptQuote(independent,1,testMillis,uint32_t(testEpoch),testMillis);
   assert(guard.confirmed()&&!needConfirmation&&guard.price==80005);
   // First-price/confirmation network deadlines cannot inherit a 1-hour dial.
-  guard=btc::PriceGuard{};quotes.clear();refreshDial.stable=4;nextQuoteAt=testMillis+3600000;
+  guard=btc::PriceGuard{};quotes.clear();priceSequence.clear();refreshDial.stable=4;nextQuoteAt=testMillis+3600000;
   tick(80000.25);assert(!guard.confirmed()&&nextQuoteAt==testMillis);
   liveReady=false;streamWarmupStarted=true;streamWarmupUntil=testMillis-1;
   for(auto& state:rotation.states){state.availableAt=testMillis;state.failures=0;}
@@ -694,6 +757,19 @@ void tubeDiagnosticTests(){
   assert(packets.size()==6&&packets.back().selected==16&&packets.back().bytes[10]==0xC0); // Return to startup chase with no market.
   btc::Quote tick;tick.price=83300;tick.timestamp=uint32_t(testEpoch);acceptQuote(tick,0,testMillis,uint32_t(testEpoch),testMillis);
   packets.clear();refreshNixies(testMillis);assertPriceFrame(83300);assert(!tubeTestEndsAt);
+  // Diagnostics clear shownPrice but preserve the distinct-price sequence.
+  // Restoring a fresh guard fallback must still reject its forbidden prior
+  // number, even though the restored frame follows the first-frame path.
+  testMillis+=6000;refreshDial.stable=0;quotes.clear();guard=btc::PriceGuard{};
+  assert(guard.accept(83310.4,0,testMillis)&&guard.accept(83310.4,1,testMillis));
+  priceSequence.clear();priceSequence.record(83310);priceSequence.record(83342);
+  shownPrice=83342;shownDigits=83342;tubeTestEndsAt=testMillis+5000;
+  display::blankPrice();packets.clear();refreshNixies(testMillis);assert(!shownPrice&&priceSequence.latest()==83342&&packets.size()==6);
+  testMillis+=5000;lastQuoteReceived=guard.acceptedAt=testMillis;lastPriceEpoch=uint32_t(testEpoch);lastAcceptedSource=0;
+  auto beforeBook=quotes;auto beforeGuard=guard;uint32_t accepted=acceptedQuotes;
+  packets.clear();refreshNixies(testMillis);assertBoundedPriceFrame(83310.4,83342,83310);
+  assert(!tubeTestEndsAt&&displayEstimated&&shownPrice==83310.4&&shownQuoteReceived==testMillis);
+  assert(acceptedQuotes==accepted&&!memcmp(&beforeBook,&quotes,sizeof(quotes))&&!memcmp(&beforeGuard,&guard,sizeof(guard)));
   std::cout<<"PASS: explicit five-second tube diagnostic advances every cathode on all six CS lines at 500 ms without prices, then restores the live/startup display\n";
 }
 void temporaryCadenceTests(){
@@ -736,8 +812,8 @@ void assembledDialTests(){
     assert(refreshDial.stable==position&&timelineDial.stable==position&&nextNixieAt==testMillis);
     assert(nextDrawAt==testMillis&&nextHistoryAt[position]==testMillis);
     assert(config::kRefreshMs[refreshDial.stable]==periods[position]&&config::kWindowSeconds[timelineDial.stable]==windows[position]);
-    guard.price=83300;quotes.clear();shownPrice=83300;shownDigits=83300;lastQuoteReceived=testMillis;
-    packets.clear();refreshNixies(testMillis);assertPriceFrame(83300);
+    guard.price=83300;quotes.clear();priceSequence.clear();shownPrice=0;lastQuoteReceived=testMillis;
+    packets.clear();refreshNixies(testMillis);assertPriceFrame(83300); // A fresh isolated scenario starts with the genuine guard reference.
     assert(nextNixieAt==testMillis+periods[position]);
     for(uint16_t invalid:{uint16_t(2269),uint16_t(3300)}){
       adc[35]=adc[34]=invalid;testMillis+=25;readDials(testMillis);testMillis+=151;readDials(testMillis);
@@ -830,4 +906,4 @@ void wirelessRuntimeTests(){
   WiFi.connection=WL_CONNECTED;wifi.loop(testMillis);testMillis+=8001;wifi.loop(testMillis);assert(wifi.online()&&!wifi.portalActive());
   std::cout<<"PASS: actual dial sampling/snapshots, queued signed OTA checks bypassing schedule without interrupting in-flight HTTP, wireless matrix/tube controls and BOOT diagnostics gestures\n";
 }
-int main(){settingsTests();cacheRuntimeTests();sharedCandleRuntimeTests();liveFxRuntimeTests();secondStreamWarmupRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();sequencedPriceRuntimeTests();convertedBookRuntimeTests();canonicalChartRuntimeTests();quietCurrentBookRuntimeTests();rejectedBookRuntimeTests();varietyHoldoffRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();asyncCacheTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}
+int main(){settingsTests();cacheRuntimeTests();sharedCandleRuntimeTests();liveFxRuntimeTests();secondStreamWarmupRuntimeTests();boundedDisplayMotionRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();sequencedPriceRuntimeTests();convertedBookRuntimeTests();canonicalChartRuntimeTests();quietCurrentBookRuntimeTests();rejectedBookRuntimeTests();varietyHoldoffRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();asyncCacheTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}

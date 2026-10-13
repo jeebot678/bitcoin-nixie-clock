@@ -16,6 +16,8 @@ struct Snapshot {
   uint32_t dataHeap=0,dataBlock=0,httpStack=0;
   uint32_t transitions=0,priceChanges=0,multiChanges=0;
   uint32_t priceReversals=0,selectionHolds=0;
+  uint32_t estimatedFrames=0;
+  bool displayEstimated=false;
   uint16_t streamProviders=0,currentBooks=0,currentConvertedBooks=0;
   uint32_t streamDropped=0,streamRejected=0,streamDisconnects=0,streamStack=0;
   uint32_t sourceQuotes[btc::kSourceCount]={},sourceAges[btc::kSourceCount]={};

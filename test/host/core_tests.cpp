@@ -10,6 +10,7 @@
 #include "LedMatrixMap.h"
 #include "TlsGate.h"
 #include "QuoteBook.h"
+#include "DisplayMotion.h"
 
 std::string readFile(const std::string& path) { std::ifstream file(path); assert(file.good()); std::ostringstream out;out<<file.rdbuf();return out.str(); }
 size_t slotsIn(JsonVariantConst value) {
@@ -315,6 +316,34 @@ void fixtures(const std::string& directory,uint32_t now,uint32_t historyEpoch) {
   assert(deserializeJson(bad,"{invalid"));
   assert(!deserializeJson(bad,"{\"code\":\"50011\",\"data\":[]}"));assert(!btc::parseQuote(btc::Provider::Okx,bad.as<JsonVariantConst>(),now,quote));
 }
+void displayMotionCoreTests(){
+  assert(btc::DisplayMotion::radius(1.2)==2&&btc::DisplayMotion::radius(19999)==2);
+  assert(btc::DisplayMotion::radius(83310.4)==8&&btc::DisplayMotion::radius(500000)==10);
+  for(double reference:{1.2,10.25,19999.0,83310.4,999999.49}){
+    btc::QuoteSequence sequence;uint32_t previous=uint32_t(std::floor(reference+.5)),prior=0,entropy=0x12345678;
+    sequence.record(previous);std::set<uint32_t> observed;
+    const uint32_t radius=btc::DisplayMotion::radius(reference);
+    for(unsigned frame=0;frame<500;++frame){
+      entropy=1664525U*entropy+1013904223U;
+      const uint32_t digits=btc::DisplayMotion::choose(reference,previous,sequence,entropy);
+      assert(digits&&digits<=999999&&std::abs(double(digits)-reference)<=radius);
+      assert(digits!=previous&&(!prior||digits!=prior)&&!sequence.reverses(digits));
+      bool multiAvailable=false;
+      for(uint32_t candidate=uint32_t(std::max(1.0,std::ceil(reference-radius)));candidate<=uint32_t(std::min(999999.0,std::floor(reference+radius)));++candidate)
+        if(candidate!=previous&&!sequence.reverses(candidate)&&btc::QuoteBook::changedDigits(candidate,previous)>=2)multiAvailable=true;
+      if(multiAvailable)assert(btc::QuoteBook::changedDigits(digits,previous)>=2);
+      assert(sequence.latest()==previous); // The stateless helper cannot record a fabricated market observation.
+      observed.insert(digits);prior=previous;previous=digits;sequence.record(digits);
+    }
+    assert(observed.size()>=3);
+  }
+  btc::QuoteSequence sequence;sequence.record(83310);std::set<uint32_t> ties;
+  for(uint32_t entropy=0;entropy<256;++entropy)ties.insert(btc::DisplayMotion::choose(83310.4,83310,sequence,entropy));
+  assert(ties.size()>=3); // Entropy changes the choice among equally valid rendered values.
+  for(double invalid:{0.0,-1.0,double(NAN),double(INFINITY),999999.5,1000000.0})
+    assert(!btc::DisplayMotion::choose(invalid,83310,sequence,123));
+  std::cout<<"PASS: stateless price-centered display motion respects minimum/capped radii, six-digit bounds, genuine-reference anchoring, entropy, and previous/prior-distinct exclusions\n";
+}
 void otaTests(){
   assert(ota::newer("1.0.1","1.0.0"));assert(ota::newer("1.10.0","1.9.9"));assert(!ota::newer("1.0.0","1.0.0"));assert(!ota::newer("0.9.9","1.0.0"));
   ota::Version version;for(const char* text:{"01.2.3","1.2","1.2.3-beta","1.2.3\n","65536.0.0","1.0.99999999999999999"})assert(!ota::version(text,version));
@@ -323,4 +352,4 @@ void otaTests(){
   ota::Manifest manifest;assert(ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));assert(ota::canonical(manifest).find("1.0.1\n")==0);
   doc["size"]=0;assert(!ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));doc["size"]=2048;doc["board"]="esp32s3";assert(!ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));doc["board"]=ota_config::kBoard;doc["url"]="https://github.com/attacker/clock/releases/download/v1.0.1/firmware.bin";assert(!ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));
 }
-int main(int argc,char**argv){assert(argc==4);coreTests();currentBookCoreTests();quoteSequenceCoreTests();convertedBookCoreTests();fixtures(argv[1],uint32_t(strtoul(argv[2],nullptr,10)),uint32_t(strtoul(argv[3],nullptr,10)));otaTests();std::cout<<"PASS: core, all live quote/history fixtures, malformed input, OTA manifest rules\n";}
+int main(int argc,char**argv){assert(argc==4);coreTests();currentBookCoreTests();quoteSequenceCoreTests();convertedBookCoreTests();displayMotionCoreTests();fixtures(argv[1],uint32_t(strtoul(argv[2],nullptr,10)),uint32_t(strtoul(argv[3],nullptr,10)));otaTests();std::cout<<"PASS: core, all live quote/history fixtures, malformed input, OTA manifest rules\n";}

@@ -35,6 +35,7 @@ int main(){
   snapshot.currentBooks=16;snapshot.displayQuoteAge=12345;
   snapshot.priceReversals=0;snapshot.selectionHolds=7;
   snapshot.currentConvertedBooks=16;
+  snapshot.displayPrice=83299.25;snapshot.displayEstimated=true;snapshot.estimatedFrames=19;snapshot.displayMode=4;
   snapshot.streamSlots[0].reasonSource=0;snapshot.streamSlots[0].reason=live::Reason::Tls;
   snapshot.streamSlots[0].tlsError=-0x2700;snapshot.streamSlots[0].reasonAgeMs=7000;
   snapshot.chartColumns=0x1FFFFF;snapshot.chartPixels=42;snapshot.historyCandles=6;snapshot.historySavedAt=1800000000;
@@ -70,6 +71,9 @@ int main(){
   assert(response["current_books_mask"]==16&&response["display_quote_age_ms"]==12345);
   assert(response["price_reversals"]==0&&response["selection_holds"]==7);
   assert(response["current_converted_books_mask"]==16);
+  assert(response["display_estimated"]==true&&response["estimated_frames"]==19);
+  assert(response["display_adjustment_usd"]==0.75&&response["display_quote"]==83299.25&&response["display_digits"]==83300);
+  assert(response["display_mode"]=="estimate"&&response["display_quote_age_ms"]==12345&&response["market_price"]==83300.12);
   assert(telemetryWeb.body.value.find("token")==std::string::npos&&telemetryWeb.body.value.find("password")==std::string::npos&&telemetryWeb.body.value.find("ssid")==std::string::npos);
   telemetryWeb.request("/",HTTP_GET);assert(telemetryWeb.statusCode==200&&telemetryWeb.body.value.find("Check for update now")!=std::string::npos);
   telemetryWeb.request("/control-token",HTTP_GET);assert(!deserializeJson(response,telemetryWeb.body.c_str()));std::string token=response["token"].as<const char*>();assert(token.size()==32);

@@ -12,6 +12,7 @@
 #include <sys/time.h>
 #include "LivePrice.h"
 #include "QuoteBook.h"
+#include "DisplayMotion.h"
 #include "DeviceTelemetry.h"
 #include "NetworkMemory.h"
 
@@ -56,6 +57,8 @@ uint32_t nextNixieAt=0,nixieFrames=0,lastNixieAt=0,acceptedQuotes=0;
 uint32_t lastFrameGap=0,lastFramePeriod=0,minimumFrameGap=0,maximumFrameGap=0;
 uint32_t priceTransitions=0,priceChanges=0,multiDigitChanges=0;
 uint32_t priceReversals=0,selectionHolds=0;
+bool displayEstimated=false;
+uint32_t estimatedFrames=0;
 uint32_t nextTelemetryAt=0,nextRawAt=0;
 uint16_t frequencyMv=0,rangeMv=0,frequencyRaw=0,rangeRaw=0;
 int frequencyDecoded=-1,rangeDecoded=-1;
@@ -149,11 +152,12 @@ void publishTelemetry(uint32_t now) {
   s.minimumGap=minimumFrameGap;s.maximumGap=maximumFrameGap;
   s.transitions=priceTransitions;s.priceChanges=priceChanges;s.multiChanges=multiDigitChanges;
   s.priceReversals=priceReversals;s.selectionHolds=selectionHolds;
+  s.displayEstimated=displayEstimated;s.estimatedFrames=estimatedFrames;
   s.marketPrice=guard.price;s.displayPrice=shownPrice;s.digits=shownDigits;s.source=shownSource;
   s.quoteKind=shownQuoteKind;s.displayQuoteAge=shownPrice?now-shownQuoteReceived:UINT32_MAX;
   s.chartSource=chartSource;s.chartQuoteAge=chartSource<btc::kSourceCount?now-chartQuoteReceived:UINT32_MAX;
   bool testing=tubeTestEndsAt&&!btc::due(now,tubeTestEndsAt);
-  s.displayMode=testing?3:!s.online||!guard.price?1:!shownPrice?2:0;
+  s.displayMode=testing?3:!guard.price?1:!shownPrice?2:displayEstimated?4:0;
   if(testing)s.testStep=uint8_t((5000-uint32_t(tubeTestEndsAt-now))/500);
   s.matrixPage=matrixDiagnostics?diagnosticPage:255;
   s.confirmed=guard.confirmed();s.inflight=inflight;s.otaPending=forceOtaPending;s.bootConfirmed=ota::bootConfirmed();s.ota=ota::status();telemetry::publish(s);
@@ -274,36 +278,28 @@ void refreshNixies(uint32_t now) {
     shownPrice=0;nextNixieAt=now;return;
   }
   tubeTestEndsAt=0;
-  if (!wifi.online()) {quotes.clear();priceSequence.clear();shownPrice=0;nextNixieAt=now;return;}
   if (!guard.price) {display::setupZero(now);shownPrice=0;return;}
   const auto liveState=liveReady?live::status():live::Status{};
   const uint16_t currentBooks=liveState.currentBooks,currentConvertedBooks=liveState.currentConvertedBooks;
   const bool stale=uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(refreshPeriod());
-  if (stale&&!currentBooks&&!currentConvertedBooks) {
-    display::blankPrice();shownPrice=0;return;
-  }
   if (!shownPrice || btc::due(now,nextNixieAt)) {
     const bool firstFrame=!shownPrice;
     const uint32_t previousDigits=shownDigits;
     const uint32_t period=refreshPeriod();
     btc::DisplayQuote selected{guard.price,lastQuoteReceived,lastPriceEpoch,lastAcceptedSource,lastAcceptedKind};
-    bool selectedQuote=quotes.choose(now,firstFrame?0:shownDigits,shownSource,guard.price,fx.fresh(now),selected,currentBooks,&priceSequence,esp_random(),currentConvertedBooks);
-    uint32_t fallbackDigits=uint32_t(std::floor(selected.price+0.5));
-    if(!selectedQuote&&(stale||priceSequence.reverses(fallbackDigits)||
-       (btc::kSources[lastAcceptedSource].usdt&&!fx.fresh(now)))){
-      // A guard fallback must obey the same sequence rule. Preserve the last
-      // real display and its actual timestamp while requesting more diversity.
-      if(!needDifferentQuote)differentQuoteSince=now;
-      needDifferentQuote=true;
-      if(!shownPrice||uint32_t(now-shownQuoteReceived)>btc::staleAfterMs(period)||
-         std::abs(shownPrice/guard.price-1)>0.05){display::blankPrice();shownPrice=0;return;}
-      selected={shownPrice,shownQuoteReceived,shownQuoteTimestamp,shownSource,shownQuoteKind};
-    }
+    const uint32_t entropy=esp_random();
+    bool selectedQuote=wifi.online()&&quotes.choose(now,firstFrame?0:shownDigits,shownSource,guard.price,fx.fresh(now),selected,currentBooks,&priceSequence,entropy,currentConvertedBooks);
     uint32_t digits=uint32_t(std::floor(selected.price+0.5));
     bool previousNeedDifferent=needDifferentQuote;
-    needDifferentQuote=!firstFrame&&digits==shownDigits;
+    // Motion must not make an unchanged real market quote look like new data
+    // to the fetch scheduler. Its diversity/backoff policy remains independent.
+    needDifferentQuote=!firstFrame&&(!selectedQuote||digits==uint32_t(std::floor(shownPrice+0.5))||priceSequence.reverses(digits));
     if(!needDifferentQuote)differentQuoteSince=0;
     else if(!previousNeedDifferent)differentQuoteSince=now;
+    const bool genuine=selectedQuote||(wifi.online()&&!stale&&
+      (!btc::kSources[lastAcceptedSource].usdt||fx.fresh(now)));
+    displayEstimated=!genuine||(!firstFrame&&digits==previousDigits)||priceSequence.reverses(digits);
+    if(displayEstimated){digits=btc::DisplayMotion::choose(selected.price,previousDigits,priceSequence,entropy);++estimatedFrames;}
     shownDigits=digits;
     bool reversal=priceSequence.reverses(digits);
     priceSequence.record(digits);
@@ -312,8 +308,8 @@ void refreshNixies(uint32_t now) {
     lastFrameGap=now-lastNixieAt;
     if(lastFramePeriod!=period||firstFrame){minimumFrameGap=maximumFrameGap=0;lastFramePeriod=period;priceTransitions=priceChanges=multiDigitChanges=priceReversals=selectionHolds=0;}
     else {++priceTransitions;priceChanges+=shownDigits!=previousDigits;multiDigitChanges+=btc::QuoteBook::changedDigits(previousDigits,shownDigits)>=2;priceReversals+=reversal;selectionHolds+=shownDigits==previousDigits;if(!minimumFrameGap||lastFrameGap<minimumFrameGap)minimumFrameGap=lastFrameGap;if(lastFrameGap>maximumFrameGap)maximumFrameGap=lastFrameGap;}
-    if (logNixies || nixieFrames==1) Serial.printf("Nixie frame at %lu ms: %.2f interval=%lu ms gap=%lu ms quoteAge=%lu ms source=%s digits=%lu cosmetic=%s\n",(unsigned long)now,shownPrice,
-      (unsigned long)period,(unsigned long)uint32_t(now-lastNixieAt),(unsigned long)uint32_t(now-shownQuoteReceived),btc::kSources[shownSource].name,(unsigned long)shownDigits,"no");
+    if (logNixies || nixieFrames==1) Serial.printf("Nixie frame at %lu ms: %.2f interval=%lu ms gap=%lu ms quoteAge=%lu ms source=%s digits=%lu estimated=%s\n",(unsigned long)now,shownPrice,
+      (unsigned long)period,(unsigned long)uint32_t(now-lastNixieAt),(unsigned long)uint32_t(now-shownQuoteReceived),btc::kSources[shownSource].name,(unsigned long)shownDigits,displayEstimated?"yes":"no");
     lastNixieAt=now;
     // Preserve the timer phase through normal loop jitter. If work delays a
     // frame, send the latest value once and skip expired deadlines.
@@ -458,19 +454,12 @@ void draw(uint32_t now) {
   nextDrawAt=now+(setupDisplay?config::kSetupFrameMs:display::startupAnimating()?config::kStartupFrameMs:1000);
   if (testEndsAt && !btc::due(now,testEndsAt)) { display::selfTest(uint8_t((4500-(testEndsAt-now))/750)); return; }
   testEndsAt=0;
-  const auto liveState=liveReady?live::status():live::Status{};
-  bool stale=!guard.price || (uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(config::kRefreshMs[refreshDial.stable])&&
-    !liveState.currentBooks&&!liveState.currentConvertedBooks);
   const bool testingTubes=tubeTestEndsAt && !btc::due(now,tubeTestEndsAt);
   if (setupDisplay) {
     display::setupStatus(wifi.setupState(),now);
-    if (!testingTubes) {
-      if (!wifi.online()) display::setupZero(now);
-      else if (stale && guard.price) display::blankPrice();
-    }
+    if (!testingTubes&&!guard.price) display::setupZero(now);
     return;
   }
-  if (stale && guard.price && !testingTubes) display::blankPrice();
   if(matrixDiagnostics){
     char top[24],bottom[24];
     if(diagnosticPage==0){

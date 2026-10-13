@@ -1,11 +1,15 @@
 # Nixie refresh and chart behavior
 
-Firmware 1.0.25 keeps the selected display cadence independent of network
-requests and selects genuine price alternatives without two-price reversals.
+Firmware 1.0.26 keeps the selected display cadence independent of network
+requests and shows a different tube number at every selected deadline after
+the first actual quote, using a bounded display estimate when needed.
 Frequency settings are 100 / 500 / 1500 / 10000 / 60000 ms; range settings are
 30 / 60 / 300 / 1800 / 3600 seconds. Each deadline writes all six Nixie modules,
-selecting a current book midpoint or recent validated quote even when a
-request is still running.
+preferring an unadjusted eligible actual quote. When real quotes cannot supply
+a different number, it selects a display estimate identified in diagnostics even if requests
+are delayed, the actual price is stale or Wi-Fi is offline. Before the first
+actual quote, the setup animation remains active. An explicit tube diagnostic
+temporarily overrides the normal display path.
 
 The quote book retains up to twelve distinct rounded prices per provider for
 five seconds. Older book midpoints and trade quotes retain this five-second
@@ -20,7 +24,7 @@ display values. A return from B to the preceding distinct value A is
 ineligible until a third value has been displayed. An A → B → B → A sequence
 is therefore blocked just like A → B → A: unchanged frames, decimal-only
 updates and provider changes do not erase the preceding distinct value.
-This hard rule applies both to cached quote selection and to the guard
+This hard rule applies both to actual quote selection and the display estimate
 fallback, so the fallback cannot reintroduce an A/B loop.
 
 Among eligible quotes, selection first favors unseen values or those least
@@ -28,27 +32,30 @@ recently displayed, then the greatest number of changed digits. An
 `esp_random()`-derived tie score selects between remaining distinct rounded
 prices. The score depends on the dollar value, so duplicate entries or
 multiple providers reporting the same rounded number do not add weight.
-Randomness selects an existing validated quote; it never adds a price offset
-or invents a trade. Original quote timestamps, receipt ages, five-second TTLs
-and the current-book exception are unchanged. Display selection does not
-alter candle observations, range settings or scale parameters.
+Randomness in actual-quote selection chooses an existing validated value.
+Version 1.0.26 separately permits the estimate fallback described below.
+Original quote timestamps, receipt ages, five-second TTLs and the current-book
+exception are unchanged. Display selection does not alter candle
+observations, range settings or scale parameters.
 
-If there are only two usable real values, rejecting a reversal can leave the
-last value displayed until a third arrives. Every scheduled deadline still
-writes all six Nixie modules during this hold. A held fallback keeps its
-original receipt time and is limited by the usual stale deadline of
-`max(30 seconds, 3 × selected interval)`; a synchronized current book follows
-its separate healthy-book validity rules. The firmware does not extend an
-old trade's TTL to force movement. Lower price diversity can therefore produce
-fewer visible changes while preserving the 100 ms command cadence. If no
-usable candidate changes the whole-dollar display, the timer still runs. Version
-1.0.22 lets healthy streams supply alternatives before requesting another
-eligible HTTP provider: an unchanged run must last at least five seconds,
-or the selected display interval if longer. A genuine change resets that
-wait; stale feeds and required independent confirmation bypass it. An
-isolated unchanged 100 ms frame therefore cannot interrupt a second feed
-for a slower HTTP request. No synthetic $1 stepping or larger
-invented change is used; all displayed values come from observed market prices.
+The user-authorized estimate fallback replaces normal-operation holds and
+stale/offline blanking after the first actual price arrives. Its base is an
+unaltered real quote, with a dollar adjustment bound of
+`clamp(round(real price × 0.0001), 2, 10)`. A random candidate within that
+bound cannot equal the latest displayed number or the preceding distinct
+number. Candidates changing at least two digits are preferred wherever the
+bounded set permits them. An eligible actual quote that supplies a different
+number remains preferred with ordinary nearest-dollar rounding.
+
+An estimate is a display effect around the retained real base, not a new
+market observation or prediction of the next trade. It cannot enter the
+quote cache, guard, actual source/accepted-price counters, canonical OHLC,
+volatility calculations or flash history. The real base's source, price,
+publication timestamp and receipt time remain intact, and their age keeps
+advancing throughout a stale/offline period. The normal timer continues to
+write changed numbers at 100 / 500 / 1500 / 10000 / 60000 ms without renewing
+the underlying market quote's TTL. Market reception and REST recovery run
+independently, with existing provider cooldowns and TLS protections.
 
 Coinbase is the preferred primary USD stream. Version 1.0.23 introduced Bitfinex
 realtime depth-one book midpoints on the secondary to supply genuine venue
@@ -162,16 +169,25 @@ counts and receipt ages, queue overflows, rejected payloads and disconnects.
 `current_converted_books_mask` identifies current converted-book quotes.
 Bitfinex uses bit 4 (`16`) in each. `display_quote_kind` distinguishes
 `last-trade`, `bbo-midpoint` and `converted-bbo-midpoint`.
-`display_quote_age_ms` reports the actual selected quote's receipt age,
-even when it exceeds five seconds for a current book.
+`display_quote_age_ms` reports the actual base quote's receipt age,
+even when it exceeds five seconds for a current book or an outage estimate.
 An advancing age with unchanged source quote counts is expected during a
 healthy quiet book and does not indicate a fabricated price receipt.
+`display_estimated` identifies a fallback estimate;
+`display_adjustment_usd` gives the displayed difference from the real base,
+including ordinary dollar rounding when no estimate is used. The boolean
+marker therefore distinguishes the fallback from rounding;
+`estimated_frames` counts these display frames independently of actual
+accepted quotes. `display_quote_kind` continues to describe the underlying
+actual quote, rather than relabeling an estimate as a trade or book update.
 They also report HTTP kind/source/status, a requested differing quote, cached
 candle count/epoch, chart columns/pixels, usable data-RAM and frame timing.
 Per-deadline transition, changed-price and multi-digit-change counters observe
 every 100 ms frame even when LAN collection is slower. `price_reversals` and
-`selection_holds` distinguish real variety from repeated A/B changes and
-intentional holds. The 30-second
+`selection_holds` distinguish rounded display reversals and unchanged frames.
+After a real quote arrives, the normal 1.0.26 path should produce neither
+reversals nor holds, while `estimated_frames` distinguishes its display
+effects from newly received real prices. The 30-second
 `cadence-test` temporarily selects the normal 500 ms live-price path, sets
 `cadence_test=true`, and restores the mechanical setting automatically.
 
@@ -272,11 +288,13 @@ the display hardware.
 
 Earlier passing change-rate reports do not test the distinct-change rule:
 alternating two genuine venue prices can raise both changed-price and
-multi-digit counters on every frame. Version 1.0.25 specifically prevents
-that return to the preceding distinct value and selects less recently used
-eligible prices before comparing digit changes. Its assembled-device
-measurement is pending; the new report must record reversals and holds
-alongside timing, quote age, connected sources and actual variation.
+multi-digit counters on every frame. Version 1.0.25 specifically prevented
+that return to the preceding distinct value and selected less recently used
+eligible prices before comparing digit changes. Its subsequent 180-second
+steady device baseline recorded 1,801 changed transitions out of 1,801,
+averaging 100.021 ms, with zero holds or reversals and both preferred feeds
+healthy. See [the v1.0.25 device report](../test/device_release_1.0.25_report.json).
+That run preceded display estimates and used actual received quotes.
 
 The separate 90-second computer probe using the original Coinbase and direct
 Bitfinex pair ran the actual compiled C++ parser, guard and selector with
@@ -285,8 +303,8 @@ changed the rounded value (73%), with 378 multi-digit changes, 213 holds and
 zero distinct-value A → B → A reversals. Every displayed price was traceable
 to a real accepted quote. See [the two-source report](../test/anti_repeat_quote_probe_report.json).
 This shows why a third real quote is useful when the reversal rule blocks
-two-price oscillation. It is not evidence of final three-book ESP32 timing or
-visible output; that device measurement remains pending.
+two-price oscillation. Its computer timing and modeled frame orchestration
+remain distinct from the assembled-device baseline above and visible output.
 
 The final 60-second three-book computer run passed with the actual compiled
 C++ parsers, guard and selector. After ten seconds of warmup, all 500
@@ -301,10 +319,13 @@ There were three startup blank frames before usable data arrived.
 The current converted-head exception was exercised in 17 frames whose real
 receipt age exceeded five seconds, reaching 14.491 seconds. Heartbeats did
 not create new quotes or reset those ages. See [the three-book computer report](../test/anti_repeat_three_books_probe_report.json).
-The full host suite and ESP32 build passed. This probe models reception and
-frame orchestration on the computer; 1.0.25 installation and assembled-device
-cadence, feed stability and visible appearance still require their own
-measurement.
+The full host suite and ESP32 build passed for that pre-estimate version.
+This probe models reception and frame orchestration on the computer; it is
+separate from the assembled-device baseline. Actual application/SPI host cases
+cover stale/offline conditions at all five refresh settings, estimate bounds,
+original quote ages and unchanged real-data counters/history. Version 1.0.26
+installation and live measurements of continuous motion, bounds and estimate
+markers remain pending. Visible appearance is not established by telemetry.
 
 The prior 1.0.15 bare-ESP32 measurement passed its 30-second diagnostic but did
 not exercise ongoing minute-history requests on the assembled 5-minute range.
@@ -315,7 +336,9 @@ Run `python3 tools/run_tests.py` and `pio run`. Tests exercise actual firmware
 sources with modeled network/hardware, address/undefined-behavior sanitizers,
 all five refresh intervals, real-price selection and duplicate/stale handling,
 distinct-change reversal rules across holds and decimal/provider updates,
-tie selection without duplicate weighting, guard fallback and hold expiry,
+tie selection without duplicate weighting, display-only estimate bounds,
+continued stale/offline cadence after the first quote, estimate telemetry,
+unchanged actual quote ages/counters and no synthetic OHLC/history,
 quiet synchronized books with unchanged timestamps/counters, removal and
 corruption invalidation, message-health expiry and historical quote TTLs,
 separate direct/converted heads, both-leg conversion validity and independent

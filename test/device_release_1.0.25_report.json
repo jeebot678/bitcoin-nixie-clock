@@ -1,0 +1,118 @@
+{
+  "version": "1.0.25",
+  "device_id": "08576da50528",
+  "transport": "LAN telemetry after signed GitHub/main OTA",
+  "checked_at_utc": "2026-10-13T22:12:30.243053+00:00",
+  "duration_ms": 180138,
+  "samples": 705,
+  "connection_errors": [],
+  "frames": 1801,
+  "average_frame_ms": 100.02109938922821,
+  "min_frame_gap_ms": 91,
+  "max_frame_gap_ms": 109,
+  "transitions": 1801,
+  "price_changes": 1801,
+  "multi_digit_changes": 1473,
+  "changed_fraction": 1.0,
+  "multi_digit_fraction": 0.8178789561354803,
+  "stream_quotes": 1204,
+  "stream_quotes_per_second": 6.683764669309085,
+  "accepted_quotes_per_second": 6.683764669309085,
+  "source_quote_deltas": [
+    675,
+    0,
+    0,
+    0,
+    529,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "source_masks": [
+    17
+  ],
+  "stream_connections_min": 2,
+  "max_quote_age_ms": 2663,
+  "source_failure_deltas": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "final_stream_slots": [
+    {
+      "source": 0,
+      "phase": "online",
+      "reason_source": 0,
+      "last_reason": "memory-reservation",
+      "http_status": 0,
+      "tls_error": 0,
+      "reason_age_ms": 240857
+    },
+    {
+      "source": 4,
+      "phase": "online",
+      "reason_source": 4,
+      "last_reason": "memory-reservation",
+      "http_status": 0,
+      "tls_error": 0,
+      "reason_age_ms": 240889
+    }
+  ],
+  "stream_disconnects": 0,
+  "stream_dropped": 0,
+  "stream_rejected": 0,
+  "minimum_chart_columns": 21,
+  "minimum_actual_candles": 14,
+  "chart_pixels_min": 22,
+  "chart_pixels_max": 33,
+  "chart_sources": [
+    "Coinbase"
+  ],
+  "display_quote_kinds": [
+    "bbo-midpoint",
+    "converted-bbo-midpoint",
+    "last-trade"
+  ],
+  "max_chart_quote_age_ms": 4822,
+  "current_book_masks": [
+    0,
+    16
+  ],
+  "current_converted_book_masks": [
+    0,
+    16
+  ],
+  "price_reversals": 0,
+  "selection_holds": 0,
+  "sampled_distinct_dollars": 62,
+  "converted_quote_samples": 191,
+  "max_display_quote_age_ms": 36414,
+  "expired_receipt_current_book_samples": 5,
+  "variety_http_samples": 0,
+  "scale_steps": [
+    3.879815366,
+    4.084016175,
+    4.298964395,
+    4.525225679
+  ],
+  "lowest_data_heap": 11592,
+  "lowest_http_stack_remaining": 2648,
+  "lowest_stream_stack_remaining": 3964,
+  "boot_confirmed": true,
+  "history_checkpoint_advanced": true,
+  "visible_output_verified": false,
+  "pass": true,
+  "expired_receipt_current_converted_book_samples": 42,
+  "measurement_scope": "180-second steady window; counters are end minus start. Startup holds are excluded. Physical light output is not measured."
+}

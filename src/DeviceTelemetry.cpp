@@ -17,7 +17,7 @@ WebServer telemetryWeb(8080);
 char controlToken[33]={};
 bool listening=false,mdns=false;
 uint32_t stackRemaining=0;
-StaticJsonDocument<JSON_OBJECT_SIZE(78)+4*JSON_OBJECT_SIZE(7)+2*JSON_ARRAY_SIZE(5)+JSON_OBJECT_SIZE(7)+3*JSON_ARRAY_SIZE(btc::kSourceCount)+JSON_ARRAY_SIZE(2)+280> telemetryJson;
+StaticJsonDocument<JSON_OBJECT_SIZE(81)+4*JSON_OBJECT_SIZE(7)+2*JSON_ARRAY_SIZE(5)+JSON_OBJECT_SIZE(7)+3*JSON_ARRAY_SIZE(btc::kSourceCount)+JSON_ARRAY_SIZE(2)+280> telemetryJson;
 const char kTelemetryPage[] PROGMEM=R"HTML(<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bitcoin Clock diagnostics</title>
 <style>body{font:16px system-ui;background:#15191c;color:#eee;max-width:760px;margin:30px auto;padding:0 18px}table{width:100%;border-collapse:collapse}td,th{padding:10px;text-align:left;border-bottom:1px solid #555}button{padding:12px;margin:6px 4px 6px 0;font:inherit}pre{white-space:pre-wrap}#message{min-height:24px}</style>
 <h1>Clock diagnostics</h1><p>Rotate one switch at a time. A held/default setting with an invalid input can explain a frozen display. Voltages are measured at the ESP32 inputs.</p>
@@ -75,6 +75,9 @@ void state() {
   telemetryJson["streams"]=s.connections;telemetryJson["stream_quotes"]=s.quotes;telemetryJson["accepted_quotes"]=s.accepted;
   telemetryJson["quote_age_ms"]=s.accepted?s.quoteAge:UINT32_MAX;telemetryJson["confirmed"]=s.confirmed;
   telemetryJson["market_price"]=s.marketPrice;telemetryJson["display_quote"]=s.displayPrice;telemetryJson["display_digits"]=s.digits;
+  telemetryJson["display_estimated"]=s.displayEstimated;
+  telemetryJson["display_adjustment_usd"]=s.displayPrice?double(s.digits)-s.displayPrice:0;
+  telemetryJson["estimated_frames"]=s.estimatedFrames;
   telemetryJson["display_source"]=s.source<btc::kSourceCount?btc::kSources[s.source].name:"unknown";
   telemetryJson["nixie_frames"]=s.frames;telemetryJson["last_frame_gap_ms"]=s.frameGap;
   telemetryJson["last_frame_age_ms"]=s.frames?s.frameAge:UINT32_MAX;telemetryJson["next_frame_in_ms"]=s.nextFrame;
@@ -86,8 +89,8 @@ void state() {
   update["state"]=ota::stageName(s.ota.stage);update["http_status"]=s.ota.httpStatus;
   update["checked_at_ms"]=s.ota.checkedAt;update["candidate_version"]=s.ota.candidate;
   update["received_bytes"]=s.ota.received;update["total_bytes"]=s.ota.total;update["retry_after_seconds"]=s.ota.retryAfter;
-  const char* modes[]={"price","startup","blank","tube-test"};
-  telemetryJson["display_mode"]=s.displayMode<4?modes[s.displayMode]:"unknown";
+  const char* modes[]={"price","startup","blank","tube-test","estimate"};
+  telemetryJson["display_mode"]=s.displayMode<5?modes[s.displayMode]:"unknown";
   telemetryJson["tube_test_step"]=s.testStep;telemetryJson["matrix_diagnostic_page"]=s.matrixPage;
   telemetryJson["visible_output_verified"]=false; // No MISO/cathode feedback exists.
   String json;serializeJson(telemetryJson,json);noCache();telemetryWeb.send(200,"application/json",json);
