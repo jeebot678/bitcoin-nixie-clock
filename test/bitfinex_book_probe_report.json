@@ -1,0 +1,249 @@
+{
+  "checked_at_utc": "2026-10-13T18:58:49.909Z",
+  "duration_ms": 60000,
+  "scope": "Computer verified TLS with embedded Mozilla roots and exact firmware headers. Actual compiled QuoteBook and PriceGuard sampled100ms; no ESP32/device controls or extra device sessions.",
+  "subscriptions": {
+    "Coinbase": [
+      {
+        "type": "subscribe",
+        "product_ids": [
+          "BTC-USD"
+        ],
+        "channels": [
+          "ticker",
+          "heartbeat"
+        ]
+      }
+    ],
+    "Bitfinex": [
+      {
+        "event": "conf",
+        "flags": 32768
+      },
+      {
+        "event": "subscribe",
+        "channel": "ticker",
+        "symbol": "tBTCUSD"
+      },
+      {
+        "event": "subscribe",
+        "channel": "book",
+        "symbol": "tBTCUSD",
+        "prec": "P0",
+        "freq": "F0",
+        "len": "1"
+      }
+    ]
+  },
+  "timestamp_semantics": "Bitfinex conf32768 external timestamp is publication time, not execution time. Inner optional FIRST_TRADE is not used for freshness. Midpoint is derived from current best bid+ask, last is last executed trade.",
+  "results": [
+    {
+      "provider": "Coinbase",
+      "mode": "firmware",
+      "endpoint": "wss://ws-feed.exchange.coinbase.com/",
+      "request_headers": {
+        "Host": "ws-feed.exchange.coinbase.com:443",
+        "Connection": "Upgrade",
+        "Upgrade": "websocket",
+        "Sec-WebSocket-Version": "13",
+        "User-Agent": "arduino-WebSocket-Client",
+        "Origin": "file://"
+      },
+      "certificate_validation": "embedded Mozilla PEM, rejectUnauthorized=true, TLS hostname validation",
+      "protocol": null,
+      "extensions": null,
+      "ping_interval_ms": 20000,
+      "pong_timeout_ms": 5000,
+      "upgrade_status": 101,
+      "open_at_ms": 188,
+      "messages": 250,
+      "message_types": {
+        "subscriptions": 1,
+        "ticker": 190,
+        "heartbeat": 59
+      },
+      "btc_quotes": 190,
+      "fx_quotes": 0,
+      "invalid_quotes": 0,
+      "pings_sent": 2,
+      "pongs_received": 2,
+      "server_pings": 0,
+      "pong_rtt_ms": [
+        29,
+        31
+      ],
+      "errors": [],
+      "sample_quotes": [
+        {
+          "at_ms": 311,
+          "price": 83051.99,
+          "timestamp_ms": 1791917930223
+        },
+        {
+          "at_ms": 624,
+          "price": 83051.99,
+          "timestamp_ms": 1791917930600
+        },
+        {
+          "at_ms": 697,
+          "price": 83052,
+          "timestamp_ms": 1791917930675
+        },
+        {
+          "at_ms": 1192,
+          "price": 83052,
+          "timestamp_ms": 1791917931169
+        },
+        {
+          "at_ms": 2427,
+          "price": 83052,
+          "timestamp_ms": 1791917932407
+        }
+      ],
+      "max_quote_gap_ms": 3936,
+      "last_quote_at_ms": 59813,
+      "unexpected_disconnect": false,
+      "tls_authorized": true,
+      "tls_version": "TLSv1.3",
+      "response_headers": {
+        "upgrade": "websocket",
+        "connection": "upgrade",
+        "server": "cloudflare",
+        "date": "Tue, 13 Oct 2026 18:58:50 GMT"
+      },
+      "finished_reason": "duration-complete",
+      "elapsed_ms": 60002,
+      "connected_at_end": true,
+      "final_quote_age_ms": 189
+    },
+    {
+      "provider": "Bitfinex",
+      "mode": "firmware",
+      "endpoint": "wss://api-pub.bitfinex.com/ws/2",
+      "request_headers": {
+        "Host": "api-pub.bitfinex.com:443",
+        "Connection": "Upgrade",
+        "Upgrade": "websocket",
+        "Sec-WebSocket-Version": "13",
+        "User-Agent": "arduino-WebSocket-Client",
+        "Origin": "file://"
+      },
+      "certificate_validation": "embedded Mozilla PEM, rejectUnauthorized=true, TLS hostname validation",
+      "protocol": null,
+      "extensions": null,
+      "ping_interval_ms": 20000,
+      "pong_timeout_ms": 5000,
+      "upgrade_status": 101,
+      "open_at_ms": 494,
+      "messages": 111,
+      "message_types": {
+        "other": 109,
+        "ticker/undefined": 1,
+        "book/undefined": 1
+      },
+      "btc_quotes": 5,
+      "fx_quotes": 0,
+      "invalid_quotes": 0,
+      "pings_sent": 2,
+      "pongs_received": 2,
+      "server_pings": 0,
+      "pong_rtt_ms": [
+        123,
+        125
+      ],
+      "errors": [],
+      "sample_quotes": [
+        {
+          "at_ms": 646,
+          "price": 83183,
+          "timestamp_ms": 1791917930610
+        },
+        {
+          "at_ms": 4110,
+          "price": 83183,
+          "timestamp_ms": 1791917934073
+        },
+        {
+          "at_ms": 19084,
+          "price": 83177,
+          "timestamp_ms": 1791917949048
+        },
+        {
+          "at_ms": 34118,
+          "price": 83180,
+          "timestamp_ms": 1791917964082
+        },
+        {
+          "at_ms": 49174,
+          "price": 83186,
+          "timestamp_ms": 1791917979140
+        }
+      ],
+      "max_quote_gap_ms": 15056,
+      "last_quote_at_ms": 49174,
+      "unexpected_disconnect": false,
+      "tls_authorized": true,
+      "tls_version": "TLSv1.3",
+      "response_headers": {
+        "upgrade": "websocket",
+        "connection": "upgrade",
+        "server": "cloudflare",
+        "date": "Tue, 13 Oct 2026 18:58:50 GMT"
+      },
+      "book_quotes": 71,
+      "last_book_at_ms": 59960,
+      "max_book_gap_ms": 4406,
+      "finished_reason": "duration-complete",
+      "elapsed_ms": 60001,
+      "connected_at_end": true,
+      "final_quote_age_ms": 10827
+    }
+  ],
+  "selector_results": {
+    "last": {
+      "frames": 496,
+      "transitions": 495,
+      "whole_dollar_changes": 338,
+      "multi_digit_changes": 219,
+      "percent_changed": 68.28282828282828,
+      "percent_multi_digit": 44.24242424242424,
+      "sources": [
+        0,
+        4
+      ],
+      "max_selected_quote_age_ms": 4954,
+      "min_frame_gap_ms": 99,
+      "max_frame_gap_ms": 119
+    },
+    "midpoint": {
+      "frames": 496,
+      "transitions": 495,
+      "whole_dollar_changes": 338,
+      "multi_digit_changes": 219,
+      "percent_changed": 68.28282828282828,
+      "percent_multi_digit": 44.24242424242424,
+      "sources": [
+        0,
+        4
+      ],
+      "max_selected_quote_age_ms": 4954,
+      "min_frame_gap_ms": 99,
+      "max_frame_gap_ms": 119
+    },
+    "book_midpoint": {
+      "frames": 496,
+      "transitions": 495,
+      "whole_dollar_changes": 495,
+      "multi_digit_changes": 495,
+      "percent_changed": 100,
+      "percent_multi_digit": 100,
+      "sources": [
+        4,
+        0
+      ],
+      "max_selected_quote_age_ms": 4209,
+      "min_frame_gap_ms": 99,
+      "max_frame_gap_ms": 119
+    }
+  }
+}

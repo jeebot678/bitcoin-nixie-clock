@@ -1,0 +1,275 @@
+{
+  "checked_at_utc": "2026-10-13T18:54:55.333268+00:00",
+  "transport": "HTTP/1.0 with firmware embedded Mozilla roots, identity encoding, verified hostname; one request/provider, max four concurrent",
+  "fx_usdt_usd": 0.99875,
+  "prices": [
+    {
+      "provider": "kraken",
+      "price_usd": 83075.0,
+      "whole_dollars": 83075,
+      "status": 200,
+      "elapsed_ms": 248,
+      "http_date": "Tue, 13 Oct 2026 18:54:54 GMT",
+      "changed_digits_vs_coinbase": 2,
+      "difference_usd_vs_coinbase": 16.00999999999476
+    },
+    {
+      "provider": "coinbase",
+      "price_usd": 83058.99,
+      "whole_dollars": 83059,
+      "status": 200,
+      "elapsed_ms": 124,
+      "http_date": "Tue, 13 Oct 2026 18:54:54 GMT",
+      "changed_digits_vs_coinbase": 0,
+      "difference_usd_vs_coinbase": 0.0
+    },
+    {
+      "provider": "bitstamp",
+      "price_usd": 83081.88,
+      "whole_dollars": 83082,
+      "status": 200,
+      "elapsed_ms": 123,
+      "http_date": "Tue, 13 Oct 2026 18:54:53 GMT",
+      "changed_digits_vs_coinbase": 2,
+      "difference_usd_vs_coinbase": 22.889999999999418
+    },
+    {
+      "provider": "gemini",
+      "price_usd": 83093.73,
+      "whole_dollars": 83094,
+      "status": 200,
+      "elapsed_ms": 202,
+      "http_date": "Tue, 13 Oct 2026 18:54:54 GMT",
+      "changed_digits_vs_coinbase": 2,
+      "difference_usd_vs_coinbase": 34.73999999999069
+    },
+    {
+      "provider": "bitfinex",
+      "price_usd": 83200.0,
+      "whole_dollars": 83200,
+      "status": 200,
+      "elapsed_ms": 163,
+      "http_date": "Tue, 13 Oct 2026 18:54:54 GMT",
+      "changed_digits_vs_coinbase": 3,
+      "difference_usd_vs_coinbase": 141.00999999999476
+    },
+    {
+      "provider": "binance",
+      "price_usd": 83070.47195,
+      "whole_dollars": 83070,
+      "status": 200,
+      "elapsed_ms": 927,
+      "http_date": "Tue, 13 Oct 2026 18:54:55 GMT",
+      "changed_digits_vs_coinbase": 2,
+      "difference_usd_vs_coinbase": 11.481950000001234
+    },
+    {
+      "provider": "okx",
+      "price_usd": 83076.82400000001,
+      "whole_dollars": 83077,
+      "status": 200,
+      "elapsed_ms": 269,
+      "http_date": "Tue, 13 Oct 2026 18:54:54 GMT",
+      "changed_digits_vs_coinbase": 2,
+      "difference_usd_vs_coinbase": 17.83400000000256
+    },
+    {
+      "provider": "kucoin",
+      "price_usd": 83073.2285,
+      "whole_dollars": 83073,
+      "status": 200,
+      "elapsed_ms": 283,
+      "http_date": "Tue, 13 Oct 2026 18:54:54 GMT",
+      "changed_digits_vs_coinbase": 2,
+      "difference_usd_vs_coinbase": 14.2384999999922
+    },
+    {
+      "provider": "gate",
+      "price_usd": 83075.82525000001,
+      "whole_dollars": 83076,
+      "status": 200,
+      "elapsed_ms": 777,
+      "http_date": "Tue, 13 Oct 2026 18:54:55 GMT",
+      "changed_digits_vs_coinbase": 2,
+      "difference_usd_vs_coinbase": 16.835250000003725
+    },
+    {
+      "provider": "bitget",
+      "price_usd": 83070.80153750001,
+      "whole_dollars": 83071,
+      "status": 200,
+      "elapsed_ms": 351,
+      "http_date": "Tue, 13 Oct 2026 18:54:55 GMT",
+      "changed_digits_vs_coinbase": 2,
+      "difference_usd_vs_coinbase": 11.811537500005215
+    },
+    {
+      "provider": "mexc",
+      "price_usd": 83069.5031625,
+      "whole_dollars": 83070,
+      "status": 200,
+      "elapsed_ms": 476,
+      "http_date": "Tue, 13 Oct 2026 18:54:55 GMT",
+      "changed_digits_vs_coinbase": 2,
+      "difference_usd_vs_coinbase": 10.513162499992177
+    }
+  ],
+  "requests": [
+    {
+      "name": "kraken",
+      "url": "https://api.kraken.com/0/public/Ticker?pair=XBTUSD,USDTUSD",
+      "status": 200,
+      "headers": {
+        "Date": "Tue, 13 Oct 2026 18:54:54 GMT",
+        "Content-Type": "application/json",
+        "Content-Length": "620",
+        "Cache-Control": "max-age=2, public"
+      },
+      "bytes": 620,
+      "json_valid": true,
+      "elapsed_ms": 248
+    },
+    {
+      "name": "coinbase",
+      "url": "https://api.exchange.coinbase.com/products/BTC-USD/ticker",
+      "status": 200,
+      "headers": {
+        "Date": "Tue, 13 Oct 2026 18:54:54 GMT",
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "public, max-age=1, must-revalidate",
+        "Age": "0"
+      },
+      "bytes": 182,
+      "json_valid": true,
+      "elapsed_ms": 124
+    },
+    {
+      "name": "bitstamp",
+      "url": "https://www.bitstamp.net/api/v2/ticker/btcusd/",
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/json",
+        "Content-Length": "255",
+        "Cache-Control": "max-age=1, public",
+        "Date": "Tue, 13 Oct 2026 18:54:53 GMT"
+      },
+      "bytes": 255,
+      "json_valid": true,
+      "elapsed_ms": 123
+    },
+    {
+      "name": "gemini",
+      "url": "https://api.gemini.com/v2/ticker/btcusd",
+      "status": 200,
+      "headers": {
+        "Date": "Tue, 13 Oct 2026 18:54:54 GMT",
+        "Content-Type": "application/json",
+        "Content-Length": "401"
+      },
+      "bytes": 401,
+      "json_valid": true,
+      "elapsed_ms": 202
+    },
+    {
+      "name": "bitfinex",
+      "url": "https://api-pub.bitfinex.com/v2/ticker/tBTCUSD",
+      "status": 200,
+      "headers": {
+        "Date": "Tue, 13 Oct 2026 18:54:54 GMT",
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Length": "95",
+        "Age": "9"
+      },
+      "bytes": 95,
+      "json_valid": true,
+      "elapsed_ms": 163
+    },
+    {
+      "name": "binance",
+      "url": "https://data-api.binance.vision/api/v3/ticker/price?symbol=BTCUSDT",
+      "status": 200,
+      "headers": {
+        "Date": "Tue, 13 Oct 2026 18:54:55 GMT",
+        "Content-Type": "application/json;charset=UTF-8",
+        "Content-Length": "45",
+        "x-mbx-used-weight": "2",
+        "x-mbx-used-weight-1m": "2",
+        "Cache-Control": "no-cache, no-store, must-revalidate"
+      },
+      "bytes": 45,
+      "json_valid": true,
+      "elapsed_ms": 927
+    },
+    {
+      "name": "okx",
+      "url": "https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT",
+      "status": 200,
+      "headers": {
+        "Date": "Tue, 13 Oct 2026 18:54:54 GMT",
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate"
+      },
+      "bytes": 366,
+      "json_valid": true,
+      "elapsed_ms": 269
+    },
+    {
+      "name": "kucoin",
+      "url": "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=BTC-USDT",
+      "status": 200,
+      "headers": {
+        "Date": "Tue, 13 Oct 2026 18:54:54 GMT",
+        "Content-Type": "application/json",
+        "Content-Length": "204",
+        "gw-ratelimit-remaining": "1998",
+        "gw-ratelimit-limit": "2000",
+        "gw-ratelimit-reset": "30000"
+      },
+      "bytes": 204,
+      "json_valid": true,
+      "elapsed_ms": 283
+    },
+    {
+      "name": "gate",
+      "url": "https://api.gateio.ws/api/v4/spot/tickers?currency_pair=BTC_USDT",
+      "status": 200,
+      "headers": {
+        "Date": "Tue, 13 Oct 2026 18:54:55 GMT",
+        "Content-Type": "application/json",
+        "X-Gate-RateLimit-Requests-Remain": "199",
+        "X-Gate-RateLimit-Limit": "200",
+        "X-Gate-RateLimit-Reset-Timestamp": "1791917695"
+      },
+      "bytes": 282,
+      "json_valid": true,
+      "elapsed_ms": 777
+    },
+    {
+      "name": "bitget",
+      "url": "https://api.bitget.com/api/v2/spot/market/tickers?symbol=BTCUSDT",
+      "status": 200,
+      "headers": {
+        "Date": "Tue, 13 Oct 2026 18:54:55 GMT",
+        "Content-Type": "application/json",
+        "Content-Length": "428"
+      },
+      "bytes": 428,
+      "json_valid": true,
+      "elapsed_ms": 351
+    },
+    {
+      "name": "mexc",
+      "url": "https://api.mexc.com/api/v3/ticker/price?symbol=BTCUSDT",
+      "status": 200,
+      "headers": {
+        "Content-Type": "application/json",
+        "Cache-Control": "max-age=0, no-cache, no-store",
+        "Date": "Tue, 13 Oct 2026 18:54:55 GMT",
+        "Content-Length": "39"
+      },
+      "bytes": 39,
+      "json_valid": true,
+      "elapsed_ms": 476
+    }
+  ]
+}

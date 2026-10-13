@@ -1,6 +1,6 @@
 # Nixie refresh and chart behavior
 
-Firmware 1.0.22 keeps the selected display cadence independent of network
+Firmware 1.0.23 keeps the selected display cadence independent of network
 requests and preserves a continuous supply of genuine price alternatives.
 Frequency settings are 100 / 500 / 1500 / 10000 / 60000 ms; range settings are
 30 / 60 / 300 / 1800 / 3600 seconds. Each deadline writes all six Nixie modules,
@@ -20,8 +20,12 @@ isolated unchanged 100 ms frame therefore cannot interrupt a second feed
 for a slower HTTP request. No synthetic $1 stepping or larger
 invented change is used; all displayed values come from observed market prices.
 
-Coinbase is now the preferred primary USD stream, with Kraken preferred on
-the secondary. Kraken adds matched-trade batches and USDT/USD conversion on
+Coinbase is the preferred primary USD stream. Version 1.0.23 uses Bitfinex
+realtime depth-one book midpoints on the secondary to supply genuine venue
+price diversity. The midpoint is the average of the current best bid and
+ask, not an invented price or an executed trade. TIMESTAMP publication
+milliseconds establish freshness. The ordinary Bitfinex ticker proved too
+slow in the separate probe and is excluded. Kraken remains a fallback. Kraken adds matched-trade batches and USDT/USD conversion on
 its existing TLS connection. Binance and Gemini join Bitstamp and Bitfinex
 as stream fallbacks. Both workers retain 16 actual ticks each; a burst no
 longer overwrites every intermediate price before the main loop can inspect
@@ -54,8 +58,13 @@ fully on or off, without pulse dimming. Each displayed column has at least
 one lit cell once a price is available. An observed candle includes its
 open-to-close body and high-to-low wick; an unobserved column displays a
 flat close hold without adding synthetic trades to its stored OHLC data.
-Every validated live quote contributes highs/lows across all five ranges,
-independently of the selected view and Nixie frequency. Bootstrap responses
+The chart keeps one consistent venue across all five ranges, independent
+of the selected view and Nixie frequency. Coinbase takes priority, then
+Kraken; other trusted providers can fill in during an outage. A current
+canonical source stays selected while connected and quiet for up to
+30 seconds. A displayed book midpoint cannot replace recent canonical
+observations for that interval, so a venue premium does not inflate chart
+volatility. A returning Coinbase quote restores priority immediately. Bootstrap responses
 also merge into every attempted range rather than replacing the selected
 cache. Switching ranges preserves each cache and its scale.
 
@@ -101,6 +110,13 @@ changed 1,669 of 1,800 transitions (92.7%). It still reclaimed the second
 stream for HTTP after isolated unchanged frames, so the run is retained as
 failed in [its report](../test/device_release_1.0.21_report.json). Version
 1.0.22 adds the sustained-sameness holdoff described above.
+
+The 1.0.22 device run kept both feeds connected, received 12.69 quotes/s,
+and changed 1,797 of 1,798 100 ms transitions (99.94%). Only 863 transitions
+changed multiple digits (48%); the two venues often occupied the same
+ten-dollar band. Its [report](../test/device_release_1.0.22_report.json)
+retains this unmet variation target. Bitfinex book diversity and consistent
+chart venue selection address that remaining requirement in 1.0.23.
 
 The 1.0.18 assembled LAN measurement averaged 100.007 ms but found
 33–167 ms individual gaps during synchronous checkpoints. The result is

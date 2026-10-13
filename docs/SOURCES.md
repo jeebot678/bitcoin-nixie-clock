@@ -9,13 +9,13 @@ entry rather than erasing other prices. The Nixie deadline runs independently
 of fetching; a selected cached quote is a recently observed market price, not a
 claim that another trade occurred at that deadline. REST requests use at least
 five seconds per provider, including shared history/FX traffic. No API keys or
-subscriptions are required. See [exact refresh behavior](NIXIE_REFRESH.md).
+paid plans are required. See [exact refresh behavior](NIXIE_REFRESH.md).
 
 ## Device live streams
 
-Firmware 1.0.20 prefers Coinbase on the primary verified TLS connection and
-Kraken on the secondary. Binance, Bitstamp, Bitfinex and Gemini provide
-fallbacks; only two connections run concurrently. A provider can belong to
+Firmware 1.0.23 prefers Coinbase on the primary verified TLS connection and
+Bitfinex depth-one USD book on the secondary. Kraken, Binance, Bitstamp and
+Gemini provide fallbacks; only two connections run concurrently. A provider can belong to
 only one worker. Each worker retains a nonblocking 16-tick FIFO so a batch of
 real prices reaches the quote selector and candle builder. Overflow discards
 the oldest tick and increments telemetry rather than blocking network reads.
@@ -35,7 +35,7 @@ The TLS gate and conservative memory budget remain enabled.
 | Kraken | `wss://ws.kraken.com/v2`; `ticker` for `BTC/USD` and `USDT/USD`, `event_trigger:bbo`, snapshot enabled; separate `trade` subscription for `BTC/USD`, snapshot disabled | Both subscriptions share one TLS connection. BBO ticker updates can repeat the last price; matched-trade batches retain validated rows and fence duplicate trade IDs. FX ticks update conversion without counting as Bitcoin prices or making an inactive Bitcoin feed look fresh. About 150 connection attempts/rolling 10 minutes/IP; reconnect no faster than five seconds after downtime. [Ticker](https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/ticker), [trades](https://docs.kraken.com/exchange/api-reference/spot-websocket-v2/trade), [connection rules](https://docs.kraken.com/exchange/guides/websockets/introduction). |
 | Binance | `wss://data-stream.binance.vision/ws/btcusdt@aggTrade`; raw market-data-only stream, no subscription message needed | Real aggregate execution price and millisecond trade time; exact `BTCUSDT` symbol and increasing aggregate ID required. Eligible only with fresh USDT/USD conversion. Five incoming control/ping/pong messages/s, 300 connection attempts/5 min/IP, at most 1,024 streams/connection. The client uses one stream and infrequent heartbeat frames. [Official stream and quota documentation](https://github.com/binance/binance-spot-api-docs/blob/master/web-socket-streams.md). |
 | Bitstamp | `wss://ws.bitstamp.net`; `live_trades_btcusd` | Real USD trade price, microtimestamp and increasing ID; honor reconnect events. No numeric public subscription quota established from retrieved docs; one subscription and conservative retries. [Official documentation](https://www.bitstamp.net/websocket/v2/). |
-| Bitfinex | `wss://api-pub.bitfinex.com/ws/2`; `trades`, `tBTCUSD` | 30 public subscriptions/connection. Bind the acknowledged BTC/USD channel, accept `te` with execution milliseconds, ignore `tu`, snapshots, heartbeats and repeated trade IDs. [Trades](https://docs.bitfinex.com/reference/ws-public-trades), [general rules](https://docs.bitfinex.com/docs/ws-general). |
+| Bitfinex | `wss://api-pub.bitfinex.com/ws/2`; `conf` flag `32768` followed by `book`, `tBTCUSD`, `prec:P0`, `freq:F0`, `len:"1"` | Current best-bid/ask midpoint in USD; publication timestamp is appended outside the book array. Bind the exact acknowledged instrument, precision, frequency and length, reconstruct snapshots/deletions, reject crossed or excessively wide quotes, stale/future/backward publication times and malformed rows. Lost/malformed frames require a fresh snapshot through reconnect. Heartbeats never pretend to be new book prices. Public limit 20 connections/min; documentation lists both 25 and 30 channels, so the conservative allowance is 25. Firmware uses one book channel. [Book schema and real-time F0](https://docs.bitfinex.com/reference/ws-public-books), [timestamp configuration](https://docs.bitfinex.com/docs/ws-general), [public limits](https://docs.bitfinex.com/docs/requirements-and-limitations). |
 | Gemini | `wss://ws.gemini.com`; `{"id":"1","method":"subscribe","params":["btcusd@trade"]}` | Public USD trade-only stream; exact instrument, execution nanoseconds and increasing trade ID required. Integer timestamp parsing preserves millisecond precision. The verified connection's `conninfo` advertised request weight 7,000/10 s and 300 connection attempts/5 min; these are observed live allowances, not a permanent promise. One subscription and conservative retries remain far below them. JSON status 429 receives at least a minute of backoff. [Production endpoint](https://developer.gemini.com/trading/websocket/introduction), [trade schema](https://developer.gemini.com/trading/websocket/streams), [connection-info method](https://developer.gemini.com/trading/websocket/playground). |
 
 All six feeds were reached by computer probes. The 2026-10-13 added-feed
@@ -46,16 +46,40 @@ Separate TLS handshakes for both hosts passed with the embedded Mozilla roots
 using TLS 1.2 / ECDHE-RSA-AES128-GCM-SHA256. Sparse exchanges remain useful
 fallbacks; reception volume is measured rather than inferred from a timer.
 
-A separate 60-second computer test used only Coinbase USD ticker and Kraken
-USD BBO ticker. Its JavaScript replica of the firmware quote selector kept
-12 distinct prices per provider with a five-second receipt lifetime. After
-five seconds of warmup, 547 display samples contained 546 changes across all
-546 transitions, including 516 multi-digit changes, no empty frames and
-99–102 ms timer gaps. It received 325 Coinbase and 832 Kraken prices; no
-synthetic adjustments were made. This demonstrates the pair's behavior during
-that observation, not ESP32 transport performance or a guaranteed new trade
-every 100 ms. See [the computer report](../test/usd_pair_frames_report.json)
-and [separate device measurements](NIXIE_REFRESH.md).
+A 60-second probe tested Bitfinex's ticker before choosing its book. The
+ticker produced only five updates with a maximum 15.184-second gap. Using
+its last trade or ticker-derived midpoint with Coinbase gave 370/495 changed
+frames and 296/495 multi-digit changes after warmup. That feed was rejected
+for the preferred pair. See [the ticker probe](../test/bitfinex_ticker_probe_report.json).
+
+The subsequent 60-second verified-TLS probe used the exact firmware HTTP
+upgrade headers and embedded Mozilla roots. Coinbase supplied 190 executed
+trade prices; the same Bitfinex socket supplied 71 valid depth-one BBO
+midpoints, with a maximum 4.406-second gap. Replaying the actual compiled
+`QuoteBook` and `PriceGuard` at 100 ms after ten seconds of warmup produced
+495/495 whole-dollar changes and 495/495 multi-digit changes. Maximum selected
+receipt age was 4.209 seconds. Both sockets remained connected with no errors
+and two successful PING/PONG exchanges each. This computer measurement tests
+the observed price alternatives and selector; ESP32 timing/reception still
+requires separate device acceptance. See [the book probe](../test/bitfinex_book_probe_report.json)
+and [its complete captured book sequence](../test/live_fixtures/bitfinex_book_session.json).
+
+The BBO midpoint is the arithmetic mean of actual best bid and ask prices,
+not an executed trade, and is tagged `BboMidpoint` throughout the display
+selector and diagnostics. Its timestamp describes publication. The optional
+inner ticker `FIRST_TRADE` field is never interpreted as freshness. A separate
+low-volume comparison verified all eleven REST sources again and normalized
+USDT quotes with Kraken's observed USD rate; Bitfinex showed a persistent
+venue premium during that sample. See [the comparison](../test/venue_price_comparison_report.json).
+Canonical chart-source selection is independent of Nixie quote diversity so
+that venue spread does not become chart volatility. See
+[refresh and chart semantics](NIXIE_REFRESH.md).
+
+The earlier Coinbase/Kraken computer experiment remains in
+[its report](../test/usd_pair_frames_report.json). It demonstrated 546/546
+changed transitions, including 516 multi-digit changes, during a different
+60-second market sample. It is retained as historical evidence rather than
+a promise of exchange price differences at every future display deadline.
 
 ## Public REST endpoints
 

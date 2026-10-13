@@ -28,8 +28,57 @@ time_t testTime(time_t* output){if(output)*output=testEpoch;return testEpoch;}
 #undef time
 std::string readFile(const std::string& path){std::ifstream file(path);assert(file.good());std::ostringstream out;out<<file.rdbuf();return out.str();}
 void steps(){for(auto& slot:slots)slot.step();}
+void bookTests(const std::string& directory){
+  btc::BitfinexBook book;btc::Quote quote;StaticJsonDocument<2048> message;
+  auto load=[&](const std::string& value)->JsonVariantConst{message.clear();assert(!deserializeJson(message,value));return message.as<JsonVariantConst>();};
+  assert(!book.configure(load("{\"event\":\"conf\",\"status\":\"OK\",\"flags\":0}")));
+  assert(book.configure(load("{\"event\":\"conf\",\"status\":\"OK\",\"flags\":32768}")));
+  const std::string ack="{\"event\":\"subscribed\",\"channel\":\"book\",\"symbol\":\"tBTCUSD\",\"prec\":\"P0\",\"freq\":\"F0\",\"len\":\"1\",\"chanId\":77}";
+  for(const char* field:{"symbol","prec","freq","len"}){
+    load(ack);message[field]="wrong";assert(!book.bind(message.as<JsonVariantConst>())&&!book.channel);
+  }
+  assert(book.bind(load(ack))&&book.channel==77&&!book.ready);
+  uint32_t epoch=1791917933;uint64_t stamp=uint64_t(epoch)*1000;
+  auto packet=[&](const std::string& value,uint64_t time)->JsonVariantConst{return load("[77,"+value+","+std::to_string(time)+"]");};
+  assert(book.apply(packet("[[83000,1,0.1],[83020,1,-0.1]]",stamp),epoch,quote)&&quote.price==83010&&quote.kind==btc::QuoteKind::BboMidpoint&&quote.timestampMs==stamp);
+  assert(!book.apply(packet("[83000,0,1]",stamp+1),epoch,quote)&&!book.bid&&!book.corrupted);
+  assert(book.apply(packet("[83010,1,0.3]",stamp+2),epoch,quote)&&quote.price==83015);
+  assert(book.apply(packet("[83000,0,1]",stamp+3),epoch,quote)&&quote.price==83015); // Removing an old replaced price cannot erase the current best.
+  assert(!book.apply(packet("[83040,1,0.1]",stamp+4),epoch,quote)&&!book.corrupted); // Crossed transitional state cannot emit a midpoint.
+  assert(book.apply(packet("[83050,1,-0.1]",stamp+5),epoch,quote)&&quote.price==83045);
+  assert(!book.apply(packet("[85000,1,-0.1]",stamp+6),epoch,quote)&&!book.corrupted); // Excessive spread never emits.
+  assert(!book.apply(packet("[83060,1,-0.1]",stamp+5),epoch,quote)&&book.corrupted); // Older publications cannot mutate current state.
+  book.reset();assert(!book.timestamps&&!book.ready&&!book.channel);
+  for(const std::string& invalid:{"[[83000,1,0.1],[83001,1,0.2]]","[[83000,1,0.1]]","[83000,-1,0.1]","[83000,1.5,0.1]","[83000,0,0.5]"}){
+    book.reset();assert(book.configure(load("{\"event\":\"conf\",\"status\":\"OK\",\"flags\":32768}"))&&book.bind(load(ack)));
+    if(invalid[1]!='[')assert(book.apply(packet("[[83000,1,0.1],[83020,1,-0.1]]",stamp),epoch,quote));
+    assert(!book.apply(packet(invalid,stamp+1),epoch,quote)&&book.corrupted);
+  }
+  for(uint64_t invalidTime:{stamp-6000,stamp+11000,uint64_t(UINT64_MAX)}){
+    book.reset();assert(book.configure(load("{\"event\":\"conf\",\"status\":\"OK\",\"flags\":32768}"))&&book.bind(load(ack)));
+    assert(!book.apply(packet("[[83000,1,0.1],[83020,1,-0.1]]",invalidTime),epoch,quote)&&book.corrupted);
+  }
+  // Independently captured sequence reproduces the depth-one reference,
+  // including old-level removals, quantity changes and channel heartbeats.
+  DynamicJsonDocument captured(65536);assert(!deserializeJson(captured,readFile(directory+"/bitfinex_book_session.json")));
+  book.reset();double bid=0,ask=0;unsigned emitted=0;
+  for(JsonVariantConst root:captured.as<JsonArrayConst>()){
+    if(root.is<JsonObjectConst>()){
+      if(btc::equals(root["event"],"conf"))assert(book.configure(root));
+      else assert(book.bind(root));continue;
+    }
+    if(btc::equals(root[1],"hb")){assert(!book.apply(root,uint32_t(root[2].as<uint64_t>()/1000),quote)&&!book.corrupted);continue;}
+    auto reference=[&](JsonVariantConst row){double p=row[0].as<double>(),amount=row[2].as<double>();double& side=amount>0?bid:ask;if(row[1].as<unsigned>())side=p;else if(side==p)side=0;};
+    if(root[1][0].is<JsonArrayConst>()){bid=ask=0;for(JsonVariantConst row:root[1].as<JsonArrayConst>())reference(row);}else reference(root[1]);
+    bool valid=bid>0&&ask>=bid&&(ask-bid)/((ask+bid)/2)<=.01;
+    assert(book.apply(root,uint32_t(root[2].as<uint64_t>()/1000),quote)==valid&&!book.corrupted);
+    if(valid){assert(quote.price==(bid+ask)/2&&quote.kind==btc::QuoteKind::BboMidpoint);++emitted;}
+  }
+  assert(emitted==71);
+}
 int main(int argc,char** argv){
   assert(argc==2);std::string directory=argv[1];
+  bookTests(directory);
   // TLS uses two separate record buffers. Fragmented RAM with no combined
   // 36 KiB block is usable; one large block alone does not prove both fit.
   testHeapBlocks()={20000,20000,28200};assert(network_memory::fits(8192));
@@ -39,7 +88,7 @@ int main(int argc,char** argv){
   BoundedWebSocketTls bounded;assert(bounded.handshakeSeconds==20&&bounded.timeoutSeconds==3&&!bounded.verified);bounded.setCACertBundle(caBundle);assert(bounded.verified);
   uint32_t idleAt=testMillis;uint8_t byte;assert(bounded.read()<0&&testMillis==idleAt+1);
   assert(bounded.read(&byte,0)==0&&testMillis==idleAt+1);bounded.data={42,43};assert(bounded.read()==42&&bounded.read(&byte,1)==1&&byte==43);
-  failQueue=true;assert(!live::begin()&&!queues);failQueue=false;failTask=true;assert(!live::begin()&&!queues);failTask=false;assert(live::begin()&&queues==2);
+  failQueue=true;assert(!live::begin()&&!queues);failQueue=false;failTask=true;assert(!live::begin()&&!queues);failTask=false;assert(live::begin()&&queues==2);assert(providers[0]==0&&providers[1]==4);slots[1].nextProvider=2; // Exercise Kraken fallback while checking preferred IDs.
   steps();assert(!liveSockets()&&live::status().paused);WiFi.connection=WL_CONNECTED;steps();assert(!liveSockets());
   testEpoch=btc::isoTimestamp("2026-10-11T05:34:22Z");assert(live::pauseAndWait(0));steps();assert(!liveSockets());live::resume();
   live::httpBusy(true);steps();assert(!liveSockets());live::httpBusy(false);
@@ -92,19 +141,20 @@ int main(int argc,char** argv){
   assert(!live::prepareHttp(8192,0));steps();assert(!liveSockets()&&primary.paused);
   testDataHeap()=testDataBlock()=UINT32_MAX;ESP.largest=100000;
   ESP.freeHeap=150000;assert(live::prepareHttp(8192,0));live::httpBusy(false);steps();assert(live::status().connections==2);
-  primary.socket->emit(WStype_DISCONNECTED,"HTTP 403");primary.step();assert(!primary.socket&&primary.cooldown[0].availableAt==testMillis+3600000);
+  primary.cooldown[4].availableAt=testMillis+5000;primary.socket->emit(WStype_DISCONNECTED,"HTTP 403");primary.step();assert(!primary.socket&&primary.cooldown[0].availableAt==testMillis+3600000);
   primary.step();assert(primary.source==2&&primary.socket->host=="ws.bitstamp.net"); // Kraken belongs to the other worker; USDT is ineligible without FX.
   std::string stamp="{\"event\":\"trade\",\"channel\":\"live_trades_btcusd\",\"data\":{\"price\":83008,\"id\":42,\"microtimestamp\":\""+std::to_string(uint64_t(testEpoch)*1000000)+"\"}}";
   primary.socket->emit(WStype_TEXT,stamp);assert(live::receive(tick)&&tick.source==2&&tick.quote.price==83008);
   primary.socket->emit(WStype_TEXT,stamp);assert(!live::receive(tick));
-  primary.socket->emit(WStype_TEXT,"{\"event\":\"bts:request_reconnect\"}");primary.step();assert(!primary.socket);primary.step();assert(primary.source==4);
-  std::string trade="[77,\"te\",[42,"+std::to_string(uint64_t(testEpoch)*1000)+",0.01,83009]]";
-  primary.socket->emit(WStype_TEXT,trade);assert(!live::receive(tick)); // No trusted symbol/channel binding yet.
-  primary.socket->emit(WStype_TEXT,"{\"event\":\"subscribed\",\"channel\":\"trades\",\"symbol\":\"tETHUSD\",\"chanId\":77}");
-  primary.socket->emit(WStype_TEXT,trade);assert(!live::receive(tick));
-  primary.socket->emit(WStype_TEXT,"{\"event\":\"subscribed\",\"channel\":\"trades\",\"symbol\":\"tBTCUSD\",\"chanId\":77}");
-  primary.socket->emit(WStype_TEXT,trade);assert(live::receive(tick)&&tick.source==4&&tick.quote.price==83009);
-  primary.socket->emit(WStype_TEXT,trade);primary.socket->emit(WStype_TEXT,"[77,\"tu\",[43,1791696862000,0.01,83010]]");assert(!live::receive(tick));
+  primary.socket->emit(WStype_TEXT,"{\"event\":\"bts:request_reconnect\"}");primary.step();assert(!primary.socket);primary.nextProvider=1;primary.cooldown[4].availableAt=testMillis;primary.step();assert(primary.source==4);
+  std::string bookSnapshot="[77,[[83000,1,0.1],[83020,1,-0.1]],"+std::to_string(uint64_t(testEpoch)*1000)+"]";
+  primary.socket->emit(WStype_TEXT,bookSnapshot);assert(!live::receive(tick)); // No bound channel/config yet.
+  primary.socket->emit(WStype_TEXT,"{\"event\":\"conf\",\"status\":\"OK\",\"flags\":32768}");
+  primary.socket->emit(WStype_TEXT,"{\"event\":\"subscribed\",\"channel\":\"book\",\"symbol\":\"tBTCUSD\",\"prec\":\"P0\",\"freq\":\"F0\",\"len\":\"1\",\"chanId\":77}");
+  primary.socket->emit(WStype_TEXT,bookSnapshot);assert(live::receive(tick)&&tick.source==4&&tick.quote.price==83010&&tick.quote.kind==btc::QuoteKind::BboMidpoint);
+  assert(primary.socket->sent[0].find("32768")!=std::string::npos&&primary.socket->sent[1].find("book")!=std::string::npos);
+  primary.socket->emit(WStype_TEXT,"[77,\"hb\",1791696862000]");
+  primary.socket->emit(WStype_TEXT,"[77,\"te\",[42,1791696862000,0.01,83009]]");assert(!live::receive(tick));
   primary.socket->emit(WStype_DISCONNECTED,"HTTP 429");primary.step();assert(primary.cooldown[4].availableAt==testMillis+60000);
   primary.step();assert(primary.source==3&&primary.socket->host=="ws.gemini.com");
   std::string gemini="{\"E\":"+std::to_string(uint64_t(testEpoch)*1000000000+987654321)+",\"s\":\"btcusd\",\"t\":2840141032956701,\"p\":\"83017.89\",\"q\":\"0.01\",\"m\":true}";
@@ -112,7 +162,7 @@ int main(int argc,char** argv){
   primary.socket->emit(WStype_TEXT,gemini);assert(!live::receive(tick));
   primary.socket->emit(WStype_TEXT,"{\"id\":\"1\",\"status\":429,\"error\":{\"code\":-1003,\"msg\":\"Rate limit exceeded\"}}");
   primary.step();assert(primary.cooldown[3].availableAt==testMillis+60000&&!primary.socket);
-  primary.nextProvider=2;live::allowUsdt(true);primary.step();
+  primary.nextProvider=3;live::allowUsdt(true);primary.step();
   assert(primary.source==5&&primary.socket->host=="data-stream.binance.vision"&&primary.socket->url=="/ws/btcusdt@aggTrade"&&primary.socket->sent.empty());
   std::string binance="{\"e\":\"aggTrade\",\"s\":\"BTCUSDT\",\"p\":\"83016.54\",\"a\":152345678,\"T\":"+std::to_string(uint64_t(testEpoch)*1000+123)+"}";
   primary.socket->emit(WStype_TEXT,binance);assert(live::receive(tick)&&tick.source==5&&std::abs(tick.quote.price-83016.54)<1e-6);
@@ -120,14 +170,14 @@ int main(int argc,char** argv){
   live::allowUsdt(false);primary.step();assert(!primary.socket||primary.source!=5); // Expired conversion closes an unusable stream and leaves USD failover eligible.
   assert(!live::pauseAndWait(0));steps();assert(live::pauseAndWait(0)&&!liveSockets());live::resume();
   WiFi.connection=0;steps();assert(live::status().paused&&!liveSockets());WiFi.connection=WL_CONNECTED;
-  testMillis=UINT32_MAX-500;for(auto& slot:slots){slot.nextProvider=slot.index;for(auto& state:slot.cooldown)state.availableAt=testMillis;}
+  testMillis=UINT32_MAX-500;for(auto& slot:slots){slot.nextProvider=slot.index?2:0;for(auto& state:slot.cooldown)state.availableAt=testMillis;}
   steps();testMillis=501;for(auto& slot:slots)if(slot.source==1)slot.socket->emit(WStype_TEXT,kraken);
   assert(live::fresh(testMillis));
   testMillis+=35001;steps();assert(!live::status().connected);
   // The pinned library begins with lastPing=0 and pongReceived=false. A
   // connected feed must not time out before its first scheduled ping, nor
   // lose a healthy data stream merely because control PONGs are delayed.
-  for(auto& slot:slots){slot.close();slot.nextProvider=slot.index;for(auto& state:slot.cooldown)state.availableAt=testMillis;}
+  for(auto& slot:slots){slot.close();slot.nextProvider=slot.index?2:0;for(auto& state:slot.cooldown)state.availableAt=testMillis;}
   steps();uint32_t heartbeatStart=testMillis;
   for(auto& slot:slots)assert(slot.socket&&slot.connected&&slot.socket->misses==0&&slot.socket->pong==10000);
   testMillis=heartbeatStart+11001;steps();assert(live::status().connections==2);
@@ -141,7 +191,7 @@ int main(int argc,char** argv){
   // Silent TLS connect failures expose the exact negative error before the
   // next library iteration can delete the SSL object. They release the gate
   // immediately, keeping the other worker free to establish its connection.
-  for(auto& slot:slots){slot.close();slot.nextProvider=slot.index;for(auto& state:slot.cooldown)state.availableAt=testMillis;}
+  for(auto& slot:slots){slot.close();slot.nextProvider=slot.index?2:0;for(auto& state:slot.cooldown)state.availableAt=testMillis;}
   {btc::TlsLease held;assert(held.acquire());steps();}
   slots[0].socket->tlsFailure(-32512);slots[0].step();
   auto diagnosis=live::status();
@@ -152,18 +202,18 @@ int main(int argc,char** argv){
   // while another connection keeps delivering prices. A reserved upgrade
   // prevents both workers from dropping their fallbacks together.
   for(auto& slot:slots){slot.close();for(auto& state:slot.cooldown)state.availableAt=testMillis;}
-  slots[0].nextProvider=3;slots[1].nextProvider=4;live::allowUsdt(false);steps();
-  assert(slots[0].source==2&&slots[1].source==4);
+  slots[0].nextProvider=4;slots[1].nextProvider=5;live::allowUsdt(false);steps();
+  assert(slots[0].source==2&&slots[1].source==3);
   uint32_t fallbackStart=testMillis;testMillis=fallbackStart+30001;
   {btc::TlsLease held;assert(held.acquire());slots[0].step();
     assert(!slots[0].connected&&slots[0].source==0&&slots[1].connected&&recoveryOwner==1);
-    slots[1].step();assert(slots[1].connected&&slots[1].source==4&&recoveryOwner==1);
+    slots[1].step();assert(slots[1].connected&&slots[1].source==3&&recoveryOwner==1);
   }
   slots[0].step();assert(slots[0].connected&&slots[0].source==0&&!recoveryOwner);
   assert(live::status().slots[0].reason==live::Reason::PreferredRecovery&&live::status().slots[0].reasonSource==2);
-  slots[1].step();assert(slots[1].source==1&&slots[1].connected); // Peer preferred ownership is respected.
+  slots[1].step();assert(slots[1].source==4&&slots[1].connected); // Peer preferred ownership is respected.
   // With only one live fallback, retain it while the idle worker recovers.
-  slots[0].close();slots[1].close();slots[0].nextProvider=3;slots[0].step();
+  slots[0].close();slots[1].close();slots[0].nextProvider=4;slots[0].step();
   assert(slots[0].connected&&slots[0].source==2);testMillis+=30001;slots[0].step();assert(slots[0].connected&&slots[0].source==2);
   // Independently captured public trade payloads validate schema/timestamps.
   for(uint8_t provider:{uint8_t(2),uint8_t(4)}){

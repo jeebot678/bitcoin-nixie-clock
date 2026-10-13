@@ -14,7 +14,7 @@ extern const uint8_t caBundle[] asm("_binary_data_cert_x509_crt_bundle_bin_start
 namespace {
 // Put the highest-throughput USD trade feed on the primary socket. Fallbacks
 // add subscriptions, not TLS sessions, and share the same bounded retries.
-constexpr uint8_t providers[]={0,1,5,2,4,3};
+constexpr uint8_t providers[]={0,4,1,5,2,3};
 constexpr unsigned providerCount=sizeof(providers)/sizeof(providers[0]);
 constexpr unsigned slotCount=2;
 constexpr unsigned tickDepth=16;
@@ -56,6 +56,7 @@ struct Slot {
   int failureStatus=0;
   uint32_t openedAt=0,lastMessageAt=0,lastValidQuoteAt=0,channel=0;
   uint64_t lastTrade=0;
+  btc::BitfinexBook book;
   void record(live::Reason cause,uint32_t now,int code=0,int tls=0){
     reasonSource=source.load();diagnosticStatus=int16_t(code);diagnosticTls=tls;reasonAt=now;reason=cause;
   }
@@ -87,8 +88,9 @@ struct Slot {
         ? "{\"method\":\"subscribe\",\"params\":{\"channel\":\"ticker\",\"symbol\":[\"BTC/USD\",\"USDT/USD\"],\"event_trigger\":\"bbo\",\"snapshot\":true}}"
         : source==0 ? "{\"type\":\"subscribe\",\"product_ids\":[\"BTC-USD\"],\"channels\":[\"ticker\",\"heartbeat\"]}"
         : source==2 ? "{\"event\":\"bts:subscribe\",\"data\":{\"channel\":\"live_trades_btcusd\"}}"
-        : source==4 ? "{\"event\":\"subscribe\",\"channel\":\"trades\",\"symbol\":\"tBTCUSD\"}"
+        : source==4 ? "{\"event\":\"subscribe\",\"channel\":\"book\",\"symbol\":\"tBTCUSD\",\"prec\":\"P0\",\"freq\":\"F0\",\"len\":\"1\"}"
         : source==3 ? "{\"id\":\"1\",\"method\":\"subscribe\",\"params\":[\"btcusd@trade\"]}":nullptr;
+      if(source==4)socket->sendTXT("{\"event\":\"conf\",\"flags\":32768}");
       if(subscription)socket->sendTXT(subscription);
       if(source==1)socket->sendTXT("{\"method\":\"subscribe\",\"params\":{\"channel\":\"trade\",\"symbol\":[\"BTC/USD\"],\"snapshot\":false}}");
       Serial.printf("Live stream %u connected: %s\n",index,btc::kSources[source].name);
@@ -103,9 +105,9 @@ struct Slot {
       Serial.printf("Stream %u disconnected: %s (%s)\n",index,btc::kSources[source].name,reason);
       connected=false;failed=true;++disconnects;
     } else if (type==WStype_TEXT && length) {
-      if(length>8192){++rejected;return;}
+      if(length>8192){++rejected;if(source==4){failed=true;record(live::Reason::Protocol,now);}return;}
       document.clear();
-      if (deserializeJson(document,payload,length,DeserializationOption::NestingLimit(8))) {++rejected;return;}
+      if (deserializeJson(document,payload,length,DeserializationOption::NestingLimit(8))) {++rejected;if(source==4){failed=true;record(live::Reason::Protocol,now);}return;}
       lastMessageAt=now;
       JsonVariantConst root=document.as<JsonVariantConst>();
       if (btc::equals(root["type"],"error") || btc::equals(root["event"],"error") ||
@@ -116,12 +118,21 @@ struct Slot {
         record(btc::equals(root["event"],"bts:request_reconnect")?live::Reason::ServerReconnect:live::Reason::SubscriptionError,now,failureStatus);
         failed=true;return;
       }
-      if (source==4 && btc::equals(root["event"],"subscribed") &&
-          btc::equals(root["channel"],"trades") && btc::equals(root["symbol"],"tBTCUSD")) {
-        channel=root["chanId"].as<uint32_t>();return;
-      }
       live::Tick tick;
       uint32_t epoch=uint32_t(time(nullptr));
+      if(source==4){
+        if(btc::equals(root["event"],"conf")||btc::equals(root["event"],"subscribed")){
+          bool bound=btc::equals(root["event"],"conf")?book.configure(root):book.bind(root);
+          if(!bound){failed=true;record(live::Reason::SubscriptionError,now);}
+          return;
+        }
+        if(btc::equals(root["event"],"info")&&(root["code"]==20051||root["code"]==20060||root["code"]==20061)){
+          failed=true;record(live::Reason::ServerReconnect,now);return;
+        }
+        if(book.apply(root,epoch,tick.quote))enqueue(tick,now);
+        if(book.corrupted){++rejected;failed=true;record(live::Reason::Protocol,now);}
+        return; // Trade/ticker payloads cannot masquerade as a current BBO.
+      }
       if(source==1 && btc::parseKrakenFx(root,epoch,tick.fx)) {
         tick.quote.timestamp=btc::isoTimestamp(root["data"][0]["timestamp"]);
         tick.quote.timestampMs=btc::isoTimestampMs(root["data"][0]["timestamp"]);
@@ -156,14 +167,15 @@ struct Slot {
     if(socket&&btc::kSources[source].usdt&&!usdtAllowed){record(live::Reason::FxExpired,now);close();}
     // Upgrade a sparse fallback after its preferred feeds leave cooldown.
     // One worker upgrades at a time, preserving the other established feed.
-    if(connected&&source!=0&&source!=1&&uint32_t(now-openedAt)>=30000&&!busy&&otherConnected(index)){
-      for(unsigned preferred=0;preferred<2;++preferred){
+    if(connected&&source!=providers[0]&&source!=providers[1]&&uint32_t(now-openedAt)>=30000&&!busy&&otherConnected(index)){
+      for(unsigned position=0;position<2;++position){
+        unsigned preferred=providers[position];
         if(!btc::due(now,cooldown[preferred].availableAt)||owners[preferred])continue;
         uint8_t free=0;
         if(!recoveryOwner.compare_exchange_strong(free,uint8_t(index+1)))break;
         free=0;
         if(!owners[preferred].compare_exchange_strong(free,uint8_t(index+1))){uint8_t own=uint8_t(index+1);recoveryOwner.compare_exchange_strong(own,0);continue;}
-        record(live::Reason::PreferredRecovery,now);close(false);source=uint8_t(preferred);nextProvider=preferred;break;
+        record(live::Reason::PreferredRecovery,now);close(false);source=uint8_t(preferred);nextProvider=position;break;
       }
     }
     if (!socket) {
@@ -177,7 +189,7 @@ struct Slot {
       }
       if (eligible<0){phase=live::Phase::Backoff;return;}
       nextProvider=unsigned(eligible);source=providers[nextProvider];
-      failed=false;failureStatus=0;channel=0;lastTrade=0;openedAt=lastMessageAt=lastValidQuoteAt=now;
+      failed=false;failureStatus=0;channel=0;lastTrade=0;book.reset();openedAt=lastMessageAt=lastValidQuoteAt=now;
       Serial.printf("Stream %u starting: %s, dataHeap=%lu dataBlock=%lu\n",index,btc::kSources[source].name,(unsigned long)network_memory::freeBytes(),(unsigned long)network_memory::largestBlock());
       socket.reset(new StreamSocket());socket->onEvent([this](WStype_t type,uint8_t* data,size_t size){event(type,data,size);});
       const char* host=source==1?"ws.kraken.com":source==0?"ws-feed.exchange.coinbase.com":source==2?"ws.bitstamp.net":source==4?"api-pub.bitfinex.com":source==3?"ws.gemini.com":"data-stream.binance.vision";

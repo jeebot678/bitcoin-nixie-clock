@@ -1,0 +1,222 @@
+{
+  "checked_at_utc": "2026-10-13T18:55:57.598Z",
+  "duration_ms": 60000,
+  "scope": "Computer verified TLS with embedded Mozilla roots and exact firmware headers. Actual compiled QuoteBook and PriceGuard sampled100ms; no ESP32/device controls or extra device sessions.",
+  "subscriptions": {
+    "Coinbase": [
+      {
+        "type": "subscribe",
+        "product_ids": [
+          "BTC-USD"
+        ],
+        "channels": [
+          "ticker",
+          "heartbeat"
+        ]
+      }
+    ],
+    "Bitfinex": [
+      {
+        "event": "conf",
+        "flags": 32768
+      },
+      {
+        "event": "subscribe",
+        "channel": "ticker",
+        "symbol": "tBTCUSD"
+      }
+    ]
+  },
+  "timestamp_semantics": "Bitfinex conf32768 external timestamp is publication time, not execution time. Inner optional FIRST_TRADE is not used for freshness. Midpoint is derived from current best bid+ask, last is last executed trade.",
+  "results": [
+    {
+      "provider": "Coinbase",
+      "mode": "firmware",
+      "endpoint": "wss://ws-feed.exchange.coinbase.com/",
+      "request_headers": {
+        "Host": "ws-feed.exchange.coinbase.com:443",
+        "Connection": "Upgrade",
+        "Upgrade": "websocket",
+        "Sec-WebSocket-Version": "13",
+        "User-Agent": "arduino-WebSocket-Client",
+        "Origin": "file://"
+      },
+      "certificate_validation": "embedded Mozilla PEM, rejectUnauthorized=true, TLS hostname validation",
+      "protocol": null,
+      "extensions": null,
+      "ping_interval_ms": 20000,
+      "pong_timeout_ms": 5000,
+      "upgrade_status": 101,
+      "open_at_ms": 202,
+      "messages": 323,
+      "message_types": {
+        "subscriptions": 1,
+        "ticker": 262,
+        "heartbeat": 60
+      },
+      "btc_quotes": 262,
+      "fx_quotes": 0,
+      "invalid_quotes": 0,
+      "pings_sent": 2,
+      "pongs_received": 2,
+      "server_pings": 0,
+      "pong_rtt_ms": [
+        27,
+        30
+      ],
+      "errors": [],
+      "sample_quotes": [
+        {
+          "at_ms": 249,
+          "price": 83068.84,
+          "timestamp_ms": 1791917757891
+        },
+        {
+          "at_ms": 860,
+          "price": 83068.84,
+          "timestamp_ms": 1791917758531
+        },
+        {
+          "at_ms": 1195,
+          "price": 83068.84,
+          "timestamp_ms": 1791917758861
+        },
+        {
+          "at_ms": 1438,
+          "price": 83068.85,
+          "timestamp_ms": 1791917759110
+        },
+        {
+          "at_ms": 1936,
+          "price": 83068.84,
+          "timestamp_ms": 1791917759604
+        }
+      ],
+      "max_quote_gap_ms": 2633,
+      "last_quote_at_ms": 59502,
+      "unexpected_disconnect": false,
+      "tls_authorized": true,
+      "tls_version": "TLSv1.3",
+      "response_headers": {
+        "upgrade": "websocket",
+        "connection": "upgrade",
+        "server": "cloudflare",
+        "date": "Tue, 13 Oct 2026 18:55:57 GMT"
+      },
+      "finished_reason": "duration-complete",
+      "elapsed_ms": 60001,
+      "connected_at_end": true,
+      "final_quote_age_ms": 499
+    },
+    {
+      "provider": "Bitfinex",
+      "mode": "firmware",
+      "endpoint": "wss://api-pub.bitfinex.com/ws/2",
+      "request_headers": {
+        "Host": "api-pub.bitfinex.com:443",
+        "Connection": "Upgrade",
+        "Upgrade": "websocket",
+        "Sec-WebSocket-Version": "13",
+        "User-Agent": "arduino-WebSocket-Client",
+        "Origin": "file://"
+      },
+      "certificate_validation": "embedded Mozilla PEM, rejectUnauthorized=true, TLS hostname validation",
+      "protocol": null,
+      "extensions": null,
+      "ping_interval_ms": 20000,
+      "pong_timeout_ms": 5000,
+      "upgrade_status": 101,
+      "open_at_ms": 479,
+      "messages": 12,
+      "message_types": {
+        "other": 11,
+        "ticker/undefined": 1
+      },
+      "btc_quotes": 5,
+      "fx_quotes": 0,
+      "invalid_quotes": 0,
+      "pings_sent": 2,
+      "pongs_received": 2,
+      "server_pings": 0,
+      "pong_rtt_ms": [
+        123,
+        132
+      ],
+      "errors": [],
+      "sample_quotes": [
+        {
+          "at_ms": 610,
+          "price": 83198,
+          "timestamp_ms": 1791917758261
+        },
+        {
+          "at_ms": 11422,
+          "price": 83180,
+          "timestamp_ms": 1791917769074
+        },
+        {
+          "at_ms": 26440,
+          "price": 83212,
+          "timestamp_ms": 1791917784092
+        },
+        {
+          "at_ms": 41424,
+          "price": 83200,
+          "timestamp_ms": 1791917799073
+        },
+        {
+          "at_ms": 56608,
+          "price": 83200,
+          "timestamp_ms": 1791917814259
+        }
+      ],
+      "max_quote_gap_ms": 15184,
+      "last_quote_at_ms": 56608,
+      "unexpected_disconnect": false,
+      "tls_authorized": true,
+      "tls_version": "TLSv1.3",
+      "response_headers": {
+        "upgrade": "websocket",
+        "connection": "upgrade",
+        "server": "cloudflare",
+        "date": "Tue, 13 Oct 2026 18:55:58 GMT"
+      },
+      "finished_reason": "duration-complete",
+      "elapsed_ms": 60001,
+      "connected_at_end": true,
+      "final_quote_age_ms": 3393
+    }
+  ],
+  "selector_results": {
+    "last": {
+      "frames": 496,
+      "transitions": 495,
+      "whole_dollar_changes": 370,
+      "multi_digit_changes": 296,
+      "percent_changed": 74.74747474747475,
+      "percent_multi_digit": 59.7979797979798,
+      "sources": [
+        0,
+        4
+      ],
+      "max_selected_quote_age_ms": 4974,
+      "min_frame_gap_ms": 99,
+      "max_frame_gap_ms": 102
+    },
+    "midpoint": {
+      "frames": 496,
+      "transitions": 495,
+      "whole_dollar_changes": 370,
+      "multi_digit_changes": 296,
+      "percent_changed": 74.74747474747475,
+      "percent_multi_digit": 59.7979797979798,
+      "sources": [
+        0,
+        4
+      ],
+      "max_selected_quote_age_ms": 4974,
+      "min_frame_gap_ms": 99,
+      "max_frame_gap_ms": 102
+    }
+  }
+}

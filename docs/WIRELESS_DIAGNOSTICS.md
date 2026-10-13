@@ -43,6 +43,11 @@ code and age. `stream_source_failures` counts failures separately for every
 provider. Source 255 means none and reason age `UINT32_MAX` means no stop has
 been recorded. These fields distinguish exchange refusal, TLS failure,
 header/heartbeat timeouts, RAM waiting and deliberate HTTP/OTA reservations.
+Version 1.0.23 adds `display_quote_kind` (`last-trade` or `bbo-midpoint`),
+`chart_source` and `chart_quote_age_ms`. Book midpoint timestamps mark
+publication rather than execution. The chart source can differ from the
+displayed quote venue; premium display quotes do not alter a healthy
+canonical chart.
 The chart mask now contains every displayed candle column, including one-cell
 carried-price markers for quiet or missing buckets. `history_candles` counts
 only retained real OHLC buckets; placeholders are neither stored nor used to
@@ -101,7 +106,7 @@ both switches run from POS5 to POS1. See [the mapping](PCB_PIN_MAP.md).
 ## Triggering an update
 
 ```sh
-python3 tools/clock_link.py ota --expect 1.0.22 --wait 240
+python3 tools/clock_link.py ota --expect 1.0.23 --wait 240
 ```
 
 First publish and verify the signed newer release and `main` manifest. The tool

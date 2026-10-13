@@ -44,6 +44,9 @@ uint32_t chartColumns=0;
 uint16_t chartPixels=0;
 double shownPrice=0;
 uint8_t shownSource=0,lastAcceptedSource=0;
+btc::QuoteKind shownQuoteKind=btc::QuoteKind::LastTrade,lastAcceptedKind=btc::QuoteKind::LastTrade;
+uint8_t chartSource=255;
+uint32_t chartQuoteReceived=0;
 uint32_t shownQuoteReceived=0;
 uint32_t shownDigits=0;
 uint32_t nextNixieAt=0,nixieFrames=0,lastNixieAt=0,acceptedQuotes=0;
@@ -140,6 +143,7 @@ void publishTelemetry(uint32_t now) {
   s.minimumGap=minimumFrameGap;s.maximumGap=maximumFrameGap;
   s.transitions=priceTransitions;s.priceChanges=priceChanges;s.multiChanges=multiDigitChanges;
   s.marketPrice=guard.price;s.displayPrice=shownPrice;s.digits=shownDigits;s.source=shownSource;
+  s.quoteKind=shownQuoteKind;s.chartSource=chartSource;s.chartQuoteAge=chartSource<btc::kSourceCount?now-chartQuoteReceived:UINT32_MAX;
   bool testing=tubeTestEndsAt&&!btc::due(now,tubeTestEndsAt);
   s.displayMode=testing?3:!s.online||!guard.price?1:uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(s.interval)?2:0;
   if(testing)s.testStep=uint8_t((5000-uint32_t(tubeTestEndsAt-now))/500);
@@ -207,10 +211,23 @@ void acceptQuote(const btc::Quote& quote,uint8_t source,uint32_t receivedAt,uint
     lastPriceEpoch=quote.timestamp?quote.timestamp:epoch;
     lastQuoteReceived=receivedAt;++acceptedQuotes;needConfirmation=!guard.confirmed();
     if (needConfirmation) nextQuoteAt=now; // Confirmation never waits for a slow display dial.
-    lastAcceptedSource=source;quotes.put(price,source,receivedAt,lastPriceEpoch);
+    lastAcceptedSource=source;lastAcceptedKind=quote.kind;
+    quotes.put(price,source,receivedAt,lastPriceEpoch,quote.kind);
+    // Keep one venue's chart observations consistent. The tubes may select
+    // other genuine quotes, including book midpoints with a venue premium.
+    uint16_t providers=liveReady?live::status().providers:0;
+    unsigned rank=source==0?0:source==1?1:2;
+    unsigned currentRank=chartSource==0?0:chartSource==1?1:2;
+    uint32_t chartAge=now-chartQuoteReceived;
+    bool chartAlive=chartSource<btc::kSourceCount&&(chartAge<=5000||
+      (chartAge<=30000&&((providers&(1U<<chartSource))||quote.kind==btc::QuoteKind::BboMidpoint)));
+    if(source!=chartSource&&chartAlive&&rank>=currentRank)return;
+    bool sameConnected=source==chartSource&&(providers&(1U<<source));
+    chartSource=source;chartQuoteReceived=receivedAt;
     uint64_t stampMs=quote.timestampMs?quote.timestampMs:uint64_t(lastPriceEpoch)*1000;
     uint64_t utcMs=chartNowMs();
-    if(!chartContinuousSince||uint32_t(now-lastChartTickAt)>5000){chartContinuousSince=std::min(stampMs,utcMs);for(auto& filled:candleBackfilled)filled=false;}
+    uint32_t gapLimit=sameConnected?30000:5000;
+    if(!chartContinuousSince||uint32_t(now-lastChartTickAt)>gapLimit){chartContinuousSince=std::min(stampMs,utcMs);for(auto& filled:candleBackfilled)filled=false;}
     lastChartTickAt=now;
     for(unsigned w=0;w<5;++w){
       if(candleSeries[w].add(stampMs,price,w,utcMs))markCandleDirty(w,now);
@@ -250,7 +267,7 @@ void refreshNixies(uint32_t now) {
     const bool firstFrame=!shownPrice;
     const uint32_t previousDigits=shownDigits;
     const uint32_t period=refreshPeriod();
-    btc::DisplayQuote selected{guard.price,lastQuoteReceived,lastPriceEpoch,lastAcceptedSource};
+    btc::DisplayQuote selected{guard.price,lastQuoteReceived,lastPriceEpoch,lastAcceptedSource,lastAcceptedKind};
     quotes.choose(now,firstFrame?0:shownDigits,shownSource,guard.price,fx.fresh(now),selected);
     uint32_t digits=uint32_t(std::floor(selected.price+0.5));
     bool previousNeedDifferent=needDifferentQuote;
@@ -258,6 +275,7 @@ void refreshNixies(uint32_t now) {
     if(!needDifferentQuote)differentQuoteSince=0;
     else if(!previousNeedDifferent)differentQuoteSince=now;
     shownDigits=digits;
+    shownQuoteKind=selected.kind;
     display::price(double(shownDigits),true);shownPrice=selected.price;shownSource=selected.source;shownQuoteReceived=selected.receivedAt;++nixieFrames;
     lastFrameGap=now-lastNixieAt;
     if(lastFramePeriod!=period||firstFrame){minimumFrameGap=maximumFrameGap=0;lastFramePeriod=period;priceTransitions=priceChanges=multiDigitChanges=0;}

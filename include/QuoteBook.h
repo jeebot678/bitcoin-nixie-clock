@@ -16,21 +16,23 @@ struct DisplayQuote {
   double price=0;
   uint32_t receivedAt=0, timestamp=0;
   uint8_t source=0;
+  QuoteKind kind=QuoteKind::LastTrade;
   DisplayQuote()=default;
-  DisplayQuote(double p,uint32_t received,uint32_t stamp,uint8_t provider)
-    :price(p),receivedAt(received),timestamp(stamp),source(provider) {}
+  DisplayQuote(double p,uint32_t received,uint32_t stamp,uint8_t provider,QuoteKind type=QuoteKind::LastTrade)
+    :price(p),receivedAt(received),timestamp(stamp),source(provider),kind(type) {}
 };
+static_assert(sizeof(DisplayQuote)==24,"Quote kind must use existing display-cache padding");
 // Keep several distinct real whole-dollar prices per provider. Duplicate
 // updates refresh one entry instead of pushing every alternative out.
 class QuoteBook {
  public:
   static constexpr uint32_t kMaximumAgeMs=5000;
   static constexpr unsigned kDepth=12;
-  void put(double price,uint8_t source,uint32_t receivedAt,uint32_t timestamp) {
+  void put(double price,uint8_t source,uint32_t receivedAt,uint32_t timestamp,QuoteKind kind=QuoteKind::LastTrade) {
     if(source>=kSourceCount||!validPrice(price))return;
     auto& latest=entries_[source][heads_[source]];
     if(validPrice(latest.price)&&std::floor(latest.price+0.5)!=std::floor(price+0.5))heads_[source]=(heads_[source]+1)%kDepth;
-    entries_[source][heads_[source]]={price,receivedAt,timestamp,source};
+    entries_[source][heads_[source]]={price,receivedAt,timestamp,source,kind};
   }
   static unsigned changedDigits(uint32_t a,uint32_t b){
     unsigned changed=0;for(unsigned i=0;i<6;++i){changed+=a%10!=b%10;a/=10;b/=10;}return changed;

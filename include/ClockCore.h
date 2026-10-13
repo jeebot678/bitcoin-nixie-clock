@@ -7,6 +7,7 @@
 #include "PriceSources.h"
 
 namespace btc {
+enum class QuoteKind:uint8_t {LastTrade,BboMidpoint};
 inline bool due(uint32_t now, uint32_t deadline) { return int32_t(now - deadline) >= 0; }
 inline bool validPrice(double price) { return std::isfinite(price) && price > 0 && price <= 1e9; }
 inline bool freshTimestamp(uint32_t timestamp, uint32_t now, uint32_t maxAge = config::kQuoteMaxAgeSeconds) {

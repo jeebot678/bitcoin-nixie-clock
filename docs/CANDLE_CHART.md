@@ -56,7 +56,13 @@ clipped for several seconds while panning catches up; large spikes widen
 immediately. After a spike the scale contracts gradually.
 
 All five live ranges collect candles independently of the Nixie frequency
-dial. Bootstrap uses Bitstamp minute/hour transactions; Coinbase's newest
+dial. Since 1.0.23, live chart observations stay on one venue: Coinbase takes
+priority, then Kraken, with other trusted feeds available during an outage.
+Nixie quote selection is independent. A premium Bitfinex book midpoint can
+change the tubes without creating an artificial chart spike. Connected but
+quiet canonical feeds, and recent canonical observations when a book quote
+arrives, are retained for up to 30 seconds; then fallback is allowed.
+Bootstrap uses Bitstamp minute/hour transactions; Coinbase's newest
 1,000 trades provide a bounded partial-history fallback. Each response is
 parsed once into every applicable range, retaining independent OHLC buckets:
 a Bitstamp minute response updates both short ranges, while an hour response

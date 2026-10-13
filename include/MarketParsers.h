@@ -10,8 +10,10 @@ namespace btc {
 struct Quote {
   double price = 0, usdtUsd = 0;
   uint32_t timestamp = 0; // Zero means endpoint provides no price timestamp.
+  QuoteKind kind=QuoteKind::LastTrade; // Uses existing padding; no extra queue/cache RAM.
   uint64_t timestampMs = 0;
 };
+static_assert(sizeof(Quote)==32,"Quote kind must fit existing timestamp padding");
 inline bool number(JsonVariantConst value, double& result) {
   if (value.is<const char*>()) {
     const char* string = value.as<const char*>();

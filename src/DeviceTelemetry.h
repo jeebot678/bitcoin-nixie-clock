@@ -32,6 +32,9 @@ struct Snapshot {
   Dial frequency,range;
   ota::Status ota;
   uint8_t connections=0,source=0;
+  btc::QuoteKind quoteKind=btc::QuoteKind::LastTrade;
+  uint8_t chartSource=255;
+  uint32_t chartQuoteAge=UINT32_MAX;
   uint8_t displayMode=1,testStep=0,matrixPage=255;
   bool online=false,portal=false,clock=false,confirmed=false,inflight=false,otaPending=false,bootConfirmed=false;
   bool cadenceTest=false;

@@ -35,9 +35,9 @@ void complete(bool ok=true,int status=200){queued={};queued.request=outstanding;
 namespace ota {Status state;Status status(){return state;}bool due=false,validBoot=true;void begin(){}void healthCheck(uint32_t,bool){}bool bootConfirmed(){return validBoot;}bool checkDue(uint32_t,bool){return due;}void defer(uint32_t){due=false;}bool checkAndInstall(){return true;}}
 namespace telemetry {Snapshot last;std::vector<Command> queued;bool begin(){return true;}void publish(const Snapshot&s){last=s;}bool receive(Command&command){if(queued.empty())return false;command=queued.front();queued.erase(queued.begin());return true;}}
 namespace live {
-Tick pending;bool queued=false,healthy=false,busy=false,usdtAllowed=false;uint8_t connectionCount=2;
+Tick pending;bool queued=false,healthy=false,busy=false,usdtAllowed=false;uint8_t connectionCount=2;uint16_t providerMask=3;
 bool begin(){return true;}bool receive(Tick& tick){if(!queued)return false;tick=pending;queued=false;return true;}
-Status status(){Status s;s.connections=healthy?connectionCount:0;s.providers=healthy?3:0;return s;}bool fresh(uint32_t){return healthy;}
+Status status(){Status s;s.connections=healthy?connectionCount:0;s.providers=healthy?providerMask:0;return s;}bool fresh(uint32_t){return healthy;}
 bool pauseAndWait(uint32_t){return true;}void resume(){}void httpBusy(bool value){busy=value;}void allowUsdt(bool value){usdtAllowed=value;}
 }
 #define time testTime
@@ -141,7 +141,8 @@ void resetCandleRuntime(){
   guard=btc::PriceGuard{};assert(guard.accept(83300,0,testMillis)&&guard.accept(83300,1,testMillis));
   fx.usd=1;fx.receivedAt=testMillis;quotes.clear();quotes.put(83300,0,testMillis,uint32_t(testEpoch));
   lastQuoteReceived=testMillis;lastPriceEpoch=uint32_t(testEpoch);lastChartTickAt=testMillis;chartContinuousSince=chartNowMs();
-  networkReady=liveReady=streamWarmupStarted=true;live::healthy=true;live::connectionCount=2;live::busy=false;live::queued=false;live::pending={};
+  chartSource=255;chartQuoteReceived=0;shownQuoteKind=lastAcceptedKind=btc::QuoteKind::LastTrade;
+  networkReady=liveReady=streamWarmupStarted=true;live::healthy=true;live::connectionCount=2;live::providerMask=3;live::busy=false;live::queued=false;live::pending={};
   streamWarmupUntil=testMillis;nextQuoteAt=testMillis+100000;needDifferentQuote=needConfirmation=false;differentQuoteSince=0;
   forceOtaPending=ota::due=false;ota::validBoot=true;matrixDiagnostics=false;testEndsAt=tubeTestEndsAt=0;
   market::ready=false;
@@ -337,6 +338,62 @@ void quoteSelectionRuntimeTests(){
   assert(guard.price==80017.6&&shownPrice==80017.6&&lastPriceEpoch==uint32_t(testEpoch));
   quotes.clear();
   std::cout<<"PASS: actual runtime/SPI source rotation survives burst overwrite; expired alternatives never invent prices or change chart timestamps\n";
+}
+void canonicalChartRuntimeTests(){
+  resetCandleRuntime();refreshDial.stable=0;for(unsigned w=0;w<5;++w)seedRuntimeBars(w);
+  live::providerMask=(1U<<0)|(1U<<4);quotes.clear();shownPrice=0;nextNixieAt=testMillis;
+  auto tick=[&](uint8_t source,double price,btc::QuoteKind kind){
+    live::pending={};live::pending.source=source;live::pending.receivedAt=testMillis;
+    live::pending.quote.price=price;live::pending.quote.timestamp=uint32_t(testEpoch);live::pending.quote.kind=kind;
+    live::queued=true;processLive(testMillis);
+  };
+  tick(0,83310.4,btc::QuoteKind::LastTrade);assert(chartSource==0&&chartQuoteReceived==testMillis);
+  packets.clear();refreshNixies(testMillis);assertPriceFrame(83310);assert(shownQuoteKind==btc::QuoteKind::LastTrade);
+  uint32_t canonicalAt=lastChartTickAt,start=testMillis,accepted=acceptedQuotes;time_t epochStart=testEpoch;
+  btc::CandleSeries canonical[5];btc::CandleScale axes[5];
+  std::copy(candleSeries,candleSeries+5,canonical);std::copy(candleScales,candleScales+5,axes);
+  uint32_t references[5];std::copy(candleReferencePrice,candleReferencePrice+5,references);
+  // Record actual flash snapshots before receiving the premium quote. Restore
+  // the test filesystem afterward so its local generations do not affect the
+  // application's separate CandleStore bookkeeping in subsequent suites.
+  auto priorFiles=fsMock().files;btc::CandleSeries saved[5];btc::CandleScale savedAxes[5];CandleStore checkpoint;
+  assert(checkpoint.begin(saved,savedAxes));
+  for(unsigned w=0;w<5;++w){assert(checkpoint.save(w,canonical[w],axes[w],chartNowMs()));candleDirty[w]=false;nextCandleSave[w]=testMillis+30000;}
+  auto committed=fsMock().files;
+  testMillis=start+100;tick(4,84567,btc::QuoteKind::BboMidpoint);
+  assert(acceptedQuotes==accepted+1&&guard.price==84567&&lastChartTickAt==canonicalAt);
+  packets.clear();refreshNixies(testMillis);assertPriceFrame(84567);assert(shownSource==4&&multiDigitChanges==1&&shownQuoteKind==btc::QuoteKind::BboMidpoint);
+  nextTelemetryAt=testMillis;publishTelemetry(testMillis);
+  assert(telemetry::last.chartSource==0&&telemetry::last.chartQuoteAge==100&&telemetry::last.quoteKind==btc::QuoteKind::BboMidpoint);
+  for(unsigned i=2;i<=4;++i){testMillis=start+i*100;tick(4,84567+i,btc::QuoteKind::BboMidpoint);}
+  assert(!memcmp(canonical,candleSeries,sizeof(canonical))&&!memcmp(axes,candleScales,sizeof(axes)));
+  assert(!memcmp(references,candleReferencePrice,sizeof(references))&&lastChartTickAt==canonicalAt);
+  for(bool dirty:candleDirty)assert(!dirty);
+  saveHistory(testMillis);assert(!inflight&&fsMock().files==committed);
+  CandleStore reboot;assert(reboot.begin(saved,savedAxes));
+  assert(!memcmp(canonical,saved,sizeof(canonical)));
+  for(unsigned w=0;w<5;++w)assert(savedAxes[w].low==axes[w].low&&savedAxes[w].step==axes[w].step);
+  fsMock().files=priorFiles;
+  selectRuntimeRange(3);selectRuntimeRange(2);assert(chartColumns==0x1FFFFF&&chartPixels>=21);
+  assert(!memcmp(canonical,candleSeries,sizeof(canonical))&&candleScales[2].low==axes[2].low&&candleScales[2].step==axes[2].step);
+
+  // A connected canonical feed can be quiet without the other exchange's
+  // premium creating false volatility in the chart during its 30-second grace.
+  testMillis=start+29999;testEpoch=epochStart+29;tick(4,84570,btc::QuoteKind::BboMidpoint);
+  assert(chartSource==0&&lastChartTickAt==canonicalAt&&!memcmp(canonical,candleSeries,sizeof(canonical)));
+  live::providerMask=1U<<4;live::connectionCount=1;testMillis=start+31000;testEpoch=epochStart+31;
+  tick(4,84572,btc::QuoteKind::BboMidpoint);assert(chartSource==4&&chartQuoteReceived==testMillis&&lastChartTickAt==testMillis);
+  for(unsigned w=0;w<5;++w){uint32_t current=btc::candleBucket(chartNowMs(),w);assert(candleSeries[w].bars[current%21].close==8457200);
+    for(const auto& old:canonical[w].bars)if(old.bucket+20>=current&&old.bucket<current)assert(!memcmp(&old,&candleSeries[w].bars[old.bucket%21],sizeof(old)));}
+  // Fresh Coinbase immediately restores the chart, even though the fallback
+  // remains fresh and continues to offer a different real price for the tubes.
+  live::providerMask=(1U<<0)|(1U<<4);live::connectionCount=2;testMillis=start+31100;
+  tick(0,83312,btc::QuoteKind::LastTrade);assert(chartSource==0&&chartQuoteReceived==testMillis&&lastChartTickAt==testMillis);
+  for(unsigned w=0;w<5;++w){uint32_t current=btc::candleBucket(chartNowMs(),w);assert(candleSeries[w].bars[current%21].close==8331200);
+    for(const auto& old:canonical[w].bars)if(old.bucket+20>=current&&old.bucket<current)assert(!memcmp(&old,&candleSeries[w].bars[old.bucket%21],sizeof(old)));}
+  packets.clear();refreshNixies(testMillis);assertPriceFrame(83312);assert(shownSource==0&&shownQuoteKind==btc::QuoteKind::LastTrade);
+  live::providerMask=3;live::pending={};
+  std::cout<<"PASS: premium Bitfinex midpoint drives genuine 100 ms tube changes without altering canonical Coinbase OHLC, scale, saved caches or range recall; quiet-feed grace, outage fallback and immediate Coinbase recovery retain closed candles\n";
 }
 void varietyHoldoffRuntimeTests(){
   auto tickAndFrame=[&](uint32_t at,double price){
@@ -604,4 +661,4 @@ void wirelessRuntimeTests(){
   WiFi.connection=WL_CONNECTED;wifi.loop(testMillis);testMillis+=8001;wifi.loop(testMillis);assert(wifi.online()&&!wifi.portalActive());
   std::cout<<"PASS: actual dial sampling/snapshots, queued signed OTA checks bypassing schedule without interrupting in-flight HTTP, wireless matrix/tube controls and BOOT diagnostics gestures\n";
 }
-int main(){settingsTests();cacheRuntimeTests();sharedCandleRuntimeTests();liveFxRuntimeTests();secondStreamWarmupRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();varietyHoldoffRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();asyncCacheTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}
+int main(){settingsTests();cacheRuntimeTests();sharedCandleRuntimeTests();liveFxRuntimeTests();secondStreamWarmupRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();canonicalChartRuntimeTests();varietyHoldoffRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();asyncCacheTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}
