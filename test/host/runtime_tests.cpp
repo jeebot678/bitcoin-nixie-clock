@@ -145,7 +145,7 @@ void resetCandleRuntime(){
   chartSource=255;chartQuoteReceived=0;shownQuoteKind=lastAcceptedKind=btc::QuoteKind::LastTrade;
   priceSequence.clear();shownPrice=0;priceReversals=selectionHolds=0;
   networkReady=liveReady=streamWarmupStarted=true;live::healthy=true;live::connectionCount=2;live::providerMask=3;live::currentBookMask=live::currentConvertedBookMask=0;live::busy=false;live::queued=false;live::pending={};
-  streamWarmupUntil=testMillis;nextQuoteAt=testMillis+100000;needDifferentQuote=needConfirmation=false;differentQuoteSince=0;
+  initialOtaGraceUntil=streamWarmupUntil=testMillis;nextQuoteAt=testMillis+100000;needDifferentQuote=needConfirmation=false;differentQuoteSince=0;
   forceOtaPending=ota::due=false;ota::validBoot=true;matrixDiagnostics=false;testEndsAt=tubeTestEndsAt=0;
   market::ready=false;
   for(unsigned w=0;w<5;++w){candleSeries[w]={};candleScales[w]={};candleDirty[w]=candleBackfilled[w]=false;
@@ -253,7 +253,7 @@ void secondStreamWarmupRuntimeTests(){
   for(unsigned elapsed:{0U,10000U,34999U}){testMillis=start+elapsed;nextQuoteAt=nextHistoryAt[2]=testMillis;schedule(testMillis);assert(market::calls==calls);}
   // Once both feeds are established, the second-stream grace must not hold
   // ordinary HTTP work until a stale timer expires.
-  live::connectionCount=2;nextHistoryAt[2]=testMillis+100000;nextQuoteAt=testMillis;schedule(testMillis);
+  live::connectionCount=2;nextHistoryAt[2]=testMillis+100000;nextQuoteAt=testMillis;needConfirmation=true;schedule(testMillis);
   assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Quote);market::complete();processResult(testMillis);
   live::connectionCount=1;streamWarmupUntil=testMillis+35000;nextQuoteAt=testMillis;needDifferentQuote=true;
   calls=market::calls;schedule(testMillis);assert(market::calls==calls);
@@ -626,7 +626,7 @@ void rejectedBookRuntimeTests(){
   live::currentBookMask=0;live::providerMask=3;live::pending={};
   std::cout<<"PASS: rejected, unnormalizable and stale current BBO publications revoke the previous head's live-state eligibility; a later accepted publication restores eligibility with its real receipt time and leaves canonical candles unchanged\n";
 }
-void varietyHoldoffRuntimeTests(){
+void healthyFeedSchedulingRuntimeTests(){
   auto tickAndFrame=[&](uint32_t at,double price){
     testMillis=at;btc::Quote tick;tick.price=price;tick.timestamp=uint32_t(testEpoch);
     acceptQuote(tick,0,at,uint32_t(testEpoch),at);
@@ -636,34 +636,33 @@ void varietyHoldoffRuntimeTests(){
   };
   auto prepare=[&](unsigned frequency,uint32_t start){
     resetCandleRuntime();testMillis=start;refreshDial.stable=frequency;cadenceTestActive=false;
-    guard.acceptedAt=fx.receivedAt=lastQuoteReceived=lastChartTickAt=start;streamWarmupUntil=start;
-    nextQuoteAt=start;for(auto& deadline:nextHistoryAt)deadline=start+300000;
+    guard.acceptedAt=fx.receivedAt=lastQuoteReceived=lastChartTickAt=start;initialOtaGraceUntil=streamWarmupUntil=start;
+    nextQuoteAt=start;for(auto& deadline:nextHistoryAt)deadline=start+20000000;
     for(auto& state:rotation.states)state.availableAt=start;
     shownPrice=0;nextNixieAt=start;tickAndFrame(start,83300);
     assert(!needDifferentQuote&&!differentQuoteSince);
   };
-  uint32_t start=testMillis+10000;prepare(0,start);unsigned calls=market::calls;
-  uint32_t miss=start+100;tickAndFrame(miss,83300);assert(needDifferentQuote&&differentQuoteSince==miss);
-  schedule(testMillis);assert(market::calls==calls&&!inflight&&!live::busy&&live::connectionCount==2);
-  for(unsigned elapsed=100;elapsed<=4900;elapsed+=100){tickAndFrame(miss+elapsed,83300);schedule(testMillis);
-    assert(market::calls==calls&&!live::busy&&differentQuoteSince==miss);}
-  testMillis=miss+4999;schedule(testMillis);assert(market::calls==calls);
-  tickAndFrame(miss+5000,83300);schedule(testMillis);
-  assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Quote&&live::busy);
-  market::complete();processResult(testMillis);assert(!live::busy);
-  tickAndFrame(miss+5100,83342);assert(!needDifferentQuote&&!differentQuoteSince);schedule(testMillis);assert(market::calls==calls+1);
-  tickAndFrame(miss+5200,83342);assert(needDifferentQuote&&differentQuoteSince==testMillis);schedule(testMillis);assert(market::calls==calls+1);
+  // A confirmed single healthy feed is enough for genuine market data.
+  // Cosmetic motion must not cause recurring REST allocations or remove it
+  // while waiting for a second stream, at any selected rendering cadence.
+  unsigned calls;
+  for(unsigned frequency=0;frequency<5;++frequency){
+    uint32_t start=testMillis+10000;prepare(frequency,start);calls=market::calls;
+    live::connectionCount=1;live::providerMask=1;
+    unsigned count=frequency==0?1800:120;uint32_t previous=shownDigits,prior=0;
+    for(unsigned frame=1;frame<=count;++frame){
+      tickAndFrame(start+frame*config::kRefreshMs[frequency],83300);
+      assert(shownDigits!=previous&&(!prior||shownDigits!=prior));prior=previous;previous=shownDigits;
+      schedule(testMillis);assert(market::calls==calls&&!inflight&&!live::busy&&live::connectionCount==1);
+      assert(needDifferentQuote&&differentQuoteSince==start+config::kRefreshMs[frequency]);
+    }
+    assert(priceChanges==count&&!priceReversals&&!selectionHolds);
+    tickAndFrame(testMillis+config::kRefreshMs[frequency],83342);
+    assert(!needDifferentQuote&&!differentQuoteSince);schedule(testMillis);assert(market::calls==calls);
+  }
 
-  // Slow settings wait a whole selected period after their first repeated
-  // frame, rather than launching variety work five seconds into a minute.
-  start=testMillis+10000;prepare(4,start);calls=market::calls;miss=start+60000;
-  tickAndFrame(miss,83300);schedule(testMillis);assert(market::calls==calls&&differentQuoteSince==miss);
-  testMillis=miss+59999;lastQuoteReceived=testMillis;schedule(testMillis);assert(market::calls==calls&&!live::busy);
-  tickAndFrame(miss+60000,83300);schedule(testMillis);assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Quote);
-  market::complete();processResult(testMillis);
-
-  // Lost live reception and an independent confirmation bypass variety's
-  // waiting period. Their ordinary provider cooldowns remain respected.
+  // Genuine loss of live data and independent confirmation still dispatch
+  // REST immediately after grace, respecting provider cooldowns.
   resetCandleRuntime();for(auto& deadline:nextHistoryAt)deadline=testMillis+100000;
   live::healthy=false;nextQuoteAt=testMillis;calls=market::calls;schedule(testMillis);
   assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Quote&&!differentQuoteSince);
@@ -673,19 +672,40 @@ void varietyHoldoffRuntimeTests(){
   assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Quote&&!differentQuoteSince);
   market::complete();processResult(testMillis);
 
-  // Unsigned elapsed time must survive wrap, including a first repeated frame
-  // exactly at zero. Zero is a valid timestamp, not an inactive timer sentinel.
+  // The same no-REST policy survives wrap and a first repeated frame at zero.
   for(uint32_t initial:{UINT32_MAX-3000,UINT32_MAX-99}){
-    prepare(0,initial);calls=market::calls;miss=initial+100;tickAndFrame(miss,83300);
+    prepare(0,initial);calls=market::calls;uint32_t miss=initial+100;tickAndFrame(miss,83300);
     assert(needDifferentQuote&&differentQuoteSince==miss);
     for(unsigned elapsed=100;elapsed<=4900;elapsed+=100){tickAndFrame(miss+elapsed,83300);schedule(testMillis);
       assert(market::calls==calls&&differentQuoteSince==miss&&!live::busy);}
     testMillis=miss+4999;schedule(testMillis);assert(market::calls==calls);
-    tickAndFrame(miss+5000,83300);schedule(testMillis);assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Quote);
-    market::complete();processResult(testMillis);
+    tickAndFrame(miss+5000,83300);schedule(testMillis);assert(market::calls==calls&&!inflight&&!live::busy);
   }
   needDifferentQuote=false;differentQuoteSince=0;
-  std::cout<<"PASS: repeated 100 ms frame preserves both feeds; variety waits 5 seconds or the slower dial period, resets on real changes, bypasses for outages/confirmation and survives millis wrap including a zero start\n";
+  std::cout<<"PASS: healthy unchanged single-feed quotes keep all five cosmetic cadences moving without REST/TLS churn, including 180 seconds at100 ms and rollover; genuine outage/confirmation retain prompt fallback\n";
+}
+void immutableOtaGraceRuntimeTests(){
+  for(uint32_t start:{testMillis+10000,UINT32_MAX-10000}){
+    resetCandleRuntime();testMillis=start;streamWarmupStarted=false;initialOtaGraceUntil=0;
+    live::healthy=true;live::connectionCount=1;live::providerMask=1;
+    guard.acceptedAt=lastQuoteReceived=fx.receivedAt=start;nextQuoteAt=start+200000;
+    for(auto& deadline:nextHistoryAt)deadline=start+200000;
+    ota::due=true;unsigned calls=market::calls;schedule(start);
+    const uint32_t initial=start+35000;
+    assert(initialOtaGraceUntil==initial&&streamWarmupUntil==initial&&market::calls==calls);
+    for(unsigned elapsed:{10000U,30000U}){
+      testMillis=start+elapsed;market::outstanding={market::Kind::Quote,0,0,uint32_t(testEpoch)};
+      market::sent=true;inflight=true;market::complete();processResult(testMillis);
+      assert(initialOtaGraceUntil==initial&&streamWarmupUntil==testMillis+35000);
+      schedule(testMillis);assert(market::calls==calls&&!inflight&&ota::due);
+    }
+    testMillis=initial-1;schedule(testMillis);assert(market::calls==calls&&!inflight);
+    testMillis=initial;schedule(testMillis);
+    assert(market::calls==calls+1&&inflight&&market::outstanding.kind==market::Kind::Ota&&!ota::due);
+    assert(initialOtaGraceUntil==initial&&!btc::due(testMillis,streamWarmupUntil));
+    market::complete();processResult(testMillis);assert(!inflight&&initialOtaGraceUntil==initial);
+  }
+  std::cout<<"PASS: immutable 35-second boot OTA grace expires despite repeated HTTP renewal of missing-secondary stream grace, including millis rollover\n";
 }
 void startupAndDialRegressionTests(){
   for(auto& s:candleSeries)s={}; // Fresh-boot chart samples.
@@ -869,16 +889,16 @@ void streamStarvationRegressionTests(){
     schedule(testMillis);assert(market::calls==calls&&!inflight&&!live::busy);
   }
   // A local allocation deferral preserves provider cooldowns and the stream;
-  // repeated quotes ask another source without waiting on the display core.
+  // genuine confirmation work stays independent of the display core.
   live::healthy=true;testMillis=resume+35000;
   for(auto& state:rotation.states){state.availableAt=testMillis;state.failures=0;}
   for(auto& deadline:nextHistoryAt)deadline=testMillis+100000;
-  nextQuoteAt=testMillis;schedule(testMillis);assert(market::sent&&market::outstanding.kind==market::Kind::Quote);
+  nextQuoteAt=testMillis;needConfirmation=true;schedule(testMillis);assert(market::sent&&market::outstanding.kind==market::Kind::Quote);
   uint8_t source=market::outstanding.source;uint32_t cooldown=rotation.states[source].availableAt;
   market::complete(false);market::queued.deferred=true;processResult(testMillis);
   assert(!rotation.states[source].failures&&rotation.states[source].availableAt==cooldown&&!live::busy);
-  nextQuoteAt=testMillis+100000;needDifferentQuote=false;
-  std::cout<<"PASS: 500 ms/5 min regression gives streams 35 seconds to reconnect, prevents continuous HTTP starvation, distinguishes local RAM deferral and requests different real quotes independently of display timing\n";
+  nextQuoteAt=testMillis+100000;needDifferentQuote=needConfirmation=false;
+  std::cout<<"PASS: 500 ms/5 min regression gives streams 35 seconds to reconnect, prevents continuous HTTP starvation, and preserves cooldowns on local RAM deferral for genuine confirmation work\n";
 }
 void wirelessRuntimeTests(){
   live::healthy=true;lastQuoteReceived=testMillis+6000;
@@ -906,4 +926,4 @@ void wirelessRuntimeTests(){
   WiFi.connection=WL_CONNECTED;wifi.loop(testMillis);testMillis+=8001;wifi.loop(testMillis);assert(wifi.online()&&!wifi.portalActive());
   std::cout<<"PASS: actual dial sampling/snapshots, queued signed OTA checks bypassing schedule without interrupting in-flight HTTP, wireless matrix/tube controls and BOOT diagnostics gestures\n";
 }
-int main(){settingsTests();cacheRuntimeTests();sharedCandleRuntimeTests();liveFxRuntimeTests();secondStreamWarmupRuntimeTests();boundedDisplayMotionRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();sequencedPriceRuntimeTests();convertedBookRuntimeTests();canonicalChartRuntimeTests();quietCurrentBookRuntimeTests();rejectedBookRuntimeTests();varietyHoldoffRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();asyncCacheTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}
+int main(){settingsTests();cacheRuntimeTests();sharedCandleRuntimeTests();liveFxRuntimeTests();secondStreamWarmupRuntimeTests();boundedDisplayMotionRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();sequencedPriceRuntimeTests();convertedBookRuntimeTests();canonicalChartRuntimeTests();quietCurrentBookRuntimeTests();rejectedBookRuntimeTests();healthyFeedSchedulingRuntimeTests();immutableOtaGraceRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();asyncCacheTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}

@@ -7,9 +7,11 @@
 enum WStype_t {WStype_ERROR,WStype_DISCONNECTED,WStype_CONNECTED,WStype_TEXT,WStype_BIN,WStype_PING,WStype_PONG};
 inline unsigned& liveSockets(){static unsigned count=0;return count;}
 inline std::function<void()>& connectedHook(){static std::function<void()> callback;return callback;}
+inline std::function<void(bool)>& socketLoopHook(){static std::function<void(bool)> callback;return callback;}
 class WebSocketsClient {
  protected:
-  struct Client {int cCode=0,tlsError=0;uint32_t lastPing=0;bool pongReceived=false;unsigned pongTimeoutCount=0;} _client;
+  struct TlsErrorMock {int error=0;int lastError(char*,size_t){return error;}};
+  struct Client {int cCode=0,tlsError=0;uint32_t lastPing=0;bool pongReceived=false;unsigned pongTimeoutCount=0;TlsErrorMock tls;TlsErrorMock* ssl=&tls;} _client;
  public:
   std::function<void(WStype_t,uint8_t*,size_t)> callback;
   std::string host,url,protocol;std::vector<std::string> sent;
@@ -21,8 +23,9 @@ class WebSocketsClient {
   void setReconnectInterval(uint32_t interval){reconnect=interval;}
   void enableHeartbeat(uint32_t interval,uint32_t timeout,unsigned failures){ping=interval;pong=timeout;misses=failures;_client.pongReceived=false;}
   bool sendTXT(const char* payload){sent.emplace_back(payload);return true;}
-  void tlsFailure(int code){pending=false;_client.tlsError=code;}
+  void tlsFailure(int code){pending=false;_client.tlsError=code;_client.tls.error=code;}
   void loop(){
+    if(socketLoopHook())socketLoopHook()(pending);
     if(pending){pending=false;_client.cCode=101;emit(WStype_CONNECTED,"");if(connectedHook())connectedHook()();return;}
     // Model the pinned library's ordering: ping first, then PONG timeout.
     if(connected&&ping){

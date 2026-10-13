@@ -18,16 +18,49 @@ void vQueueDelete(QueueHandle_t queue){delete queue;--queues;}
 int xQueueSend(QueueHandle_t queue,const void* data,int){if(queue->values.size()==queue->capacity)return 0;queue->values.emplace_back(queue->itemSize);memcpy(queue->values.back().data(),data,queue->itemSize);return pdTRUE;}
 int xQueueReceive(QueueHandle_t queue,void* data,int){if(queue->values.empty())return 0;memcpy(data,queue->values.front().data(),queue->itemSize);queue->values.pop_front();return pdTRUE;}
 int xTaskCreatePinnedToCore(void(*)(void*),const char*,unsigned stack,void* argument,unsigned priority,void*,int core){assert(stack==9216&&priority==0&&core==0&&argument);return failTask?0:pdPASS;}
+unsigned testTaskPriority=0;std::vector<unsigned> priorityChanges;
+void vTaskPrioritySet(void*,unsigned priority){testTaskPriority=priority;priorityChanges.push_back(priority);}
+unsigned uxTaskGetStackHighWaterMark(void*){return 4096;}
 SerialMock Serial;EspMock ESP;WifiMock WiFi;uint32_t testMillis=100;
 std::map<int,int>pins,modes,adc;std::vector<GpioEvent>gpioEvents;
 const uint8_t caBundle[] asm("_binary_data_cert_x509_crt_bundle_bin_start")={0};
 time_t testEpoch=0;
 time_t testTime(time_t* output){if(output)*output=testEpoch;return testEpoch;}
 #define time testTime
+#define ARDUINO 1 // Exercise actual FreeRTOS priority and SSL-error branches.
 #include "../../src/LivePrice.cpp"
+#undef ARDUINO
 #undef time
 std::string readFile(const std::string& path){std::ifstream file(path);assert(file.good());std::ostringstream out;out<<file.rdbuf();return out.str();}
 void steps(){for(auto& slot:slots)slot.step();}
+void priorityTransitionTests(){
+  for(auto& slot:slots){slot.close();for(auto& state:slot.cooldown)state.availableAt=testMillis;}
+  live::httpBusy(false);live::resume();live::allowUsdt(false);
+  slots[0].nextProvider=0;slots[1].nextProvider=4;testTaskPriority=0;steps();
+  auto& primary=slots[0];auto& secondary=slots[1];assert(primary.connected&&primary.source==0&&secondary.connected&&secondary.source==2);
+  auto* primarySocket=primary.socket.get();unsigned handshakes=0;
+  // At worker entry this fallback was connected, so its entry priority was1.
+  // Same-step recovery must lower it BEFORE any preferred-feed TLS crypto.
+  socketLoopHook()=[&](bool pending){assert(pending&&testTaskPriority==0);++handshakes;};
+  secondary.openedAt=testMillis-30001;testTaskPriority=1;priorityChanges.clear();secondary.step();
+  assert(handshakes==1&&secondary.connected&&secondary.source==4&&testTaskPriority==0);
+  assert(priorityChanges.size()==1&&priorityChanges[0]==0&&primary.connected&&primary.socket.get()==primarySocket);
+  assert(secondary.reason==live::Reason::PreferredRecovery);
+  // Expiring FX also closes an established USDT feed inside one step and
+  // immediately falls back to USD. It must obey the same idle-task priority.
+  secondary.close();secondary.nextProvider=3;live::allowUsdt(true);testTaskPriority=0;secondary.step();
+  assert(secondary.connected&&secondary.source==5);live::allowUsdt(false);
+  testTaskPriority=1;priorityChanges.clear();unsigned before=handshakes;secondary.step();
+  assert(handshakes==before+1&&secondary.connected&&!btc::kSources[secondary.source].usdt&&testTaskPriority==0);
+  assert(priorityChanges.size()==1&&priorityChanges[0]==0&&secondary.reason==live::Reason::FxExpired);
+  // Established drains retain priority1. The priority drop is scoped to
+  // connection crypto and cannot slow or stall the independent primary.
+  socketLoopHook()=[&](bool pending){assert(!pending&&testTaskPriority==1);};
+  testTaskPriority=1;priorityChanges.clear();primary.step();secondary.step();
+  assert(priorityChanges.empty()&&primary.connected&&secondary.connected&&testTaskPriority==1);
+  socketLoopHook()={};
+  std::cout<<"PASS: preferred recovery and FX-expiry same-step TLS lower entry priority1 to0 before socket crypto, preserving priority1 for connected drains and the independent primary\n";
+}
 void bookTests(const std::string& directory){
   btc::BitfinexBook book;btc::Quote quote;StaticJsonDocument<2048> message;
   auto load=[&](const std::string& value)->JsonVariantConst{message.clear();assert(!deserializeJson(message,value));return message.as<JsonVariantConst>();};
@@ -327,6 +360,7 @@ int main(int argc,char** argv){
   }
   currentBookStatusTests();
   convertedBookStatusTests();
+  priorityTransitionTests();
   for(auto& slot:slots){slot.close();vQueueDelete(slot.ticks);slot.ticks=nullptr;}assert(!queues&&!liveSockets());
   std::cout<<"PASS: dual live workers, bounded burst queues, USD/USDT parsers, channel binding/deduplication, current-book liveness without synthetic quotes, HTTP memory reservation, uninterrupted primary, failover/backoff, Wi-Fi/SNTP, OTA pause and rollover\n";
 }

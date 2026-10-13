@@ -253,6 +253,11 @@ struct Slot {
       if (!started && !network_memory::fits()) {handshake.release();phase=live::Phase::WaitMemory;return;}
       if (!started) openedAt=lastMessageAt=lastValidQuoteAt=now;
       phase=live::Phase::Handshake;
+#ifdef ARDUINO
+      // Recovery/FX expiry can close an online feed earlier in this same step.
+      // Lower priority again before TLS crypto so IDLE0 can feed its watchdog.
+      vTaskPrioritySet(nullptr,0);
+#endif
       socket->loop();if (connected) handshake.release();
       // connectFailedCb() emits no event. Capture SSL's real negative error
       // before the next loop deletes it, then release the gate for the peer.

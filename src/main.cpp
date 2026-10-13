@@ -37,6 +37,7 @@ uint32_t lastChartTickAt=0;
 bool networkReady=false,inflight=false,timeStarted=false;
 bool liveReady=false,streamWarmupStarted=false;
 uint32_t streamWarmupUntil=0,firstQuoteFallbackAt=0;
+uint32_t initialOtaGraceUntil=0;
 bool showingSetup=false;
 bool needConfirmation=true,logNixies=false;
 bool needDifferentQuote=false;
@@ -130,6 +131,9 @@ void publishTelemetry(uint32_t now) {
   if(!btc::due(now,nextTelemetryAt))return;
   nextTelemetryAt=now+250;
   telemetry::Snapshot s;s.uptime=now;s.heap=ESP.getFreeHeap();s.largest=ESP.getMaxAllocHeap();
+#ifdef ARDUINO
+  s.resetReason=uint8_t(esp_reset_reason());
+#endif
   s.dataHeap=network_memory::freeBytes();s.dataBlock=network_memory::largestBlock();s.httpStack=market::stackRemaining();
   s.httpKind=inflight?httpKind:255;s.httpSource=httpSource;s.httpStatus=lastHttpStatus;s.quoteRequested=needDifferentQuote;
   s.chartColumns=chartColumns;s.chartPixels=chartPixels;s.historyCandles=candleSeries[timelineDial.stable].count(timelineDial.stable,chartNowMs());s.historySavedAt=uint32_t(candleSavedTime[timelineDial.stable]/1000);
@@ -396,7 +400,7 @@ void schedule(uint32_t now) {
   // After one feed starts, give the second time to establish without history
   // or confirmation HTTP repeatedly reclaiming its TLS allocation.
   if (!streamWarmupStarted) {
-    streamWarmupStarted=true;streamWarmupUntil=now+35000;firstQuoteFallbackAt=now;
+    streamWarmupStarted=true;initialOtaGraceUntil=streamWarmupUntil=now+35000;firstQuoteFallbackAt=now;
   }
   const uint8_t window=timelineDial.stable;
   if(forceOtaPending&&ota::bootConfirmed()&&market::send({market::Kind::Ota,0,window,epoch})){
@@ -405,7 +409,7 @@ void schedule(uint32_t now) {
   }
   // An unavailable market must not prevent the device from receiving an OTA
   // fix. Only the bounded initial stream grace precedes manifest checks.
-  if (btc::due(now,streamWarmupUntil) && ota::checkDue(now,wifi.online()) && market::send({market::Kind::Ota,0,window,epoch})) {
+  if (btc::due(now,initialOtaGraceUntil) && ota::checkDue(now,wifi.online()) && market::send({market::Kind::Ota,0,window,epoch})) {
     httpKind=uint8_t(market::Kind::Ota);httpSource=0;
     ota::defer(now);inflight=true;live::httpBusy(true);return;
   }
@@ -435,13 +439,11 @@ void schedule(uint32_t now) {
   if (!live::fresh(now) && (!fx.fresh(now) || uint32_t(now-fx.receivedAt)>=config::kFxRefreshMs) && btc::due(now,rotation.states[1].availableAt)) {
     if (dispatch(market::Kind::Fx,1,window,now,epoch)) return;
   }
-  // An isolated unchanged whole-dollar frame must not tear down an active
-  // second feed for a slower HTTP request. Let streaming receipts supply
-  // alternatives; use HTTP only after sustained sameness or stale data.
+  // Healthy streams already deliver actual market data. Display estimates
+  // supply visual motion when those real prices repeat; identical prices
+  // must not cause REST handshakes to reclaim a second feed's TLS allocation.
   bool liveFresh=live::fresh(now);
-  bool sustainedSame=needDifferentQuote&&
-    uint32_t(now-differentQuoteSince)>=std::max<uint32_t>(5000,refreshPeriod());
-  if (btc::due(now,nextQuoteAt) && (needConfirmation || !liveFresh || sustainedSame)) {
+  if (btc::due(now,nextQuoteAt) && (needConfirmation || !liveFresh)) {
     int source=rotation.choose(now,fx.fresh(now));
     if (source>=0 && dispatch(market::Kind::Quote,uint8_t(source),window,now,epoch)) nextQuoteAt=now+config::kRefreshMs[refreshDial.stable];
     else nextQuoteAt=now+500;
