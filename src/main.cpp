@@ -135,6 +135,7 @@ void publishTelemetry(uint32_t now) {
   s.interval=refreshPeriod();s.cadenceTest=cadenceTestActive;s.window=config::kWindowSeconds[timelineDial.stable];
   auto liveState=live::status();s.connections=liveState.connections;s.quotes=liveState.quotes;
   s.streamProviders=liveState.providers;s.streamDropped=liveState.dropped;s.streamRejected=liveState.rejected;s.streamDisconnects=liveState.disconnects;
+  s.currentBooks=liveState.currentBooks;
   s.streamStack=liveState.stackFreeBytes;
   for(unsigned source=0;source<btc::kSourceCount;++source){s.sourceQuotes[source]=liveState.quoteCounts[source];s.sourceAges[source]=liveState.quoteAges[source];s.sourceFailures[source]=liveState.failures[source];}
   for(unsigned i=0;i<2;++i)s.streamSlots[i]=liveState.slots[i];
@@ -143,9 +144,10 @@ void publishTelemetry(uint32_t now) {
   s.minimumGap=minimumFrameGap;s.maximumGap=maximumFrameGap;
   s.transitions=priceTransitions;s.priceChanges=priceChanges;s.multiChanges=multiDigitChanges;
   s.marketPrice=guard.price;s.displayPrice=shownPrice;s.digits=shownDigits;s.source=shownSource;
-  s.quoteKind=shownQuoteKind;s.chartSource=chartSource;s.chartQuoteAge=chartSource<btc::kSourceCount?now-chartQuoteReceived:UINT32_MAX;
+  s.quoteKind=shownQuoteKind;s.displayQuoteAge=shownPrice?now-shownQuoteReceived:UINT32_MAX;
+  s.chartSource=chartSource;s.chartQuoteAge=chartSource<btc::kSourceCount?now-chartQuoteReceived:UINT32_MAX;
   bool testing=tubeTestEndsAt&&!btc::due(now,tubeTestEndsAt);
-  s.displayMode=testing?3:!s.online||!guard.price?1:uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(s.interval)?2:0;
+  s.displayMode=testing?3:!s.online||!guard.price?1:!shownPrice?2:0;
   if(testing)s.testStep=uint8_t((5000-uint32_t(tubeTestEndsAt-now))/500);
   s.matrixPage=matrixDiagnostics?diagnosticPage:255;
   s.confirmed=guard.confirmed();s.inflight=inflight;s.otaPending=forceOtaPending;s.bootConfirmed=ota::bootConfirmed();s.ota=ota::status();telemetry::publish(s);
@@ -206,7 +208,10 @@ void serialCommands(uint32_t now) {
 void acceptQuote(const btc::Quote& quote,uint8_t source,uint32_t receivedAt,uint32_t epoch,uint32_t now) {
   if (source>=btc::kSourceCount) return;
   double price;
-  if (!fx.normalize(quote.price,btc::kSources[source].usdt,now,price)) {nextQuoteAt=now+500;return;}
+  if (!fx.normalize(quote.price,btc::kSources[source].usdt,now,price)) {
+    if(quote.kind==btc::QuoteKind::BboMidpoint)quotes.invalidateCurrentBook(source);
+    nextQuoteAt=now+500;return;
+  }
   if (guard.accept(price,source,now)) {
     lastPriceEpoch=quote.timestamp?quote.timestamp:epoch;
     lastQuoteReceived=receivedAt;++acceptedQuotes;needConfirmation=!guard.confirmed();
@@ -236,7 +241,10 @@ void acceptQuote(const btc::Quote& quote,uint8_t source,uint32_t receivedAt,uint
       else if(price<=UINT32_MAX/100.0)candleReferencePrice[w]=uint32_t(std::llround(price*100));
     }
     nextDrawAt=now;
-  } else {needConfirmation=true;nextQuoteAt=now;}
+  } else {
+    if(quote.kind==btc::QuoteKind::BboMidpoint)quotes.invalidateCurrentBook(source);
+    needConfirmation=true;nextQuoteAt=now;
+  }
 }
 void processLive(uint32_t now) {
   live::Tick tick;uint32_t started=millis();
@@ -247,6 +255,7 @@ void processLive(uint32_t now) {
       if(tick.source==1&&std::isfinite(tick.fx)&&tick.fx>=0.5&&tick.fx<=1.5&&!tick.quote.price){fx.usd=tick.fx;fx.receivedAt=tick.receivedAt;}
       else if(!tick.fx)acceptQuote(tick.quote,tick.source,tick.receivedAt,tick.quote.timestamp,now);
     }
+    else if(tick.quote.kind==btc::QuoteKind::BboMidpoint)quotes.invalidateCurrentBook(tick.source);
     if(i>=1&&uint32_t(millis()-started)>=4)break; // Drain bursts without delaying the tube timer.
   }
   live::allowUsdt(fx.fresh(millis()));
@@ -260,7 +269,9 @@ void refreshNixies(uint32_t now) {
   tubeTestEndsAt=0;
   if (!wifi.online()) {quotes.clear();shownPrice=0;nextNixieAt=now;return;}
   if (!guard.price) {display::setupZero(now);shownPrice=0;return;}
-  if (uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(refreshPeriod())) {
+  const uint16_t currentBooks=liveReady?live::status().currentBooks:0;
+  const bool stale=uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(refreshPeriod());
+  if (stale&&!currentBooks) {
     display::blankPrice();shownPrice=0;return;
   }
   if (!shownPrice || btc::due(now,nextNixieAt)) {
@@ -268,7 +279,8 @@ void refreshNixies(uint32_t now) {
     const uint32_t previousDigits=shownDigits;
     const uint32_t period=refreshPeriod();
     btc::DisplayQuote selected{guard.price,lastQuoteReceived,lastPriceEpoch,lastAcceptedSource,lastAcceptedKind};
-    quotes.choose(now,firstFrame?0:shownDigits,shownSource,guard.price,fx.fresh(now),selected);
+    bool selectedQuote=quotes.choose(now,firstFrame?0:shownDigits,shownSource,guard.price,fx.fresh(now),selected,currentBooks);
+    if(stale&&!selectedQuote){display::blankPrice();shownPrice=0;return;}
     uint32_t digits=uint32_t(std::floor(selected.price+0.5));
     bool previousNeedDifferent=needDifferentQuote;
     needDifferentQuote=!firstFrame&&digits==shownDigits;
@@ -426,7 +438,8 @@ void draw(uint32_t now) {
   nextDrawAt=now+(setupDisplay?config::kSetupFrameMs:display::startupAnimating()?config::kStartupFrameMs:1000);
   if (testEndsAt && !btc::due(now,testEndsAt)) { display::selfTest(uint8_t((4500-(testEndsAt-now))/750)); return; }
   testEndsAt=0;
-  bool stale=!guard.price || uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(config::kRefreshMs[refreshDial.stable]);
+  bool stale=!guard.price || (uint32_t(now-lastQuoteReceived)>btc::staleAfterMs(config::kRefreshMs[refreshDial.stable])&&
+    !(liveReady&&live::status().currentBooks));
   const bool testingTubes=tubeTestEndsAt && !btc::due(now,tubeTestEndsAt);
   if (setupDisplay) {
     display::setupStatus(wifi.setupState(),now);

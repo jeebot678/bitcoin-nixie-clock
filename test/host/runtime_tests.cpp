@@ -35,9 +35,9 @@ void complete(bool ok=true,int status=200){queued={};queued.request=outstanding;
 namespace ota {Status state;Status status(){return state;}bool due=false,validBoot=true;void begin(){}void healthCheck(uint32_t,bool){}bool bootConfirmed(){return validBoot;}bool checkDue(uint32_t,bool){return due;}void defer(uint32_t){due=false;}bool checkAndInstall(){return true;}}
 namespace telemetry {Snapshot last;std::vector<Command> queued;bool begin(){return true;}void publish(const Snapshot&s){last=s;}bool receive(Command&command){if(queued.empty())return false;command=queued.front();queued.erase(queued.begin());return true;}}
 namespace live {
-Tick pending;bool queued=false,healthy=false,busy=false,usdtAllowed=false;uint8_t connectionCount=2;uint16_t providerMask=3;
+Tick pending;bool queued=false,healthy=false,busy=false,usdtAllowed=false;uint8_t connectionCount=2;uint16_t providerMask=3,currentBookMask=0;
 bool begin(){return true;}bool receive(Tick& tick){if(!queued)return false;tick=pending;queued=false;return true;}
-Status status(){Status s;s.connections=healthy?connectionCount:0;s.providers=healthy?providerMask:0;return s;}bool fresh(uint32_t){return healthy;}
+Status status(){Status s;s.connections=healthy?connectionCount:0;s.providers=healthy?providerMask:0;s.currentBooks=healthy?currentBookMask:0;return s;}bool fresh(uint32_t){return healthy;}
 bool pauseAndWait(uint32_t){return true;}void resume(){}void httpBusy(bool value){busy=value;}void allowUsdt(bool value){usdtAllowed=value;}
 }
 #define time testTime
@@ -142,7 +142,7 @@ void resetCandleRuntime(){
   fx.usd=1;fx.receivedAt=testMillis;quotes.clear();quotes.put(83300,0,testMillis,uint32_t(testEpoch));
   lastQuoteReceived=testMillis;lastPriceEpoch=uint32_t(testEpoch);lastChartTickAt=testMillis;chartContinuousSince=chartNowMs();
   chartSource=255;chartQuoteReceived=0;shownQuoteKind=lastAcceptedKind=btc::QuoteKind::LastTrade;
-  networkReady=liveReady=streamWarmupStarted=true;live::healthy=true;live::connectionCount=2;live::providerMask=3;live::busy=false;live::queued=false;live::pending={};
+  networkReady=liveReady=streamWarmupStarted=true;live::healthy=true;live::connectionCount=2;live::providerMask=3;live::currentBookMask=0;live::busy=false;live::queued=false;live::pending={};
   streamWarmupUntil=testMillis;nextQuoteAt=testMillis+100000;needDifferentQuote=needConfirmation=false;differentQuoteSince=0;
   forceOtaPending=ota::due=false;ota::validBoot=true;matrixDiagnostics=false;testEndsAt=tubeTestEndsAt=0;
   market::ready=false;
@@ -394,6 +394,86 @@ void canonicalChartRuntimeTests(){
   packets.clear();refreshNixies(testMillis);assertPriceFrame(83312);assert(shownSource==0&&shownQuoteKind==btc::QuoteKind::LastTrade);
   live::providerMask=3;live::pending={};
   std::cout<<"PASS: premium Bitfinex midpoint drives genuine 100 ms tube changes without altering canonical Coinbase OHLC, scale, saved caches or range recall; quiet-feed grace, outage fallback and immediate Coinbase recovery retain closed candles\n";
+}
+void quietCurrentBookRuntimeTests(){
+  resetCandleRuntime();refreshDial.stable=0;live::providerMask=(1U<<0)|(1U<<4);live::currentBookMask=1U<<4;
+  for(unsigned w=0;w<5;++w){seedRuntimeBars(w);nextHistoryAt[w]=testMillis+120000;}
+  quotes.clear();shownPrice=0;nextNixieAt=nextQuoteAt=testMillis;
+  uint32_t start=testMillis;time_t startEpoch=testEpoch;
+  auto incoming=[&](uint8_t source,double price,btc::QuoteKind kind){
+    live::pending={};live::pending.source=source;live::pending.receivedAt=testMillis;
+    live::pending.quote.price=price;live::pending.quote.timestamp=uint32_t(testEpoch);live::pending.quote.kind=kind;
+    live::queued=true;processLive(testMillis);
+  };
+  incoming(0,83310.4,btc::QuoteKind::LastTrade);packets.clear();refreshNixies(testMillis);assertPriceFrame(83310);
+  testMillis=start+100;incoming(4,84567,btc::QuoteKind::BboMidpoint);
+  uint32_t publishedAt=testMillis,publishedEpoch=uint32_t(testEpoch),acceptedAtPublication=acceptedQuotes,calls=market::calls;
+  packets.clear();refreshNixies(testMillis);assertPriceFrame(84567);
+  for(unsigned frame=2;frame<=300;++frame){
+    testMillis=start+frame*100;testEpoch=startEpoch+frame/10;incoming(0,83310.4,btc::QuoteKind::LastTrade);
+    uint32_t actualAccepted=acceptedQuotes;btc::CandleSeries beforeRender[5];std::copy(candleSeries,candleSeries+5,beforeRender);
+    packets.clear();refreshNixies(testMillis);assertPriceFrame(frame%2?84567:83310);
+    assert(acceptedQuotes==actualAccepted&&!memcmp(beforeRender,candleSeries,sizeof(beforeRender)));
+    assert(chartSource==0&&chartQuoteReceived==testMillis&&acceptedQuotes==acceptedAtPublication+frame-1);
+    if(shownSource==4){assert(shownQuoteKind==btc::QuoteKind::BboMidpoint&&shownQuoteReceived==publishedAt);
+      btc::DisplayQuote current;assert(quotes.choose(testMillis,83310,0,guard.price,true,current,live::currentBookMask));
+      assert(current.source==4&&current.receivedAt==publishedAt&&current.timestamp==publishedEpoch&&current.price==84567);}
+    for(unsigned w=0;w<5;++w)for(const auto& bar:candleSeries[w].bars)if(bar.bucket)assert(bar.high<=8331100);
+    schedule(testMillis);assert(market::calls==calls&&!inflight&&!live::busy&&!needDifferentQuote);
+  }
+  assert(priceTransitions==300&&priceChanges==300&&multiDigitChanges==300&&minimumFrameGap==100&&maximumFrameGap==100);
+  // Invalidating the producer's book state immediately removes its expired
+  // publication from selection; neither reconnection nor fake receipt refresh
+  // can resurrect it. The current canonical trade still renders normally.
+  live::currentBookMask=0;testMillis+=100;incoming(0,83310.4,btc::QuoteKind::LastTrade);
+  uint32_t lastAccepted=acceptedQuotes,realReceipt=lastQuoteReceived;
+  packets.clear();refreshNixies(testMillis);assertPriceFrame(83310);
+  assert(shownSource==0&&shownQuoteKind==btc::QuoteKind::LastTrade&&needDifferentQuote);
+  btc::DisplayQuote selected;assert(quotes.choose(testMillis,83310,0,guard.price,true,selected,0)&&selected.source==0);
+  // Existing stale blanking and provider cooldowns continue to apply when
+  // neither the canonical feed nor a valid current book remains available.
+  live::healthy=false;testMillis=realReceipt+btc::staleAfterMs(100)+1;packets.clear();refreshNixies(testMillis);
+  assert(!shownPrice&&packets.size()==6&&acceptedQuotes==lastAccepted);
+  for(const auto& packet:packets)for(unsigned digit=1;digit<16;++digit)assert(packet.bytes[digit]==0x80);
+  fx.receivedAt=testMillis;streamWarmupUntil=testMillis;nextQuoteAt=testMillis;
+  for(auto& deadline:nextHistoryAt)deadline=testMillis+100000;
+  for(auto& state:rotation.states)state.availableAt=testMillis+10000;
+  schedule(testMillis);assert(market::calls==calls&&!inflight);
+  testMillis+=500;rotation.states[0].availableAt=testMillis;schedule(testMillis);
+  assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Quote&&market::outstanding.source==0);
+  market::complete();processResult(testMillis);assert(acceptedQuotes==lastAccepted+1&&!live::busy);
+  live::healthy=true;live::currentBookMask=0;live::providerMask=3;live::pending={};
+  std::cout<<"PASS: one quiet validated book publication supports 30 seconds of genuine 100 ms multi-digit frames without refreshing its timestamp, inflating quote counters, adding chart observations or dispatching HTTP; book invalidation, stale blanking and provider backoff remain enforced\n";
+}
+void rejectedBookRuntimeTests(){
+  resetCandleRuntime();refreshDial.stable=0;live::providerMask=(1U<<0)|(1U<<4);live::currentBookMask=1U<<4;
+  quotes.clear();shownPrice=0;nextNixieAt=testMillis;uint32_t start=testMillis;time_t initialEpoch=testEpoch;
+  auto incoming=[&](uint8_t source,double price,btc::QuoteKind kind){
+    live::pending={};live::pending.source=source;live::pending.receivedAt=testMillis;
+    live::pending.quote.price=price;live::pending.quote.timestamp=uint32_t(testEpoch);live::pending.quote.kind=kind;
+    live::queued=true;processLive(testMillis);
+  };
+  incoming(0,83310.4,btc::QuoteKind::LastTrade);packets.clear();refreshNixies(testMillis);assertPriceFrame(83310);
+  testMillis=start+100;incoming(4,84567,btc::QuoteKind::BboMidpoint);packets.clear();refreshNixies(testMillis);assertPriceFrame(84567);
+  testMillis=start+6100;testEpoch=initialEpoch+6;incoming(0,83310.4,btc::QuoteKind::LastTrade);
+  btc::CandleSeries canonical[5];std::copy(candleSeries,candleSeries+5,canonical);uint32_t accepted=acceptedQuotes;
+  btc::DisplayQuote selected;assert(quotes.choose(testMillis,83310,0,guard.price,true,selected,live::currentBookMask)&&selected.source==4&&selected.receivedAt==start+100);
+  incoming(4,150000,btc::QuoteKind::BboMidpoint); // Valid transport data, rejected market outlier.
+  assert(acceptedQuotes==accepted&&guard.price==83310.4&&needConfirmation&&!memcmp(canonical,candleSeries,sizeof(canonical)));
+  assert(quotes.choose(testMillis,83310,0,guard.price,true,selected,live::currentBookMask)&&selected.source==0);
+  packets.clear();refreshNixies(testMillis);assertPriceFrame(83310);assert(shownSource==0);
+  testMillis=start+6200;incoming(4,84572,btc::QuoteKind::BboMidpoint);
+  assert(acceptedQuotes==accepted+1&&!needConfirmation&&!memcmp(canonical,candleSeries,sizeof(canonical)));
+  packets.clear();refreshNixies(testMillis);assertPriceFrame(84572);assert(shownSource==4&&shownQuoteReceived==testMillis);
+  assert(quotes.choose(testMillis+6000,83310,0,guard.price,true,selected,live::currentBookMask)&&selected.source==4&&selected.receivedAt==testMillis);
+  incoming(4,NAN,btc::QuoteKind::BboMidpoint); // Normalization failure also revokes the head.
+  assert(acceptedQuotes==accepted+1&&quotes.choose(testMillis,83310,0,guard.price,true,selected,live::currentBookMask)&&selected.source==0);
+  testMillis+=100;incoming(4,84573,btc::QuoteKind::BboMidpoint);assert(acceptedQuotes==accepted+2);
+  live::pending.quote.timestamp=uint32_t(testEpoch)-config::kQuoteMaxAgeSeconds-1;live::queued=true;processLive(testMillis);
+  assert(acceptedQuotes==accepted+2&&quotes.choose(testMillis,83310,0,guard.price,true,selected,live::currentBookMask)&&selected.source==0);
+  assert(!memcmp(canonical,candleSeries,sizeof(canonical)));
+  live::currentBookMask=0;live::providerMask=3;live::pending={};
+  std::cout<<"PASS: rejected, unnormalizable and stale current BBO publications revoke the previous head's live-state eligibility; a later accepted publication restores eligibility with its real receipt time and leaves canonical candles unchanged\n";
 }
 void varietyHoldoffRuntimeTests(){
   auto tickAndFrame=[&](uint32_t at,double price){
@@ -661,4 +741,4 @@ void wirelessRuntimeTests(){
   WiFi.connection=WL_CONNECTED;wifi.loop(testMillis);testMillis+=8001;wifi.loop(testMillis);assert(wifi.online()&&!wifi.portalActive());
   std::cout<<"PASS: actual dial sampling/snapshots, queued signed OTA checks bypassing schedule without interrupting in-flight HTTP, wireless matrix/tube controls and BOOT diagnostics gestures\n";
 }
-int main(){settingsTests();cacheRuntimeTests();sharedCandleRuntimeTests();liveFxRuntimeTests();secondStreamWarmupRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();canonicalChartRuntimeTests();varietyHoldoffRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();asyncCacheTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}
+int main(){settingsTests();cacheRuntimeTests();sharedCandleRuntimeTests();liveFxRuntimeTests();secondStreamWarmupRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();canonicalChartRuntimeTests();quietCurrentBookRuntimeTests();rejectedBookRuntimeTests();varietyHoldoffRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();asyncCacheTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}

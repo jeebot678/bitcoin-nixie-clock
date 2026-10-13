@@ -15,7 +15,7 @@ struct Snapshot {
   uint32_t uptime=0,heap=0,largest=0,quotes=0,accepted=0,frames=0;
   uint32_t dataHeap=0,dataBlock=0,httpStack=0;
   uint32_t transitions=0,priceChanges=0,multiChanges=0;
-  uint16_t streamProviders=0;
+  uint16_t streamProviders=0,currentBooks=0;
   uint32_t streamDropped=0,streamRejected=0,streamDisconnects=0,streamStack=0;
   uint32_t sourceQuotes[btc::kSourceCount]={},sourceAges[btc::kSourceCount]={};
   uint16_t sourceFailures[btc::kSourceCount]={};
@@ -34,7 +34,7 @@ struct Snapshot {
   uint8_t connections=0,source=0;
   btc::QuoteKind quoteKind=btc::QuoteKind::LastTrade;
   uint8_t chartSource=255;
-  uint32_t chartQuoteAge=UINT32_MAX;
+  uint32_t chartQuoteAge=UINT32_MAX,displayQuoteAge=UINT32_MAX;
   uint8_t displayMode=1,testStep=0,matrixPage=255;
   bool online=false,portal=false,clock=false,confirmed=false,inflight=false,otaPending=false,bootConfirmed=false;
   bool cadenceTest=false;

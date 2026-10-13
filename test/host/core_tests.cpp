@@ -171,6 +171,43 @@ void coreTests() {
   std::set<unsigned> mapped;for(uint8_t row=0;row<13;++row)for(uint8_t col=0;col<21;++col){auto p=led_matrix::mapPixel(row,col);assert(p.valid&&p.driver<6&&p.digit<8&&p.segmentBit<8);assert(mapped.insert(p.driver*64+p.digit*8+p.segmentBit).second);}
   assert(mapped.size()==273&&!led_matrix::mapPixel(13,0).valid&&!led_matrix::mapPixel(0,21).valid);
 }
+void currentBookCoreTests(){
+  btc::QuoteBook book;btc::DisplayQuote selected;const uint16_t current=1U<<4;const uint32_t published=1800000000;
+  book.put(80017.25,4,100,published,btc::QuoteKind::BboMidpoint);auto frozen=book;
+  for(uint32_t now:{6100U,10100U,30100U}){
+    assert(book.choose(now,80010,0,80010,false,selected,current)&&selected.source==4&&selected.price==80017.25);
+    assert(selected.receivedAt==100&&selected.timestamp==published&&selected.kind==btc::QuoteKind::BboMidpoint);
+    assert(!book.choose(now,80010,0,80010,false,selected,0));
+    assert(!book.choose(now,80010,0,80010,false,selected,1U<<0));
+    assert(!memcmp(&frozen,&book,sizeof(book))); // Selection never renews receipt/publication time.
+  }
+  book.clear();book.put(80027,4,100,published,btc::QuoteKind::BboMidpoint);book.put(80017,4,200,published+1,btc::QuoteKind::BboMidpoint);
+  assert(book.choose(5100,80017,4,80010,false,selected,current)&&selected.price==80027); // Older BBO remains ordinary data until its original 5 s TTL.
+  assert(book.choose(30100,80017,4,80010,false,selected,current)&&selected.price==80017&&selected.receivedAt==200&&selected.timestamp==published+1);
+  book.put(80017.2,4,300,published+2,btc::QuoteKind::BboMidpoint); // Same rounded price replaces the head.
+  assert(book.choose(30100,80017,4,80010,false,selected,current)&&selected.price==80017.2&&selected.receivedAt==300&&selected.timestamp==published+2);
+  book.put(80030,4,400,published+3,btc::QuoteKind::LastTrade);
+  assert(!book.choose(30100,80010,0,80010,false,selected,current)); // LastTrade head cannot grant older BBO slots an exception.
+  book.clear();book.put(80017,0,100,published,btc::QuoteKind::LastTrade);
+  assert(!book.choose(30100,80010,0,80010,false,selected,1U<<0));
+  book.clear();book.put(80017,5,100,published,btc::QuoteKind::BboMidpoint);
+  assert(!book.choose(30100,80010,0,80010,false,selected,1U<<5));
+  assert(book.choose(30100,80010,0,80010,true,selected,1U<<5)); // Valid current books still require fresh FX.
+  book.clear();book.put(87000,4,100,published,btc::QuoteKind::BboMidpoint);
+  assert(!book.choose(30100,80010,0,80010,true,selected,current)); // Current state cannot override the price-spread guard.
+  book.clear();book.put(80017,4,UINT32_MAX-100,published,btc::QuoteKind::BboMidpoint);
+  assert(book.choose(6000,80010,0,80010,false,selected,current)&&selected.receivedAt==UINT32_MAX-100&&selected.timestamp==published);
+  assert(!book.choose(6000,80010,0,80010,false,selected,0));
+  book.clear();book.put(80027,4,100,published,btc::QuoteKind::BboMidpoint);book.put(80017,4,200,published+1,btc::QuoteKind::BboMidpoint);
+  book.invalidateCurrentBook(4);book.invalidateCurrentBook(255);
+  assert(book.choose(350,80010,0,80010,false,selected,current)&&selected.price==80027&&selected.receivedAt==100); // Historical entries retain only their ordinary TTL.
+  assert(!book.choose(6100,80010,0,80010,false,selected,current)); // A rejected new current book cannot revalidate its prior publication.
+  book.put(80015,4,6200,published+2,btc::QuoteKind::BboMidpoint);
+  assert(book.choose(30100,80010,0,80010,false,selected,current)&&selected.price==80015&&selected.receivedAt==6200&&selected.timestamp==published+2);
+  book.clear();book.put(80015,0,100,published,btc::QuoteKind::LastTrade);book.invalidateCurrentBook(0);
+  assert(book.choose(101,80010,4,80010,false,selected)&&selected.price==80015); // Invalidating book state cannot remove a genuine trade head.
+  std::cout<<"PASS: only a validated current latest BBO head outlives its original 5 s cache TTL; historical BBO/trades, original timestamps, FX, spread bounds and rollover remain enforced\n";
+}
 void fixtures(const std::string& directory,uint32_t now,uint32_t historyEpoch) {
   const char* names[]={"coinbase","kraken","bitstamp","gemini","bitfinex","binance","okx","kucoin","gate","bitget","mexc"};
   for(size_t i=0;i<11;++i){DynamicJsonDocument doc(16000);assert(!deserializeJson(doc,readFile(directory+"/"+names[i]+".json")));btc::Quote quote;
@@ -207,4 +244,4 @@ void otaTests(){
   ota::Manifest manifest;assert(ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));assert(ota::canonical(manifest).find("1.0.1\n")==0);
   doc["size"]=0;assert(!ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));doc["size"]=2048;doc["board"]="esp32s3";assert(!ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));doc["board"]=ota_config::kBoard;doc["url"]="https://github.com/attacker/clock/releases/download/v1.0.1/firmware.bin";assert(!ota::parseManifest(doc.as<JsonVariantConst>(),"test/clock",0x1E0000,manifest));
 }
-int main(int argc,char**argv){assert(argc==4);coreTests();fixtures(argv[1],uint32_t(strtoul(argv[2],nullptr,10)),uint32_t(strtoul(argv[3],nullptr,10)));otaTests();std::cout<<"PASS: core, all live quote/history fixtures, malformed input, OTA manifest rules\n";}
+int main(int argc,char**argv){assert(argc==4);coreTests();currentBookCoreTests();fixtures(argv[1],uint32_t(strtoul(argv[2],nullptr,10)),uint32_t(strtoul(argv[3],nullptr,10)));otaTests();std::cout<<"PASS: core, all live quote/history fixtures, malformed input, OTA manifest rules\n";}

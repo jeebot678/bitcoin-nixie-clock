@@ -7,13 +7,16 @@ twelve real whole-dollar alternatives per provider for five seconds and prefers
 a quote that changes multiple displayed digits. Repeated receipts refresh an
 entry rather than erasing other prices. The Nixie deadline runs independently
 of fetching; a selected cached quote is a recently observed market price, not a
-claim that another trade occurred at that deadline. REST requests use at least
+claim that another trade occurred at that deadline. From firmware 1.0.24, the
+latest BBO midpoint has the live-book exception described below; older book
+alternatives and all last-trade quotes still expire after five seconds.
+REST requests use at least
 five seconds per provider, including shared history/FX traffic. No API keys or
 paid plans are required. See [exact refresh behavior](NIXIE_REFRESH.md).
 
 ## Device live streams
 
-Firmware 1.0.23 prefers Coinbase on the primary verified TLS connection and
+Firmware 1.0.24 prefers Coinbase on the primary verified TLS connection and
 Bitfinex depth-one USD book on the secondary. Kraken, Binance, Bitstamp and
 Gemini provide fallbacks; only two connections run concurrently. A provider can belong to
 only one worker. Each worker retains a nonblocking 16-tick FIFO so a batch of
@@ -74,6 +77,25 @@ venue premium during that sample. See [the comparison](../test/venue_price_compa
 Canonical chart-source selection is independent of Nixie quote diversity so
 that venue spread does not become chart volatility. See
 [refresh and chart semantics](NIXIE_REFRESH.md).
+
+An unchanged subscribed book remains current while the ordered connection is
+healthy. Firmware publishes a `current_books_mask` only after the timestamp
+configuration, exact subscription acknowledgement and complete snapshot are
+validated, and both best prices form an uncrossed spread of at most 1%.
+The quote selector may retain only that provider's latest `BboMidpoint` entry
+beyond the usual five-second receipt lifetime. Older entries never gain this
+exception. Missing sides, crossed or excessive spreads, malformed/stale data,
+unsubscribe, disconnect, pause or more than 35 seconds without an incoming
+message clear the mask. A later valid complete BBO can restore it.
+
+Book heartbeats maintain connection liveness without generating price ticks
+or changing receipt time, publication time or quote counters. Thus telemetry
+can honestly show an old `display_quote_age_ms` while the current bound book
+continues to quote that same midpoint. Received book updates still must pass
+the existing five-second publication-age check. A healthy unchanged book is
+exempt from the 120-second no-new-quotes reconnect deadline; the 35-second
+message-liveness deadline remains mandatory. This prevents an idle best bid
+and ask from unnecessarily closing a valid stream for a REST variety request.
 
 The earlier Coinbase/Kraken computer experiment remains in
 [its report](../test/usd_pair_frames_report.json). It demonstrated 546/546

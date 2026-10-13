@@ -1,16 +1,20 @@
 # Nixie refresh and chart behavior
 
-Firmware 1.0.23 keeps the selected display cadence independent of network
+Firmware 1.0.24 keeps the selected display cadence independent of network
 requests and preserves a continuous supply of genuine price alternatives.
 Frequency settings are 100 / 500 / 1500 / 10000 / 60000 ms; range settings are
 30 / 60 / 300 / 1800 / 3600 seconds. Each deadline writes all six Nixie modules,
-selecting a recent validated quote even when a request is still running.
+selecting a current book midpoint or recent validated quote even when a
+request is still running.
 
 The quote book retains up to twelve distinct rounded prices per provider for five
-seconds. Selection prefers a genuine multi-digit change, then a different
+seconds. Older book midpoints and trade quotes retain this five-second limit.
+Only the latest midpoint of a synchronized, valid and healthy live book can
+remain selectable beyond it. Selection prefers a genuine multi-digit change, then a different
 provider and fresher receipts. Repeated receipts refresh the current entry
 rather than evicting its alternatives. Quotes can be reused within that
-lifetime, so a display change does not mean a newly executed trade. If no
+lifetime, or while the latest live book remains current, so a display change
+does not mean a newly executed trade. If no
 candidate changes the whole-dollar display, the timer still runs. Version
 1.0.22 lets healthy streams supply alternatives before requesting another
 eligible HTTP provider: an unchanged run must last at least five seconds,
@@ -20,11 +24,12 @@ isolated unchanged 100 ms frame therefore cannot interrupt a second feed
 for a slower HTTP request. No synthetic $1 stepping or larger
 invented change is used; all displayed values come from observed market prices.
 
-Coinbase is the preferred primary USD stream. Version 1.0.23 uses Bitfinex
+Coinbase is the preferred primary USD stream. Version 1.0.23 introduced Bitfinex
 realtime depth-one book midpoints on the secondary to supply genuine venue
 price diversity. The midpoint is the average of the current best bid and
 ask, not an invented price or an executed trade. TIMESTAMP publication
-milliseconds establish freshness. The ordinary Bitfinex ticker proved too
+milliseconds establish publication freshness when a snapshot or level update
+arrives. The ordinary Bitfinex ticker proved too
 slow in the separate probe and is excluded. Kraken remains a fallback. Kraken adds matched-trade batches and USDT/USD conversion on
 its existing TLS connection. Binance and Gemini join Bitstamp and Bitfinex
 as stream fallbacks. Both workers retain 16 actual ticks each; a burst no
@@ -33,6 +38,25 @@ it. The main loop drains up to 32 ticks with a four-millisecond work budget
 so burst processing does not delay the display timer. FX-only ticks update
 conversion without counting as Bitcoin prices or masking stale Bitcoin data.
 See [verified endpoints, public quotas and payloads](SOURCES.md).
+
+Version 1.0.24 keeps that latest midpoint eligible when bid and ask stay
+unchanged. Current-book validity requires the acknowledged `tBTCUSD`
+`P0/F0`, depth-one channel, a completed snapshot with both valid levels, no
+corruption, a non-crossed spread of at most 1%, an established connection,
+and an incoming channel message or book heartbeat within 35 seconds. New level publications still pass
+timestamp validation; heartbeats do not manufacture a new publication.
+Removal of a required level, invalid data, a subscription reset, corruption,
+disconnect or missed message-health deadline removes eligibility. Historical
+entries never gain this exemption: only the latest cached BBO midpoint for
+that current book can outlive the receipt-age limit.
+
+The selector preserves the original publication and receipt timestamps when
+reusing a current midpoint. Heartbeats update transport health without
+refreshing quote timestamps, incrementing accepted-price counters or adding
+chart candles. A healthy quiet book therefore does not trigger REST merely
+because its latest level update is older than five seconds. Independent
+confirmation, a genuinely stale or invalid feed, and the sustained-sameness
+holdoff can still request REST when needed.
 
 HTTP dispatch holds new handshakes but preserves established subscriptions.
 Only a real data-RAM reservation can release the secondary. Routine quote/FX
@@ -47,7 +71,9 @@ down the second stream and left a sparse fallback as the only live source.
 Version 1.0.21 arms the heartbeat timer only after the WebSocket upgrade
 completes. A delayed PONG does not disconnect a feed that is delivering
 valid messages; the independent 35-second message and 120-second Bitcoin
-quote deadlines still detect dead or silent connections. Negative TLS
+quote deadlines still detect dead or silent connections. A synchronized
+current book is exempt from the quote deadline while its message health and
+levels remain valid. Negative TLS
 connection failures release the handshake gate immediately and retain their
 error code for LAN diagnostics. A fallback can retry a preferred USD feed
 after 30 seconds when another feed remains established, with exclusive
@@ -78,6 +104,11 @@ See [candle behavior, persistence and testing](CANDLE_CHART.md).
 
 Wireless diagnostics report active feed providers, cumulative source quote
 counts and receipt ages, queue overflows, rejected payloads and disconnects.
+`current_books_mask` identifies validated live books that remain current;
+Bitfinex uses bit 4 (`16`). `display_quote_age_ms` reports the actual selected
+quote's receipt age, even when it exceeds five seconds for a current book.
+An advancing age with unchanged source quote counts is expected during a
+healthy quiet book and does not indicate a fabricated price receipt.
 They also report HTTP kind/source/status, a requested differing quote, cached
 candle count/epoch, chart columns/pixels, usable data-RAM and frame timing.
 Per-deadline transition, changed-price and multi-digit-change counters observe
@@ -129,6 +160,16 @@ and genuine book midpoints. Flash checkpoints advanced, minimum usable
 data heap was 13,812 bytes, and no synthetic price offsets were used.
 See [the passing device report](../test/device_release_1.0.23_report.json).
 
+A later 1.0.23 quiet-book interval exposed a failure outside that passing
+sample: the unchanged Bitfinex midpoint expired from selection after five
+seconds despite a healthy synchronized connection. Losing that current
+alternative triggered unnecessary REST work. The recorded 333-second pass
+is retained for its actual conditions; it does not establish correct behavior
+for the later quiet-book case. Version 1.0.24 fixes current-book eligibility
+without extending old book entries or trades, rewriting their ages or
+inventing new quotes. Assembled-device acceptance for 1.0.24 is pending a new
+measurement.
+
 The scheduled startup OTA manifest check did temporarily pause both feeds
 for its conservative TLS reservation. This is retained separately in
 [the startup report](../test/device_release_1.0.23_startup_report.json); its
@@ -160,6 +201,8 @@ The new starvation regression checks the missing coverage explicitly.
 Run `python3 tools/run_tests.py` and `pio run`. Tests exercise actual firmware
 sources with modeled network/hardware, address/undefined-behavior sanitizers,
 all five refresh intervals, real-price selection and duplicate/stale handling,
+quiet synchronized books with unchanged timestamps/counters, removal and
+corruption invalidation, message-health expiry and historical quote TTLs,
 stream burst preservation, FX-only freshness, fallback schemas/backoff, HTTP
 reconnect grace and memory deferral, bounded transaction parsing, fixed OHLC
 candles, stable scales, full-brightness pixels and close holds, saved

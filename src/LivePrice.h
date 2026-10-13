@@ -23,7 +23,7 @@ struct Status {
   bool connected=false, paused=true;
   uint32_t quotes=0, receivedAt=0, stackFreeBytes=0,dropped=0,rejected=0,disconnects=0;
   uint8_t connections=0;
-  uint16_t providers=0;
+  uint16_t providers=0,currentBooks=0;
   uint32_t quoteCounts[btc::kSourceCount]={},quoteAges[btc::kSourceCount]={};
   uint16_t failures[btc::kSourceCount]={};
   SlotStatus slots[2];

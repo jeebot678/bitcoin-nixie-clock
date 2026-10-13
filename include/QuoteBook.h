@@ -38,7 +38,7 @@ class QuoteBook {
     unsigned changed=0;for(unsigned i=0;i<6;++i){changed+=a%10!=b%10;a/=10;b/=10;}return changed;
   }
   bool choose(uint32_t now,double previous,uint8_t previousSource,double reference,
-              bool fxFresh,DisplayQuote& result) const {
+              bool fxFresh,DisplayQuote& result,uint16_t currentBooks=0) const {
     const uint32_t previousDigits=validPrice(previous)?uint32_t(std::floor(previous+0.5)):0;
     // Prefer a genuine multi-digit change. Keep display deadlines independent
     // of fetching; if none differs, use a real quote and request another source.
@@ -48,7 +48,12 @@ class QuoteBook {
         size_t index=(previousSource+offset)%kSourceCount;
         for(const auto& quote:entries_[index]){
           uint32_t receiptAge=now-quote.receivedAt;
-          if(!validPrice(quote.price)||quote.price>=999999.5||receiptAge>age||
+          // A synchronized, live book remains current until a level changes.
+          // Only its latest midpoint may outlive the historical quote TTL;
+          // preserve the actual publication and receipt times in the result.
+          bool currentBook=quote.kind==QuoteKind::BboMidpoint&&(currentBooks&(1U<<index))&&
+            &quote==&entries_[index][heads_[index]];
+          if(!validPrice(quote.price)||quote.price>=999999.5||(receiptAge>age&&!currentBook)||
               (kSources[index].usdt&&!fxFresh)||!validPrice(reference)||std::abs(quote.price/reference-1)>0.05)continue;
           unsigned differences=changedDigits(previousDigits,uint32_t(std::floor(quote.price+0.5)));
           if(differences<minimum)continue;
@@ -64,6 +69,10 @@ class QuoteBook {
     return false;
   }
   void clear(){for(auto& source:entries_)for(auto& entry:source)entry={};memset(heads_,0,sizeof(heads_));}
+  void invalidateCurrentBook(uint8_t source){
+    if(source<kSourceCount&&entries_[source][heads_[source]].kind==QuoteKind::BboMidpoint)
+      entries_[source][heads_[source]]={};
+  }
  private:
   DisplayQuote entries_[kSourceCount][kDepth]={};
   uint8_t heads_[kSourceCount]={};

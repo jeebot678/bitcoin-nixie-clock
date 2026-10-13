@@ -76,6 +76,48 @@ void bookTests(const std::string& directory){
   }
   assert(emitted==71);
 }
+void currentBookStatusTests(){
+  for(auto& slot:slots){slot.close();live::Tick ignored;while(xQueueReceive(slot.ticks,&ignored,0)==pdTRUE){}}
+  auto& slot=slots[1];live::Tick tick;
+  const std::string conf="{\"event\":\"conf\",\"status\":\"OK\",\"flags\":32768}";
+  const std::string ack="{\"event\":\"subscribed\",\"channel\":\"book\",\"symbol\":\"tBTCUSD\",\"prec\":\"P0\",\"freq\":\"F0\",\"len\":\"1\",\"chanId\":77}";
+  const uint64_t stamp=uint64_t(testEpoch)*1000;
+  auto emit=[&](const std::string& value){slot.socket->emit(WStype_TEXT,value);};
+  auto packet=[&](const std::string& value,uint64_t published){emit("[77,"+value+","+std::to_string(published)+"]");};
+  auto open=[&](){
+    slot.close();while(live::receive(tick)){}
+    slot.nextProvider=1;for(auto& state:slot.cooldown)state.availableAt=testMillis;
+    slot.step();assert(slot.connected&&slot.source==4&&!live::status().currentBooks);
+    emit(conf);emit(ack);assert(!live::status().currentBooks);
+  };
+  auto snapshot=[&](){packet("[[83000,1,0.1],[83020,1,-0.1]]",stamp);assert(live::receive(tick)&&tick.quote.kind==btc::QuoteKind::BboMidpoint&&live::status().currentBooks==16);};
+  open();packet("\"hb\"",stamp);assert(!live::status().currentBooks&&!live::receive(tick));snapshot();
+  uint32_t received=slot.receivedAt,quotes=slot.quotes,sourceQuotes=slot.sourceQuotes[4];
+  uint64_t published=slot.book.publishedAt;
+  // An unchanged, subscribed order book remains current across the 120 s
+  // no-trade deadline. Heartbeats maintain transport liveness, never prices.
+  for(unsigned i=0;i<9;++i){
+    testMillis+=15000;packet("\"hb\"",stamp);slot.step();
+    assert(slot.connected&&live::status().currentBooks==16&&live::fresh(testMillis)&&!live::receive(tick));
+    assert(slot.receivedAt==received&&slot.quotes==quotes&&slot.sourceQuotes[4]==sourceQuotes&&slot.book.publishedAt==published);
+  }
+  assert(live::status().quoteAges[4]>=135000);
+  testMillis+=35001;assert(!live::status().currentBooks&&!live::fresh(testMillis));
+  slot.step();assert(!slot.connected&&live::status().slots[1].reason==live::Reason::NoMessages);
+  open();snapshot();
+  packet("[83000,0,1]",stamp+1);assert(!live::status().currentBooks&&!live::receive(tick));
+  testMillis+=6000;packet("\"hb\"",stamp+1);assert(!live::status().currentBooks&&!live::fresh(testMillis));
+  packet("[83010,1,0.1]",stamp+2);assert(live::receive(tick)&&live::status().currentBooks==16);
+  packet("[83040,1,0.1]",stamp+3);assert(!live::status().currentBooks&&!live::receive(tick));
+  packet("[83050,1,-0.1]",stamp+4);assert(live::receive(tick)&&live::status().currentBooks==16);
+  packet("[85000,1,-0.1]",stamp+5);assert(!live::status().currentBooks&&!live::receive(tick));
+  packet("[83050,1,-0.1]",stamp+6);assert(live::receive(tick)&&live::status().currentBooks==16);
+  emit(ack);assert(!live::status().currentBooks);packet("\"hb\"",stamp+6);assert(!live::status().currentBooks);
+  snapshot();emit("{broken");assert(!live::status().currentBooks);slot.step();assert(!slot.connected&&live::status().slots[1].reason==live::Reason::Protocol);
+  open();snapshot();packet("[83010,1,0.1]",stamp-6000);assert(!live::status().currentBooks&&!live::receive(tick));slot.step();assert(!slot.connected);
+  open();snapshot();emit("{\"event\":\"unsubscribed\",\"chanId\":77}");assert(!live::status().currentBooks);slot.step();assert(!slot.connected&&live::status().slots[1].reason==live::Reason::SubscriptionError);
+  open();snapshot();slot.socket->emit(WStype_DISCONNECTED,"connection lost");assert(!live::status().currentBooks);slot.close();
+}
 int main(int argc,char** argv){
   assert(argc==2);std::string directory=argv[1];
   bookTests(directory);
@@ -240,6 +282,7 @@ int main(int argc,char** argv){
     captured["s"]=provider==3?"btcusd":"BTCUSDT";captured[provider==3?"t":"a"]=-1;
     assert(!btc::parseStreamQuote(provider,captured.as<JsonVariantConst>(),epoch,quote));
   }
+  currentBookStatusTests();
   for(auto& slot:slots){slot.close();vQueueDelete(slot.ticks);slot.ticks=nullptr;}assert(!queues&&!liveSockets());
-  std::cout<<"PASS: dual live workers, bounded burst queues, USD/USDT parsers, channel binding/deduplication, HTTP memory reservation, uninterrupted primary, failover/backoff, Wi-Fi/SNTP, OTA pause and rollover\n";
+  std::cout<<"PASS: dual live workers, bounded burst queues, USD/USDT parsers, channel binding/deduplication, current-book liveness without synthetic quotes, HTTP memory reservation, uninterrupted primary, failover/backoff, Wi-Fi/SNTP, OTA pause and rollover\n";
 }
