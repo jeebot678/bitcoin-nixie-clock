@@ -142,7 +142,7 @@ void resetCandleRuntime(){
   fx.usd=1;fx.receivedAt=testMillis;quotes.clear();quotes.put(83300,0,testMillis,uint32_t(testEpoch));
   lastQuoteReceived=testMillis;lastPriceEpoch=uint32_t(testEpoch);lastChartTickAt=testMillis;chartContinuousSince=chartNowMs();
   networkReady=liveReady=streamWarmupStarted=true;live::healthy=true;live::connectionCount=2;live::busy=false;live::queued=false;live::pending={};
-  streamWarmupUntil=testMillis;nextQuoteAt=testMillis+100000;needDifferentQuote=needConfirmation=false;
+  streamWarmupUntil=testMillis;nextQuoteAt=testMillis+100000;needDifferentQuote=needConfirmation=false;differentQuoteSince=0;
   forceOtaPending=ota::due=false;ota::validBoot=true;matrixDiagnostics=false;testEndsAt=tubeTestEndsAt=0;
   market::ready=false;
   for(unsigned w=0;w<5;++w){candleSeries[w]={};candleScales[w]={};candleDirty[w]=candleBackfilled[w]=false;
@@ -240,7 +240,7 @@ void liveFxRuntimeTests(){
   std::cout<<"PASS: fresh Kraken FX-only ticks update conversion and USDT gating without price/chart mutation; invalid, mixed, stale and expired conversion never enables USDT\n";
 }
 void secondStreamWarmupRuntimeTests(){
-  resetCandleRuntime();live::connectionCount=1;needDifferentQuote=true;
+  resetCandleRuntime();live::connectionCount=1;needDifferentQuote=true;differentQuoteSince=testMillis-std::max<uint32_t>(5000,refreshPeriod());
   market::outstanding={market::Kind::Quote,0,2,uint32_t(testEpoch)};market::sent=inflight=true;market::complete();processResult(testMillis);
   uint32_t start=testMillis;assert(streamWarmupUntil==start+35000);unsigned calls=market::calls;
   for(unsigned elapsed:{0U,10000U,34999U}){testMillis=start+elapsed;nextQuoteAt=nextHistoryAt[2]=testMillis;schedule(testMillis);assert(market::calls==calls);}
@@ -337,6 +337,66 @@ void quoteSelectionRuntimeTests(){
   assert(guard.price==80017.6&&shownPrice==80017.6&&lastPriceEpoch==uint32_t(testEpoch));
   quotes.clear();
   std::cout<<"PASS: actual runtime/SPI source rotation survives burst overwrite; expired alternatives never invent prices or change chart timestamps\n";
+}
+void varietyHoldoffRuntimeTests(){
+  auto tickAndFrame=[&](uint32_t at,double price){
+    testMillis=at;btc::Quote tick;tick.price=price;tick.timestamp=uint32_t(testEpoch);
+    acceptQuote(tick,0,at,uint32_t(testEpoch),at);
+    quotes.clear();quotes.put(price,0,at,uint32_t(testEpoch));
+    packets.clear();refreshNixies(at);assertPriceFrame(price);
+  };
+  auto prepare=[&](unsigned frequency,uint32_t start){
+    resetCandleRuntime();testMillis=start;refreshDial.stable=frequency;cadenceTestActive=false;
+    guard.acceptedAt=fx.receivedAt=lastQuoteReceived=lastChartTickAt=start;streamWarmupUntil=start;
+    nextQuoteAt=start;for(auto& deadline:nextHistoryAt)deadline=start+300000;
+    for(auto& state:rotation.states)state.availableAt=start;
+    shownPrice=0;nextNixieAt=start;tickAndFrame(start,83300);
+    assert(!needDifferentQuote&&!differentQuoteSince);
+  };
+  uint32_t start=testMillis+10000;prepare(0,start);unsigned calls=market::calls;
+  uint32_t miss=start+100;tickAndFrame(miss,83300);assert(needDifferentQuote&&differentQuoteSince==miss);
+  schedule(testMillis);assert(market::calls==calls&&!inflight&&!live::busy&&live::connectionCount==2);
+  for(unsigned elapsed=100;elapsed<=4900;elapsed+=100){tickAndFrame(miss+elapsed,83300);schedule(testMillis);
+    assert(market::calls==calls&&!live::busy&&differentQuoteSince==miss);}
+  testMillis=miss+4999;schedule(testMillis);assert(market::calls==calls);
+  tickAndFrame(miss+5000,83300);schedule(testMillis);
+  assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Quote&&live::busy);
+  market::complete();processResult(testMillis);assert(!live::busy);
+  tickAndFrame(miss+5100,83342);assert(!needDifferentQuote&&!differentQuoteSince);schedule(testMillis);assert(market::calls==calls+1);
+  tickAndFrame(miss+5200,83342);assert(needDifferentQuote&&differentQuoteSince==testMillis);schedule(testMillis);assert(market::calls==calls+1);
+
+  // Slow settings wait a whole selected period after their first repeated
+  // frame, rather than launching variety work five seconds into a minute.
+  start=testMillis+10000;prepare(4,start);calls=market::calls;miss=start+60000;
+  tickAndFrame(miss,83300);schedule(testMillis);assert(market::calls==calls&&differentQuoteSince==miss);
+  testMillis=miss+59999;lastQuoteReceived=testMillis;schedule(testMillis);assert(market::calls==calls&&!live::busy);
+  tickAndFrame(miss+60000,83300);schedule(testMillis);assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Quote);
+  market::complete();processResult(testMillis);
+
+  // Lost live reception and an independent confirmation bypass variety's
+  // waiting period. Their ordinary provider cooldowns remain respected.
+  resetCandleRuntime();for(auto& deadline:nextHistoryAt)deadline=testMillis+100000;
+  live::healthy=false;nextQuoteAt=testMillis;calls=market::calls;schedule(testMillis);
+  assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Quote&&!differentQuoteSince);
+  market::complete();processResult(testMillis);
+  resetCandleRuntime();for(auto& deadline:nextHistoryAt)deadline=testMillis+100000;
+  needConfirmation=true;nextQuoteAt=testMillis;calls=market::calls;schedule(testMillis);
+  assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Quote&&!differentQuoteSince);
+  market::complete();processResult(testMillis);
+
+  // Unsigned elapsed time must survive wrap, including a first repeated frame
+  // exactly at zero. Zero is a valid timestamp, not an inactive timer sentinel.
+  for(uint32_t initial:{UINT32_MAX-3000,UINT32_MAX-99}){
+    prepare(0,initial);calls=market::calls;miss=initial+100;tickAndFrame(miss,83300);
+    assert(needDifferentQuote&&differentQuoteSince==miss);
+    for(unsigned elapsed=100;elapsed<=4900;elapsed+=100){tickAndFrame(miss+elapsed,83300);schedule(testMillis);
+      assert(market::calls==calls&&differentQuoteSince==miss&&!live::busy);}
+    testMillis=miss+4999;schedule(testMillis);assert(market::calls==calls);
+    tickAndFrame(miss+5000,83300);schedule(testMillis);assert(market::calls==calls+1&&market::outstanding.kind==market::Kind::Quote);
+    market::complete();processResult(testMillis);
+  }
+  needDifferentQuote=false;differentQuoteSince=0;
+  std::cout<<"PASS: repeated 100 ms frame preserves both feeds; variety waits 5 seconds or the slower dial period, resets on real changes, bypasses for outages/confirmation and survives millis wrap including a zero start\n";
 }
 void startupAndDialRegressionTests(){
   for(auto& s:candleSeries)s={}; // Fresh-boot chart samples.
@@ -497,7 +557,7 @@ void asyncCacheTests(){
 void streamStarvationRegressionTests(){
   liveReady=true;live::healthy=false;testMillis+=6000;refreshDial.stable=timelineDial.stable=0;
   guard=btc::PriceGuard{};guard.accept(84191,0,testMillis);guard.accept(84191,1,testMillis);
-  shownPrice=84191;shownDigits=84191;lastQuoteReceived=testMillis;needConfirmation=false;needDifferentQuote=true;
+  shownPrice=84191;shownDigits=84191;lastQuoteReceived=testMillis;needConfirmation=false;needDifferentQuote=true;differentQuoteSince=testMillis-5000;
   market::outstanding={market::Kind::Quote,0,0,uint32_t(testEpoch)};market::sent=true;inflight=true;
   market::complete();processResult(testMillis);uint32_t resume=testMillis;
   assert(streamWarmupUntil==resume+35000&&!live::busy);
@@ -544,4 +604,4 @@ void wirelessRuntimeTests(){
   WiFi.connection=WL_CONNECTED;wifi.loop(testMillis);testMillis+=8001;wifi.loop(testMillis);assert(wifi.online()&&!wifi.portalActive());
   std::cout<<"PASS: actual dial sampling/snapshots, queued signed OTA checks bypassing schedule without interrupting in-flight HTTP, wireless matrix/tube controls and BOOT diagnostics gestures\n";
 }
-int main(){settingsTests();cacheRuntimeTests();sharedCandleRuntimeTests();liveFxRuntimeTests();secondStreamWarmupRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();asyncCacheTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}
+int main(){settingsTests();cacheRuntimeTests();sharedCandleRuntimeTests();liveFxRuntimeTests();secondStreamWarmupRuntimeTests();nixieCadenceTests();quoteSelectionRuntimeTests();varietyHoldoffRuntimeTests();startupAndDialRegressionTests();tubeDiagnosticTests();temporaryCadenceTests();assembledDialTests();shortRangeAndMotionTests();asyncCacheTests();streamStarvationRegressionTests();wirelessRuntimeTests();soak();}

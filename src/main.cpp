@@ -37,6 +37,7 @@ uint32_t streamWarmupUntil=0,firstQuoteFallbackAt=0;
 bool showingSetup=false;
 bool needConfirmation=true,logNixies=false;
 bool needDifferentQuote=false;
+uint32_t differentQuoteSince=0;
 uint8_t httpKind=255,httpSource=255;
 int lastHttpStatus=0;
 uint32_t chartColumns=0;
@@ -252,7 +253,10 @@ void refreshNixies(uint32_t now) {
     btc::DisplayQuote selected{guard.price,lastQuoteReceived,lastPriceEpoch,lastAcceptedSource};
     quotes.choose(now,firstFrame?0:shownDigits,shownSource,guard.price,fx.fresh(now),selected);
     uint32_t digits=uint32_t(std::floor(selected.price+0.5));
+    bool previousNeedDifferent=needDifferentQuote;
     needDifferentQuote=!firstFrame&&digits==shownDigits;
+    if(!needDifferentQuote)differentQuoteSince=0;
+    else if(!previousNeedDifferent)differentQuoteSince=now;
     shownDigits=digits;
     display::price(double(shownDigits),true);shownPrice=selected.price;shownSource=selected.source;shownQuoteReceived=selected.receivedAt;++nixieFrames;
     lastFrameGap=now-lastNixieAt;
@@ -385,7 +389,13 @@ void schedule(uint32_t now) {
   if (!live::fresh(now) && (!fx.fresh(now) || uint32_t(now-fx.receivedAt)>=config::kFxRefreshMs) && btc::due(now,rotation.states[1].availableAt)) {
     if (dispatch(market::Kind::Fx,1,window,now,epoch)) return;
   }
-  if (btc::due(now,nextQuoteAt) && (needDifferentQuote || needConfirmation || !live::fresh(now))) {
+  // An isolated unchanged whole-dollar frame must not tear down an active
+  // second feed for a slower HTTP request. Let streaming receipts supply
+  // alternatives; use HTTP only after sustained sameness or stale data.
+  bool liveFresh=live::fresh(now);
+  bool sustainedSame=needDifferentQuote&&
+    uint32_t(now-differentQuoteSince)>=std::max<uint32_t>(5000,refreshPeriod());
+  if (btc::due(now,nextQuoteAt) && (needConfirmation || !liveFresh || sustainedSame)) {
     int source=rotation.choose(now,fx.fresh(now));
     if (source>=0 && dispatch(market::Kind::Quote,uint8_t(source),window,now,epoch)) nextQuoteAt=now+config::kRefreshMs[refreshDial.stable];
     else nextQuoteAt=now+500;

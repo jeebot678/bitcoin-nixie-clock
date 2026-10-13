@@ -1,6 +1,6 @@
 # Nixie refresh and chart behavior
 
-Firmware 1.0.21 keeps the selected display cadence independent of network
+Firmware 1.0.22 keeps the selected display cadence independent of network
 requests and preserves a continuous supply of genuine price alternatives.
 Frequency settings are 100 / 500 / 1500 / 10000 / 60000 ms; range settings are
 30 / 60 / 300 / 1800 / 3600 seconds. Each deadline writes all six Nixie modules,
@@ -11,8 +11,13 @@ seconds. Selection prefers a genuine multi-digit change, then a different
 provider and fresher receipts. Repeated receipts refresh the current entry
 rather than evicting its alternatives. Quotes can be reused within that
 lifetime, so a display change does not mean a newly executed trade. If no
-candidate changes the whole-dollar display, the timer still runs and requests
-another eligible provider asynchronously. No synthetic $1 stepping or larger
+candidate changes the whole-dollar display, the timer still runs. Version
+1.0.22 lets healthy streams supply alternatives before requesting another
+eligible HTTP provider: an unchanged run must last at least five seconds,
+or the selected display interval if longer. A genuine change resets that
+wait; stale feeds and required independent confirmation bypass it. An
+isolated unchanged 100 ms frame therefore cannot interrupt a second feed
+for a slower HTTP request. No synthetic $1 stepping or larger
 invented change is used; all displayed values come from observed market prices.
 
 Coinbase is now the preferred primary USD stream, with Kraken preferred on
@@ -90,6 +95,12 @@ remained displayed. The run includes startup and is retained as failed in
 [the device report](../test/device_release_1.0.20_report.json). A follow-up
 fix and another device measurement are required; the computer proof alone
 is insufficient to accept this behavior.
+
+The 1.0.21 sustained device run improved reception to 7.63 prices/s and
+changed 1,669 of 1,800 transitions (92.7%). It still reclaimed the second
+stream for HTTP after isolated unchanged frames, so the run is retained as
+failed in [its report](../test/device_release_1.0.21_report.json). Version
+1.0.22 adds the sustained-sameness holdoff described above.
 
 The 1.0.18 assembled LAN measurement averaged 100.007 ms but found
 33–167 ms individual gaps during synchronous checkpoints. The result is

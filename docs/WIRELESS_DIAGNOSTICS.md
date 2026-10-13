@@ -101,7 +101,7 @@ both switches run from POS5 to POS1. See [the mapping](PCB_PIN_MAP.md).
 ## Triggering an update
 
 ```sh
-python3 tools/clock_link.py ota --expect 1.0.21 --wait 240
+python3 tools/clock_link.py ota --expect 1.0.22 --wait 240
 ```
 
 First publish and verify the signed newer release and `main` manifest. The tool
