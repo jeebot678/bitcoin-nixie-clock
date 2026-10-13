@@ -1,6 +1,6 @@
 # Nixie refresh and chart behavior
 
-Firmware 1.0.27 keeps the selected display cadence independent of network
+Firmware 1.0.28 keeps the selected display cadence independent of network
 requests and shows a different tube number at every selected deadline after
 the first actual quote, using a bounded display estimate when needed.
 Frequency settings are 100 / 500 / 1500 / 10000 / 60000 ms; range settings are
@@ -151,9 +151,17 @@ quote deadlines still detect dead or silent connections. A synchronized
 current book is exempt from the quote deadline while its message health and
 levels remain valid. Negative TLS
 connection failures release the handshake gate immediately and retain their
-error code for LAN diagnostics. A fallback can retry a preferred USD feed
-after 30 seconds when another feed remains established, with exclusive
-provider and recovery ownership preserving the other connection.
+error code for LAN diagnostics.
+
+Version 1.0.28 retries a preferred feed from a fallback only after that
+fallback has delivered no genuine quote for 30 seconds and the peer feed
+has actual fresh prices or a validated current direct/converted book.
+Socket connection alone is insufficient evidence that the peer can supply
+prices. A fallback still delivering fresh real quotes is preserved, while
+initial preferred selection, natural error failover, provider cooldowns and
+exclusive recovery ownership remain intact. Earlier versions could replace
+a healthy fallback after 30 seconds based only on another socket being
+connected, causing repeated retries to reduce real quote availability.
 
 Version 1.0.27 explicitly sets task priority 0 immediately before every
 disconnected socket's handshake loop. A fallback can close and replace an
@@ -210,7 +218,7 @@ the current boot, enabling separate analysis of reboot segments.
 Per-deadline transition, changed-price and multi-digit-change counters observe
 every 100 ms frame even when LAN collection is slower. `price_reversals` and
 `selection_holds` distinguish rounded display reversals and unchanged frames.
-After a real quote arrives, the normal 1.0.27 path should produce neither
+After a real quote arrives, the normal 1.0.28 path should produce neither
 reversals nor holds, while `estimated_frames` distinguishes its display
 effects from newly received real prices. The 30-second
 `cadence-test` temporarily selects the normal 500 ms live-price path, sets
@@ -360,9 +368,25 @@ possible, and the old firmware did not expose a reset-reason field.
 Review established a separate same-step TLS priority defect, corrected in
 1.0.27 as described above. It is not proven to have caused the observed
 1.0.26 reboot. Fresh-feed sameness-only REST and the extendable initial OTA
-gate are also corrected, and reset-reason diagnostics support the next
-measurement. Version 1.0.27 installation and device acceptance remain pending.
-Visible appearance is not established by telemetry.
+gate were also corrected, with reset-reason diagnostics supporting later
+measurements.
+
+The subsequent 1.0.27 live run verified motion over 240.103 seconds: 2,401
+of 2,401 transitions changed, with 1,511 display estimates and zero holds,
+distinct-value reversals, resets or collection errors. Command gaps averaged
+100.00125 ms, ranging from 85 to 113 ms; all 21 chart columns stayed lit.
+There were no estimate-bound or marker errors, and the maximum adjustment
+was $8. Its automatic OTA check completed at 86.181 seconds.
+
+The [1.0.27 report](../test/device_release_1.0.27_report.json) is nevertheless
+retained as failed for the two-feed health target: only one stream remained
+connected at the end. Repeated preferred-feed retries replaced working
+fallbacks, and actual quote age reached 49.754 seconds. Display estimates
+kept the numbers moving through that gap; they did not refresh the actual
+market data. Version 1.0.28 preserves a fresh fallback and requires a truly
+fresh peer before intentional preferred recovery. Its installation and
+device outcome remain pending. Visible appearance is not established by
+telemetry.
 
 The prior 1.0.15 bare-ESP32 measurement passed its 30-second diagnostic but did
 not exercise ongoing minute-history requests on the assembled 5-minute range.
@@ -383,7 +407,8 @@ channel health, original leg timestamps and heartbeat silence,
 stream burst preservation, FX-only freshness, fallback schemas/backoff, HTTP
 reconnect grace and memory deferral, no sameness-only REST with fresh feeds,
 same-step preferred recovery priority, fixed initial OTA grace and reset-reason
-telemetry, bounded transaction parsing, fixed OHLC
+telemetry, fresh fallback retention and recovery requiring genuine peer
+freshness/current books, bounded transaction parsing, fixed OHLC
 candles, stable scales, full-brightness pixels and close holds, saved
 candles/backfill, range switching, OTA and TLS checks.
 LAN timing and pixels measure firmware commands; visible tubes/matrix still

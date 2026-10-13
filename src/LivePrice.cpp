@@ -21,7 +21,7 @@ constexpr unsigned tickDepth=16;
 std::atomic<bool> pauseRequested{false},busy{false},primaryReserved{false},secondaryReserved{false},usdtAllowed{false};
 std::atomic<uint8_t> owners[btc::kSourceCount];
 std::atomic<uint8_t> recoveryOwner{0};
-bool otherConnected(unsigned index);
+bool otherFresh(unsigned index,uint32_t now);
 class StreamSocket : public WebSocketsClient {
  public:
   int httpStatus() const {return _client.cCode;}
@@ -207,9 +207,10 @@ struct Slot {
       close();paused=true;phase=live::Phase::Paused;return;
     }
     if(socket&&btc::kSources[source].usdt&&!usdtAllowed){record(live::Reason::FxExpired,now);close();}
-    // Upgrade a sparse fallback after its preferred feeds leave cooldown.
-    // One worker upgrades at a time, preserving the other established feed.
-    if(connected&&source!=providers[0]&&source!=providers[1]&&uint32_t(now-openedAt)>=30000&&!busy&&otherConnected(index)){
+    // Recover preferred feeds only after this fallback stops delivering prices.
+    // Preserve a healthy fallback, and keep another current feed during crypto.
+    if(connected&&source!=providers[0]&&source!=providers[1]&&uint32_t(now-openedAt)>=30000&&
+       uint32_t(now-lastValidQuoteAt)>=30000&&!busy&&otherFresh(index,now)){
       for(unsigned position=0;position<2;++position){
         unsigned preferred=providers[position];
         if(!btc::due(now,cooldown[preferred].availableAt)||owners[preferred])continue;
@@ -283,7 +284,11 @@ struct Slot {
   }
 };
 Slot slots[slotCount];
-bool otherConnected(unsigned index){return slots[(index+1)%slotCount].connected.load();}
+bool otherFresh(unsigned index,uint32_t now){
+  auto& slot=slots[(index+1)%slotCount];
+  return slot.currentBook(now)||slot.currentConvertedBook(now)||
+    (slot.connected&&slot.quotes&&uint32_t(now-slot.receivedAt.load())<5000);
+}
 void worker(void* argument) {
   auto& slot=*static_cast<Slot*>(argument);
   for (;;) {

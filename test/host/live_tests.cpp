@@ -33,6 +33,20 @@ time_t testTime(time_t* output){if(output)*output=testEpoch;return testEpoch;}
 #undef time
 std::string readFile(const std::string& path){std::ifstream file(path);assert(file.good());std::ostringstream out;out<<file.rdbuf();return out.str();}
 void steps(){for(auto& slot:slots)slot.step();}
+void emitGenuineQuote(Slot& slot,uint64_t tradeId){
+  const uint64_t epoch=uint64_t(testEpoch);std::string message;
+  if(slot.source==0){
+    char timestamp[32];assert(strftime(timestamp,sizeof(timestamp),"%Y-%m-%dT%H:%M:%SZ",gmtime(&testEpoch)));
+    message=std::string("{\"type\":\"ticker\",\"product_id\":\"BTC-USD\",\"price\":\"83310.4\",\"time\":\"")+timestamp+"\"}";
+  }else if(slot.source==2){
+    message="{\"event\":\"trade\",\"channel\":\"live_trades_btcusd\",\"data\":{\"id\":"+std::to_string(tradeId)+",\"price\":83310.4,\"microtimestamp\":\""+std::to_string(epoch*1000000)+"\"}}";
+  }else{
+    assert(slot.source==3);
+    message="{\"E\":"+std::to_string(epoch*1000000000)+",\"s\":\"btcusd\",\"t\":"+std::to_string(tradeId)+",\"p\":\"83310.4\"}";
+  }
+  uint32_t accepted=slot.quotes;slot.socket->emit(WStype_TEXT,message);
+  assert(slot.quotes==accepted+1&&slot.receivedAt==testMillis&&slot.lastValidQuoteAt==testMillis);
+}
 void priorityTransitionTests(){
   for(auto& slot:slots){slot.close();for(auto& state:slot.cooldown)state.availableAt=testMillis;}
   live::httpBusy(false);live::resume();live::allowUsdt(false);
@@ -42,7 +56,8 @@ void priorityTransitionTests(){
   // At worker entry this fallback was connected, so its entry priority was1.
   // Same-step recovery must lower it BEFORE any preferred-feed TLS crypto.
   socketLoopHook()=[&](bool pending){assert(pending&&testTaskPriority==0);++handshakes;};
-  secondary.openedAt=testMillis-30001;testTaskPriority=1;priorityChanges.clear();secondary.step();
+  testMillis+=30001;testEpoch+=30;emitGenuineQuote(primary,1);
+  testTaskPriority=1;priorityChanges.clear();secondary.step();
   assert(handshakes==1&&secondary.connected&&secondary.source==4&&testTaskPriority==0);
   assert(priorityChanges.size()==1&&priorityChanges[0]==0&&primary.connected&&primary.socket.get()==primarySocket);
   assert(secondary.reason==live::Reason::PreferredRecovery);
@@ -60,6 +75,70 @@ void priorityTransitionTests(){
   assert(priorityChanges.empty()&&primary.connected&&secondary.connected&&testTaskPriority==1);
   socketLoopHook()={};
   std::cout<<"PASS: preferred recovery and FX-expiry same-step TLS lower entry priority1 to0 before socket crypto, preserving priority1 for connected drains and the independent primary\n";
+}
+void healthyFallbackRecoveryTests(){
+  uint64_t tradeId=1000;
+  auto open=[&](uint32_t start){
+    for(auto& slot:slots){slot.close();for(auto& state:slot.cooldown)state.availableAt=start;}
+    testMillis=start;live::httpBusy(false);live::resume();live::allowUsdt(false);
+    slots[0].nextProvider=0;slots[1].nextProvider=4;testTaskPriority=0;steps();
+    assert(slots[0].connected&&slots[0].source==0&&slots[1].connected&&slots[1].source==2);
+  };
+  for(uint32_t start:{testMillis+10000,UINT32_MAX-90000}){
+    open(start);auto& primary=slots[0];auto& fallback=slots[1];auto* stable=fallback.socket.get();
+    const uint32_t opened=fallback.openedAt;
+    socketLoopHook()=[](bool pending){assert(!pending&&testTaskPriority==1);};
+    // Genuine parsed trades retain an active fallback for over three minutes,
+    // despite both preferred providers remaining eligible on every iteration.
+    for(unsigned frame=0;frame<=19;++frame){
+      testMillis=start+frame*10000;if(frame)testEpoch+=10;
+      emitGenuineQuote(primary,++tradeId);emitGenuineQuote(fallback,++tradeId);
+      testTaskPriority=1;priorityChanges.clear();primary.step();fallback.step();
+      assert(fallback.connected&&fallback.source==2&&fallback.socket.get()==stable&&fallback.openedAt==opened);
+      assert(priorityChanges.empty()&&!recoveryOwner&&otherFresh(1,testMillis));
+    }
+    const uint32_t lastReal=fallback.lastValidQuoteAt;
+    testMillis=lastReal+29999;testEpoch+=29;emitGenuineQuote(primary,++tradeId);
+    fallback.socket->emit(WStype_PONG,"");testTaskPriority=1;fallback.step();
+    assert(fallback.socket.get()==stable&&fallback.source==2&&fallback.lastValidQuoteAt==lastReal); // Transport liveness does not refresh genuine-price age.
+    ++testMillis;unsigned handshakes=0;
+    socketLoopHook()=[&](bool pending){assert(pending&&testTaskPriority==0);++handshakes;};
+    testTaskPriority=1;priorityChanges.clear();fallback.step();
+    assert(handshakes==1&&fallback.connected&&fallback.source==4&&fallback.reason==live::Reason::PreferredRecovery);
+    assert(priorityChanges.size()==1&&priorityChanges[0]==0&&primary.connected);
+    socketLoopHook()={};
+  }
+  open(testMillis+10000);auto& primary=slots[0];auto& fallback=slots[1];
+  emitGenuineQuote(primary,++tradeId);emitGenuineQuote(fallback,++tradeId);auto* stable=fallback.socket.get();
+  // Mere connectivity and fresh transport heartbeats are insufficient when
+  // the surviving peer no longer provides current market data.
+  for(unsigned elapsed:{30000U,34000U}){
+    testMillis=fallback.lastValidQuoteAt+elapsed;primary.socket->emit(WStype_PONG,"");fallback.socket->emit(WStype_PONG,"");
+    socketLoopHook()=[](bool pending){assert(!pending&&testTaskPriority==1);};
+    testTaskPriority=1;priorityChanges.clear();fallback.step();
+    assert(primary.connected&&fallback.connected&&fallback.source==2&&fallback.socket.get()==stable);
+    assert(!otherFresh(1,testMillis)&&priorityChanges.empty()&&!recoveryOwner);
+  }
+  testEpoch+=34;emitGenuineQuote(primary,++tradeId);unsigned handshakes=0;
+  socketLoopHook()=[&](bool pending){assert(pending&&testTaskPriority==0);++handshakes;};
+  testTaskPriority=1;fallback.step();assert(handshakes==1&&fallback.source==4&&fallback.connected&&primary.connected);
+  socketLoopHook()={};
+  // A validated quiet native book also counts as a current surviving peer.
+  // Its heartbeat must not fabricate a price receipt just to permit recovery.
+  open(testMillis+10000);primary.close();primary.nextProvider=1;testTaskPriority=0;primary.step();
+  assert(primary.connected&&primary.source==4&&fallback.source==2);
+  primary.socket->emit(WStype_TEXT,"{\"event\":\"conf\",\"status\":\"OK\",\"flags\":32768}");
+  primary.socket->emit(WStype_TEXT,"{\"event\":\"subscribed\",\"channel\":\"book\",\"symbol\":\"tBTCUSD\",\"prec\":\"P0\",\"freq\":\"F0\",\"len\":\"1\",\"chanId\":77}");
+  const uint64_t stamp=uint64_t(testEpoch)*1000;
+  primary.socket->emit(WStype_TEXT,"[77,[[83000,1,0.1],[83020,1,-0.1]],"+std::to_string(stamp)+"]");
+  uint32_t publishedAt=primary.receivedAt,prices=primary.quotes;assert(primary.currentBook(testMillis));
+  testMillis+=30000;testEpoch+=30;
+  primary.socket->emit(WStype_TEXT,"[77,\"hb\","+std::to_string(stamp)+"]");fallback.socket->emit(WStype_PONG,"");
+  assert(uint32_t(testMillis-primary.receivedAt)==30000&&primary.quotes==prices&&otherFresh(1,testMillis));
+  handshakes=0;socketLoopHook()=[&](bool pending){assert(pending&&testTaskPriority==0);++handshakes;};
+  testTaskPriority=1;fallback.step();assert(handshakes==1&&fallback.connected&&fallback.source==0&&primary.currentBook(testMillis));
+  assert(primary.receivedAt==publishedAt&&primary.quotes==prices);socketLoopHook()={};
+  std::cout<<"PASS: healthy fallback trades retain their socket beyond180 seconds; only30-second genuine-price silence with a fresh peer permits priority0 recovery, stale connected peers block it, and all boundaries survive millis rollover\n";
 }
 void bookTests(const std::string& directory){
   btc::BitfinexBook book;btc::Quote quote;StaticJsonDocument<2048> message;
@@ -323,13 +402,15 @@ int main(int argc,char** argv){
   slots[0].nextProvider=4;slots[1].nextProvider=5;live::allowUsdt(false);steps();
   assert(slots[0].source==2&&slots[1].source==3);
   uint32_t fallbackStart=testMillis;testMillis=fallbackStart+30001;
+  emitGenuineQuote(slots[1],100);
   {btc::TlsLease held;assert(held.acquire());slots[0].step();
     assert(!slots[0].connected&&slots[0].source==0&&slots[1].connected&&recoveryOwner==1);
     slots[1].step();assert(slots[1].connected&&slots[1].source==3&&recoveryOwner==1);
   }
   slots[0].step();assert(slots[0].connected&&slots[0].source==0&&!recoveryOwner);
   assert(live::status().slots[0].reason==live::Reason::PreferredRecovery&&live::status().slots[0].reasonSource==2);
-  slots[1].step();assert(slots[1].source==4&&slots[1].connected); // Peer preferred ownership is respected.
+  testMillis+=30001;testEpoch+=30;slots[1].socket->emit(WStype_PONG,"");emitGenuineQuote(slots[0],101);
+  slots[1].step();assert(slots[1].source==4&&slots[1].connected); // Peer preferred ownership is respected while the replacement supplies current prices.
   // With only one live fallback, retain it while the idle worker recovers.
   slots[0].close();slots[1].close();slots[0].nextProvider=4;slots[0].step();
   assert(slots[0].connected&&slots[0].source==2);testMillis+=30001;slots[0].step();assert(slots[0].connected&&slots[0].source==2);
@@ -361,6 +442,7 @@ int main(int argc,char** argv){
   currentBookStatusTests();
   convertedBookStatusTests();
   priorityTransitionTests();
+  healthyFallbackRecoveryTests();
   for(auto& slot:slots){slot.close();vQueueDelete(slot.ticks);slot.ticks=nullptr;}assert(!queues&&!liveSockets());
   std::cout<<"PASS: dual live workers, bounded burst queues, USD/USDT parsers, channel binding/deduplication, current-book liveness without synthetic quotes, HTTP memory reservation, uninterrupted primary, failover/backoff, Wi-Fi/SNTP, OTA pause and rollover\n";
 }
