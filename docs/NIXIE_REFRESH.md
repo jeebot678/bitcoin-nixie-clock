@@ -167,8 +167,26 @@ alternative triggered unnecessary REST work. The recorded 333-second pass
 is retained for its actual conditions; it does not establish correct behavior
 for the later quiet-book case. Version 1.0.24 fixes current-book eligibility
 without extending old book entries or trades, rewriting their ages or
-inventing new quotes. Assembled-device acceptance for 1.0.24 is pending a new
-measurement.
+inventing new quotes. The signed 1.0.24 OTA installation and boot were verified. Its complete
+ten-minute steady observation measured 5,996 frames and 5,996 genuine
+multi-digit transitions, averaging 99.994 ms per frame. Both preferred feeds
+stayed connected, with zero errors, disconnects, queue drops, rejections or
+quote HTTP requests. They supplied 4,369 incoming prices (7.29/s); display
+selection can reuse recent observations, so these are distinct from the
+5,996 rendered transitions. The current-book exception was exercised in
+seven samples with receipt ages over five seconds, reaching 7.578 seconds
+without rewriting the original quote times.
+
+All 21 chart columns remained displayed, the chart stayed on Coinbase,
+checkpoints advanced, and usable data heap remained at least 11,980 bytes.
+The cumulative frame-gap bounds since initial period setup were 82–114 ms;
+the counter deltas and average cover the complete steady observation. See
+[the passing v1.0.24 report](../test/device_release_1.0.24_report.json). The
+[separate startup record](../test/device_release_1.0.24_startup_report.json)
+retains initial feed acquisition and the scheduled OTA memory reservation,
+including its temporary reduction in fresh-price variation. Startup and
+network interruption limits remain as described above. Visible-output
+verification remains false; telemetry records actual firmware commands.
 
 The scheduled startup OTA manifest check did temporarily pause both feeds
 for its conservative TLS reservation. This is retained separately in

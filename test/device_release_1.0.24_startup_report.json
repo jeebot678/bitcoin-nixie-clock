@@ -1,0 +1,122 @@
+{
+  "version": "1.0.24",
+  "device_id": "08576da50528",
+  "transport": "LAN telemetry after signed GitHub/main OTA",
+  "checked_at_utc": "2026-10-13T19:48:43.915584+00:00",
+  "duration_ms": 118801,
+  "samples": 201,
+  "connection_errors": [],
+  "frames": 1180,
+  "average_frame_ms": 100.67881355932204,
+  "min_frame_gap_ms": 91,
+  "max_frame_gap_ms": 110,
+  "transitions": 1179,
+  "price_changes": 645,
+  "multi_digit_changes": 606,
+  "changed_fraction": 0.5470737913486005,
+  "multi_digit_fraction": 0.5139949109414759,
+  "stream_quotes": 696,
+  "stream_quotes_per_second": 5.858536544305182,
+  "accepted_quotes_per_second": 5.883788856996153,
+  "source_quote_deltas": [
+    613,
+    0,
+    0,
+    0,
+    83,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "source_masks": [
+    0,
+    1,
+    17
+  ],
+  "stream_connections_min": 0,
+  "max_quote_age_ms": 4294967295,
+  "source_failure_deltas": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "final_stream_slots": [
+    {
+      "source": 0,
+      "phase": "online",
+      "reason_source": 255,
+      "last_reason": "none",
+      "http_status": 0,
+      "tls_error": 0,
+      "reason_age_ms": 4294967295
+    },
+    {
+      "source": 4,
+      "phase": "online",
+      "reason_source": 4,
+      "last_reason": "memory-reservation",
+      "http_status": 0,
+      "tls_error": 0,
+      "reason_age_ms": 22878
+    }
+  ],
+  "stream_disconnects": 0,
+  "stream_dropped": 0,
+  "stream_rejected": 0,
+  "minimum_chart_columns": 21,
+  "minimum_actual_candles": 0,
+  "chart_pixels_min": 21,
+  "chart_pixels_max": 31,
+  "chart_sources": [
+    "Bitstamp",
+    "Coinbase",
+    "none"
+  ],
+  "display_quote_kinds": [
+    "bbo-midpoint",
+    "last-trade"
+  ],
+  "max_chart_quote_age_ms": 4294967295,
+  "current_book_masks": [
+    0,
+    16
+  ],
+  "max_display_quote_age_ms": 4294967295,
+  "expired_receipt_current_book_samples": 0,
+  "variety_http_samples": 43,
+  "scale_steps": [
+    5.220471766,
+    9.2815,
+    9.77
+  ],
+  "lowest_data_heap": 9592,
+  "lowest_http_stack_remaining": 2636,
+  "lowest_stream_stack_remaining": 3968,
+  "boot_confirmed": true,
+  "history_checkpoint_advanced": true,
+  "visible_output_verified": false,
+  "pass": false,
+  "scope": "Entire available boot/startup observation before steady acceptance, including initial feed acquisition and scheduled manifest TLS reservation",
+  "scope_start_uptime_ms": 6328,
+  "scope_end_uptime_ms": 125129,
+  "source_commit": "25e06a14789ad24c3ee3c56b8e3fd5eb05a74983",
+  "rollout_commit": "b221eac0cea672974e756172b439892a64934309",
+  "scheduled_ota_check_observed": true,
+  "source_ci": 38456751096,
+  "rollout_ci": 38457039641,
+  "public_manifest_verified": true,
+  "unavailable_age_sentinel": 4294967295,
+  "age_scope_note": "UINT32_MAX denotes unavailable price/chart state during startup; it is not a decades-old quote.",
+  "frame_gap_scope": "Cumulative minimum and maximum since the dial/frame period initialized, including startup."
+}
