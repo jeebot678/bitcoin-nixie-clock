@@ -9,5 +9,11 @@ int main(){
   assert(skit::digits(35000)==999999&&skit::digits(44500)==999999);
   previous=skit::digits(45000);
   for(unsigned t=45500;t<=48000;t+=500){auto d=skit::digits(t);assert(d<=previous);previous=d;}
-  assert(skit::digits(48000)==10&&skit::digits(3600000)==10);
+  assert(skit::digits(48000)==1&&skit::digits(59500)==1);
+  assert(skit::kCycleMs==60000);
+  for(unsigned t=0;t<120000;t+=500){
+    assert(skit::digits(t)==skit::digits(t+skit::kCycleMs));
+    assert(skit::price(t)==skit::price(t+skit::kCycleMs));
+  }
+  assert(skit::digits(60000)==81000&&skit::digits(108000)==1);
 }

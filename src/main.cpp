@@ -543,6 +543,7 @@ void skitLoop(uint32_t now){
   if(wifi.online()&&!timeStarted){configTime(0,0,"time.cloudflare.com","pool.ntp.org");timeStarted=true;}
   processResult(now);live::pauseAndWait(0);
   uint32_t elapsed=now-skitStart;
+  if(elapsed>=skit::kCycleMs){restartSkit(now);elapsed=0;}
   uint64_t stamp=uint64_t(config::kMinimumEpoch+120)*1000+elapsed;
   if(btc::due(now,nextNixieAt)){
     uint32_t period=skit::kRefreshMs;
