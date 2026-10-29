@@ -19,9 +19,12 @@ inline double price(uint32_t elapsed) {
       172000,205000,190000,240000,278000,252000,300000,345000,320000,390000,
       440000,410000,480000,540000,510000,590000,650000,610000,700000,760000,
       720000,810000,860000,825000,900000,940000,905000,975000,1020000,990000,1050000};
-    uint32_t at=elapsed-15000,index=at/500;
+    // Compress the large surges toward the end for a sharply accelerating rally.
+    double t=(elapsed-15000)/20000.0;
+    double position=40*t*t;
+    unsigned index=unsigned(position);
     double from=index?ramp[index]:baseline(15000);
-    return from+(ramp[index+1]-from)*(at%500)/500.0;
+    return from+(ramp[index+1]-from)*(position-index);
   }
   if(elapsed<45000){
     double t=(elapsed-35000)/10000.0;

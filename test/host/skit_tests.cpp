@@ -10,7 +10,10 @@ int main(){
     if(value<previous)++pullbacks;else if(value>previous)++advances;
     previous=value;
   }
-  assert(pullbacks>=8&&advances>pullbacks);
+  assert(pullbacks>=3&&advances>pullbacks);
+  double earlyGain=skit::price(25000)-skit::price(15000);
+  double lateGain=skit::price(35000)-skit::price(25000);
+  assert(lateGain>earlyGain*5);
   assert(skit::price(35000)>1000000);
   assert(skit::digits(35000)==999999&&skit::digits(44500)==999999);
   for(unsigned t=35000;t<45000;t+=500){
