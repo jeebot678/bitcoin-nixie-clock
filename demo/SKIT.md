@@ -5,7 +5,7 @@ The demo starts automatically at boot and loops every 75 seconds, independently 
 
 - 0–15 seconds: approximately $81,000 with small fluctuations and a pre-seeded, gently varying chart.
 - 15–35 seconds: irregular rise with surges and pullbacks to $1,050,000; tubes saturate at 999999.
-- 35–45 seconds: peak hold for the reaction.
+- 35–45 seconds: the chart continues climbing toward $1,450,000 with variation; tubes stay capped at 999999.
 - 45–47 seconds: approximately $10,000.
 - 47–49 seconds: approximately $1,000.
 - 49–51 seconds: approximately $100.

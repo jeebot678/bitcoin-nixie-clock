@@ -13,6 +13,10 @@ int main(){
   assert(pullbacks>=8&&advances>pullbacks);
   assert(skit::price(35000)>1000000);
   assert(skit::digits(35000)==999999&&skit::digits(44500)==999999);
+  for(unsigned t=35000;t<45000;t+=500){
+    assert(skit::price(t)>1000000&&skit::digits(t)==999999);
+  }
+  assert(skit::price(44500)>skit::price(35000)+300000);
   for(unsigned t=45000;t<53000;t+=500){
     auto d=skit::digits(t);
     if(t<47000)assert(d>=9880&&d<=10120);

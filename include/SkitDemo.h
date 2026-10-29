@@ -4,7 +4,7 @@
 namespace skit {
 constexpr uint32_t kRefreshMs=500;
 constexpr uint32_t kCycleMs=75000;
-// Baseline 15s, pump 20s, reaction hold 10s, staged rug 8s, $1 hold 22s.
+// Baseline 15s, pump 20s, over-cap rally 10s, staged rug 8s, $1 hold 22s.
 constexpr uint8_t kWindow=0; // 30 seconds, 21 candle columns.
 inline double baseline(int32_t elapsed){
   return 81000+90*std::sin(elapsed*0.00032)+35*std::sin(elapsed*0.00091);
@@ -23,7 +23,10 @@ inline double price(uint32_t elapsed) {
     double from=index?ramp[index]:baseline(15000);
     return from+(ramp[index+1]-from)*(at%500)/500.0;
   }
-  if(elapsed<45000)return 1050000;
+  if(elapsed<45000){
+    double t=(elapsed-35000)/10000.0;
+    return 1050000+400000*t+40000*std::sin(t*18.8495559215)*std::sin(t*3.1415926536);
+  }
   // Each level stays visible for four 500ms refreshes before the next plunge.
   if(elapsed<47000)return 10000+120*std::sin((elapsed-45000)*0.003);
   if(elapsed<49000)return 1000+18*std::sin((elapsed-47000)*0.003);
