@@ -35,6 +35,9 @@ void writeDial(JsonObject out,const telemetry::Dial& dial,const uint16_t centers
 }
 void state() {
   telemetryJson.clear();auto& s=current;
+#ifdef BTC_SKIT_DEMO
+  telemetryJson["demo"]="skit";
+#endif
   telemetryJson["schema"]=1;telemetryJson["firmware"]=ota_config::kVersion;telemetryJson["board"]=ota_config::kBoard;
   char id[17];snprintf(id,sizeof(id),"%012llx",(unsigned long long)ESP.getEfuseMac());telemetryJson["device_id"]=id;
   telemetryJson["uptime_ms"]=s.uptime;telemetryJson["snapshot_age_ms"]=uint32_t(millis()-s.uptime);

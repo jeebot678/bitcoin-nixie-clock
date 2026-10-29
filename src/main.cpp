@@ -15,6 +15,9 @@
 #include "DisplayMotion.h"
 #include "DeviceTelemetry.h"
 #include "NetworkMemory.h"
+#ifdef BTC_SKIT_DEMO
+#include "SkitDemo.h"
+#endif
 
 namespace {
 Provisioning wifi;
@@ -83,7 +86,13 @@ uint64_t chartNowMs(){
 }
 bool isHistory(market::Kind kind){return kind==market::Kind::History||kind==market::Kind::Candles;}
 void markCandleDirty(unsigned window,uint32_t now){candleDirty[window]=true;if(!nextCandleSave[window])nextCandleSave[window]=now+config::kShortHistorySaveMs;}
-uint32_t refreshPeriod(){return cadenceTestActive?500:config::kRefreshMs[refreshDial.stable];}
+uint32_t refreshPeriod(){
+#ifdef BTC_SKIT_DEMO
+  return skit::kRefreshMs;
+#else
+  return cadenceTestActive?500:config::kRefreshMs[refreshDial.stable];
+#endif
+}
 void startCadenceTest(uint32_t now){cadenceTestActive=true;cadenceTestEndsAt=now+30000;nextNixieAt=now;}
 
 uint32_t millivolts(uint8_t pin) {
@@ -512,6 +521,55 @@ void saveHistory(uint32_t now) {
     }
   }
 }
+#ifdef BTC_SKIT_DEMO
+bool skitStarted=false;
+uint32_t skitStart=0;
+void restartSkit(uint32_t now){
+  skitStarted=true;skitStart=now;nextNixieAt=now;
+  candleSeries[1]=btc::CandleSeries{};candleScales[1]=btc::CandleScale{};
+  // Seed a full minute so the matrix starts with all 21 columns present.
+  uint64_t stamp=uint64_t(config::kMinimumEpoch+120)*1000;
+  for(unsigned i=0;i<=120;++i)candleSeries[1].add(stamp-60000+i*500,skit::price(0),1,stamp);
+}
+void skitLoop(uint32_t now){
+  wifi.loop(now);remoteCommands(now);serialCommands(now);
+  refreshDial.stable=timelineDial.stable=1;
+  refreshDial.initialized=timelineDial.initialized=true;
+  if(!skitStarted)restartSkit(now);
+  // A short BOOT tap replays a take; long holds retain Wi-Fi setup behavior.
+  static uint32_t pressed=0;
+  if(digitalRead(0)==LOW){if(!pressed)pressed=now;}
+  else if(pressed){if(uint32_t(now-pressed)>=40&&uint32_t(now-pressed)<1000)restartSkit(now);pressed=0;}
+  if(wifi.online()&&!timeStarted){configTime(0,0,"time.cloudflare.com","pool.ntp.org");timeStarted=true;}
+  processResult(now);live::pauseAndWait(0);
+  uint32_t elapsed=now-skitStart;
+  uint64_t stamp=uint64_t(config::kMinimumEpoch+120)*1000+elapsed;
+  if(btc::due(now,nextNixieAt)){
+    uint32_t period=skit::kRefreshMs;
+    shownDigits=skit::digits(elapsed);shownPrice=shownDigits;displayEstimated=true;++estimatedFrames;
+    display::price(shownDigits,true);
+    lastFrameGap=nixieFrames?now-lastNixieAt:0;
+    if(nixieFrames){minimumFrameGap=minimumFrameGap?std::min(minimumFrameGap,lastFrameGap):lastFrameGap;maximumFrameGap=std::max(maximumFrameGap,lastFrameGap);}
+    lastFramePeriod=period;lastNixieAt=now;++nixieFrames;
+    nextNixieAt+=((now-nextNixieAt)/period+1)*period;
+    candleSeries[1].add(stamp,skit::price(elapsed),1,stamp);
+    candleScales[1].update(candleSeries[1],1,stamp);
+    auto frame=btc::makeCandles(candleSeries[1],candleScales[1],1,stamp);
+    auto chart=frame.plot();display::plot(chart);chartColumns=frame.valid;chartPixels=0;
+    for(unsigned c=0;c<21;++c)for(unsigned r=0;r<13;++r)chartPixels+=btc::plotPixel(chart,r,c);
+  }
+  // Only OTA uses the HTTP worker; simulated data never reaches flash caches.
+  uint32_t epoch=uint32_t(time(nullptr));
+  if(networkReady&&!inflight&&wifi.online()&&epoch>=config::kMinimumEpoch&&
+     ((forceOtaPending&&ota::bootConfirmed())||ota::checkDue(now,true))&&
+     market::send({market::Kind::Ota,0,1,epoch})){
+    forceOtaPending=false;ota::defer(now);inflight=true;httpKind=uint8_t(market::Kind::Ota);httpSource=0;
+  }
+  ota::healthCheck(now,networkReady&&wifi.online()&&nixieFrames>0&&ESP.getFreeHeap()>30000);
+  publishTelemetry(now);delay(2);
+}
+#endif
+
 }
 void setup() {
   // Queue a complete diagnostic report instead of waiting for each byte to
@@ -520,7 +578,9 @@ void setup() {
   Serial.begin(115200); serialLine.reserve(64);
   Serial.printf("Firmware boot: %s\n",ota_config::kVersion);
   display::begin();
+  #ifndef BTC_SKIT_DEMO
   candleStore.begin(candleSeries,candleScales);
+  #endif
   for(unsigned w=0;w<5;++w){candleSavedTime[w]=candleStore.savedTimeMs(w);candleReferencePrice[w]=candleSeries[w].latestCloseCents(w);}
   pinMode(0,INPUT_PULLUP); pinMode(config::kRefreshPin,INPUT); pinMode(config::kTimelinePin,INPUT);
   analogReadResolution(12);
@@ -528,6 +588,9 @@ void setup() {
   Serial.println("Bitcoin Clock live firmware. Type status or dials; hold BOOT for 5 seconds to set up Wi-Fi.");
   wifi.begin(); networkReady=market::begin(); ota::begin();
   liveReady=live::begin();
+#ifdef BTC_SKIT_DEMO
+  live::pauseAndWait(1000);
+#endif
   // Let the first USD HTTP request use the full TLS pool. processResult
   // releases this hold on either success or failure, then streams take over.
   if(networkReady)live::httpBusy(true);
@@ -536,6 +599,9 @@ void setup() {
   if (!networkReady) Serial.println("HTTP worker allocation failed; reboot to retry.");
 }
 void loop() {
+#ifdef BTC_SKIT_DEMO
+  skitLoop(millis());return;
+#endif
   uint32_t now=millis();
   wifi.loop(now); readDials(now); remoteCommands(now);serialCommands(now);
   if (wifi.online()&&!timeStarted) { configTime(0,0,"time.cloudflare.com","pool.ntp.org","time.google.com"); timeStarted=true; }

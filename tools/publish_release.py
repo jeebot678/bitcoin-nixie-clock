@@ -21,7 +21,7 @@ def run(args):
 
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument("--version",required=True);args=parser.parse_args()
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument("--version",required=True);parser.add_argument("--environment",default="esp32-devkitc-32e");args=parser.parse_args()
     if not re.fullmatch(r"(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})",args.version) or any(int(v)>65535 for v in args.version.split('.')):
         raise ValueError("Use major.minor.patch")
     branch=subprocess.check_output(["git","branch","--show-current"],cwd=ROOT,text=True).strip()
@@ -34,9 +34,9 @@ def main():
     if tuple(map(int,args.version.split('.'))) <= tuple(map(int,current.split('.'))):raise ValueError("The new version must exceed the current version")
     config.write_text(text.replace(f'#define BTC_FIRMWARE_VERSION "{current}"',f'#define BTC_FIRMWARE_VERSION "{args.version}"'))
     pio=shutil.which("pio") or str(pathlib.Path.home()/".platformio/penv/bin/pio")
-    run([pio,"run"]);run([sys.executable,"tools/run_tests.py"])
+    run([pio,"run","-e",args.environment]);run([sys.executable,"tools/run_tests.py"])
     output=ROOT/"release"/("v"+args.version)
-    package(ROOT/".pio/build/esp32-devkitc-32e/firmware.bin",args.version,REPOSITORY,key,output)
+    package(ROOT/".pio/build"/args.environment/"firmware.bin",args.version,REPOSITORY,key,output)
     run(["git","add","include/OtaConfig.h"]);run(["git","commit","-m",f"Build firmware {args.version}"]);run(["git","push","origin","main"])
     notes=output/"release-notes.md";notes.write_text(f"Firmware {args.version} for the Rev20 ESP32 Bitcoin Nixie clock. Built and verified with the sanitized host test suites. Device rollout is controlled by ota/manifest.json on main.\n")
     run(["gh","release","create","v"+args.version,output/"firmware.bin",output/"manifest.json","--repo",REPOSITORY,"--target","main","--title","Firmware "+args.version,"--notes-file",notes])
