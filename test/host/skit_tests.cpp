@@ -59,7 +59,14 @@ int main(){
     assert(frame.valid==0x1fffff);
     auto connected=skit::connectedPlot(frame);
     for(unsigned c=1;c<21;++c)assert(connected.connectors[c]&connected.connectors[c-1]);
-    if(t>=15000&&t<45000)assert(scale.low==0&&scale.step==210000);
+    if(t>=20000&&t<45000){
+      assert(scale.row(uint32_t(std::llround(top*100)))==1);
+      assert(scale.row(8100000)>=11); // Earlier price history stays at the bottom.
+      unsigned topRow=12,bottomRow=0;
+      for(unsigned c=0;c<21;++c)for(unsigned r=0;r<13;++r)
+        if(btc::plotPixel(connected,r,c)){topRow=std::min(topRow,r);bottomRow=std::max(bottomRow,r);}
+      assert(topRow<=1&&bottomRow>=11); // Rally actually occupies the LED height.
+    }
     if(t==35000)assert(scale.step>initialStep*100);
   }
   assert(scale.step<initialStep*100); // Reclaim detail as the peak ages out.

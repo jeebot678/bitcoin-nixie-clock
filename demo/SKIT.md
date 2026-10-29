@@ -16,8 +16,8 @@ The demo starts automatically at boot and loops every 75 seconds, independently 
 The tubes refresh every 500 ms and the candle chart is locked to 30 seconds,
 regardless of dial positions. Short-tap BOOT to replay; power cycling also replays.
 The chart uses the simulated uncapped price. Its opening scale keeps candles modest;
-as the spike grows, the opening variation compresses toward a flat line. The rally uses a fixed linear axis to preserve the accelerating curve, including
-after the tubes saturate. Adjacent candle edges are joined without changing OHLC.
+as the spike grows, the opening variation compresses toward a flat line. The rally anchors earlier prices at the bottom and expands a linear axis to place
+the current observed high one row below the top, including after the tubes saturate. Adjacent candle edges are joined without changing OHLC.
 After the crash the axis fits visible OHLC highs/lows and recovers detail as old peaks age out. No simulated history is saved.
 Saved Wi-Fi, signed OTA checks, remote OTA commands and boot validation remain.
 Telemetry includes `demo: "skit"` and marks the display as estimated.

@@ -7,10 +7,13 @@ inline void updateScale(const btc::CandleSeries& series,btc::CandleScale& scale,
   double low,high;
   if(!series.extent(kWindow,stamp,low,high))return;
   if(elapsed<15000){low=std::min(low,80600.0);high=std::max(high,81400.0);}
-  // Freeze a linear axis throughout the rally: fitting every new maximum
-  // would normalize away the accelerating shape, especially above the tube cap.
+  // Keep the pre-rally history at the bottom and give the highest observed
+  // candle eleven rows of rise. Reserve only one row above the current high,
+  // rather than reserving room for a future multimillion-dollar maximum.
   if(elapsed>=15000&&elapsed<45000){
-    scale.low=0;scale.step=210000;scale.smoothedSpan=scale.step*12;return;
+    scale.low=std::min(low,80800.0);
+    scale.step=std::ceil(std::max(800.0,high-scale.low)/11*100)/100;
+    scale.smoothedSpan=scale.step*12;return;
   }
   // Fit the actual visible 30s OHLC extent, including the peak during the rug.
   // Reclaim vertical detail when old highs leave the window, without the live
