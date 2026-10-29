@@ -27,8 +27,8 @@ inline double price(uint32_t elapsed) {
     return from+(ramp[index+1]-from)*(position-index);
   }
   if(elapsed<45000){
-    double t=(elapsed-35000)/10000.0;
-    return 1050000+400000*t+40000*std::sin(t*18.8495559215)*std::sin(t*3.1415926536);
+    double seconds=(elapsed-35000)/1000.0;
+    return 1050000*std::exp(0.08*seconds)*(1+0.015*std::sin(seconds*1.8)*std::sin(seconds*0.31415926536));
   }
   // Each level stays visible for four 500ms refreshes before the next plunge.
   if(elapsed<47000)return 10000+120*std::sin((elapsed-45000)*0.003);

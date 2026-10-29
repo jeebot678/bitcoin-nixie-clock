@@ -57,6 +57,9 @@ int main(){
     assert(scale.low<=bottom&&scale.low+12*scale.step>=top);
     auto frame=btc::makeCandles(series,scale,skit::kWindow,stamp);
     assert(frame.valid==0x1fffff);
+    auto connected=skit::connectedPlot(frame);
+    for(unsigned c=1;c<21;++c)assert(connected.connectors[c]&connected.connectors[c-1]);
+    if(t>=15000&&t<45000)assert(scale.low==0&&scale.step==210000);
     if(t==35000)assert(scale.step>initialStep*100);
   }
   assert(scale.step<initialStep*100); // Reclaim detail as the peak ages out.

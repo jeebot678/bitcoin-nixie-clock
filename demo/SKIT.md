@@ -5,7 +5,7 @@ The demo starts automatically at boot and loops every 75 seconds, independently 
 
 - 0–15 seconds: approximately $81,000 with small fluctuations and a pre-seeded, gently varying chart.
 - 15–35 seconds: sharply accelerating rise with irregular surges and pullbacks to $1,050,000; tubes saturate at 999999.
-- 35–45 seconds: the chart continues climbing toward $1,450,000 with variation; tubes stay capped at 999999.
+- 35–45 seconds: the chart continues climbing exponentially toward $2,337,000 with variation; tubes stay capped at 999999.
 - 45–47 seconds: approximately $10,000.
 - 47–49 seconds: approximately $1,000.
 - 49–51 seconds: approximately $100.
@@ -16,8 +16,9 @@ The demo starts automatically at boot and loops every 75 seconds, independently 
 The tubes refresh every 500 ms and the candle chart is locked to 30 seconds,
 regardless of dial positions. Short-tap BOOT to replay; power cycling also replays.
 The chart uses the simulated uncapped price. Its opening scale keeps candles modest;
-as the spike grows, the opening variation compresses toward a flat line. The linear
-axis fits the visible OHLC highs/lows and recovers detail as old peaks age out. No simulated history is saved.
+as the spike grows, the opening variation compresses toward a flat line. The rally uses a fixed linear axis to preserve the accelerating curve, including
+after the tubes saturate. Adjacent candle edges are joined without changing OHLC.
+After the crash the axis fits visible OHLC highs/lows and recovers detail as old peaks age out. No simulated history is saved.
 Saved Wi-Fi, signed OTA checks, remote OTA commands and boot validation remain.
 Telemetry includes `demo: "skit"` and marks the display as estimated.
 

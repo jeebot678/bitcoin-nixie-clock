@@ -553,7 +553,7 @@ void skitLoop(uint32_t now){
     candleSeries[skit::kWindow].add(stamp,skit::price(elapsed),skit::kWindow,stamp);
     skit::updateScale(candleSeries[skit::kWindow],candleScales[skit::kWindow],stamp,elapsed);
     auto frame=btc::makeCandles(candleSeries[skit::kWindow],candleScales[skit::kWindow],skit::kWindow,stamp);
-    auto chart=frame.plot();display::plot(chart);chartColumns=frame.valid;chartPixels=0;
+    auto chart=skit::connectedPlot(frame);display::plot(chart);chartColumns=frame.valid;chartPixels=0;
     for(unsigned c=0;c<21;++c)for(unsigned r=0;r<13;++r)chartPixels+=btc::plotPixel(chart,r,c);
   }
   // Only OTA uses the HTTP worker; simulated data never reaches flash caches.

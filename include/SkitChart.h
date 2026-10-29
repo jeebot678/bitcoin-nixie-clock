@@ -7,10 +7,32 @@ inline void updateScale(const btc::CandleSeries& series,btc::CandleScale& scale,
   double low,high;
   if(!series.extent(kWindow,stamp,low,high))return;
   if(elapsed<15000){low=std::min(low,80600.0);high=std::max(high,81400.0);}
+  // Freeze a linear axis throughout the rally: fitting every new maximum
+  // would normalize away the accelerating shape, especially above the tube cap.
+  if(elapsed>=15000&&elapsed<45000){
+    scale.low=0;scale.step=210000;scale.smoothedSpan=scale.step*12;return;
+  }
   // Fit the actual visible 30s OHLC extent, including the peak during the rug.
   // Reclaim vertical detail when old highs leave the window, without the live
   // firmware's 30-minute smoothing or inventing a logarithmic price axis.
   scale.fit(low,high);scale.smoothedSpan=scale.step*12;
+}
+inline btc::Plot connectedPlot(const btc::CandleFrame& frame){
+  auto plot=frame.plot();
+  for(unsigned c=1;c<21;++c){
+    if(!(plot.valid&(1U<<c))||!(plot.valid&(1U<<(c-1))))continue;
+    uint16_t left=plot.connectors[c-1],right=plot.connectors[c];
+    if(left&right)continue;
+    unsigned distance=13,from=0,to=0;
+    for(unsigned a=0;a<13;++a)if(left&(1U<<a))
+      for(unsigned b=0;b<13;++b)if(right&(1U<<b)){
+        unsigned gap=a>b?a-b:b-a;
+        if(gap<distance){distance=gap;from=a;to=b;}
+      }
+    // Display-only bridge between neighboring candle edges; OHLC is unchanged.
+    if(distance<13)plot.connectors[c]|=btc::candleMask(from,to);
+  }
+  return plot;
 }
 inline void seedChart(btc::CandleSeries& series,btc::CandleScale& scale){
   series=btc::CandleSeries{};scale=btc::CandleScale{};
