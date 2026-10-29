@@ -3,6 +3,15 @@
 #include "CandleChart.h"
 namespace skit {
 constexpr uint64_t kChartStart=uint64_t(config::kMinimumEpoch+120)*1000;
+inline void updateScale(const btc::CandleSeries& series,btc::CandleScale& scale,uint64_t stamp,uint32_t elapsed){
+  double low,high;
+  if(!series.extent(kWindow,stamp,low,high))return;
+  if(elapsed<15000){low=std::min(low,80600.0);high=std::max(high,81400.0);}
+  // Fit the actual visible 30s OHLC extent, including the peak during the rug.
+  // Reclaim vertical detail when old highs leave the window, without the live
+  // firmware's 30-minute smoothing or inventing a logarithmic price axis.
+  scale.fit(low,high);scale.smoothedSpan=scale.step*12;
+}
 inline void seedChart(btc::CandleSeries& series,btc::CandleScale& scale){
   series=btc::CandleSeries{};scale=btc::CandleScale{};
   // Continuous pre-roll, rather than identical prices across the opening chart.

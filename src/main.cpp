@@ -551,7 +551,7 @@ void skitLoop(uint32_t now){
     lastFramePeriod=period;lastNixieAt=now;++nixieFrames;
     nextNixieAt+=((now-nextNixieAt)/period+1)*period;
     candleSeries[skit::kWindow].add(stamp,skit::price(elapsed),skit::kWindow,stamp);
-    candleScales[skit::kWindow].update(candleSeries[skit::kWindow],skit::kWindow,stamp);
+    skit::updateScale(candleSeries[skit::kWindow],candleScales[skit::kWindow],stamp,elapsed);
     auto frame=btc::makeCandles(candleSeries[skit::kWindow],candleScales[skit::kWindow],skit::kWindow,stamp);
     auto chart=frame.plot();display::plot(chart);chartColumns=frame.valid;chartPixels=0;
     for(unsigned c=0;c<21;++c)for(unsigned r=0;r<13;++r)chartPixels+=btc::plotPixel(chart,r,c);
