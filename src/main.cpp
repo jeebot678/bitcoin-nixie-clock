@@ -16,7 +16,7 @@
 #include "DeviceTelemetry.h"
 #include "NetworkMemory.h"
 #ifdef BTC_SKIT_DEMO
-#include "SkitDemo.h"
+#include "SkitChart.h"
 #endif
 
 namespace {
@@ -526,14 +526,11 @@ bool skitStarted=false;
 uint32_t skitStart=0;
 void restartSkit(uint32_t now){
   skitStarted=true;skitStart=now;nextNixieAt=now;
-  candleSeries[1]=btc::CandleSeries{};candleScales[1]=btc::CandleScale{};
-  // Seed a full minute so the matrix starts with all 21 columns present.
-  uint64_t stamp=uint64_t(config::kMinimumEpoch+120)*1000;
-  for(unsigned i=0;i<=120;++i)candleSeries[1].add(stamp-60000+i*500,skit::price(0),1,stamp);
+  skit::seedChart(candleSeries[skit::kWindow],candleScales[skit::kWindow]);
 }
 void skitLoop(uint32_t now){
   wifi.loop(now);remoteCommands(now);serialCommands(now);
-  refreshDial.stable=timelineDial.stable=1;
+  refreshDial.stable=1;timelineDial.stable=skit::kWindow;
   refreshDial.initialized=timelineDial.initialized=true;
   if(!skitStarted)restartSkit(now);
   // A short BOOT tap replays a take; long holds retain Wi-Fi setup behavior.
@@ -544,7 +541,7 @@ void skitLoop(uint32_t now){
   processResult(now);live::pauseAndWait(0);
   uint32_t elapsed=now-skitStart;
   if(elapsed>=skit::kCycleMs){restartSkit(now);elapsed=0;}
-  uint64_t stamp=uint64_t(config::kMinimumEpoch+120)*1000+elapsed;
+  uint64_t stamp=skit::kChartStart+elapsed;
   if(btc::due(now,nextNixieAt)){
     uint32_t period=skit::kRefreshMs;
     shownDigits=skit::digits(elapsed);shownPrice=shownDigits;displayEstimated=true;++estimatedFrames;
@@ -553,9 +550,9 @@ void skitLoop(uint32_t now){
     if(nixieFrames){minimumFrameGap=minimumFrameGap?std::min(minimumFrameGap,lastFrameGap):lastFrameGap;maximumFrameGap=std::max(maximumFrameGap,lastFrameGap);}
     lastFramePeriod=period;lastNixieAt=now;++nixieFrames;
     nextNixieAt+=((now-nextNixieAt)/period+1)*period;
-    candleSeries[1].add(stamp,skit::price(elapsed),1,stamp);
-    candleScales[1].update(candleSeries[1],1,stamp);
-    auto frame=btc::makeCandles(candleSeries[1],candleScales[1],1,stamp);
+    candleSeries[skit::kWindow].add(stamp,skit::price(elapsed),skit::kWindow,stamp);
+    candleScales[skit::kWindow].update(candleSeries[skit::kWindow],skit::kWindow,stamp);
+    auto frame=btc::makeCandles(candleSeries[skit::kWindow],candleScales[skit::kWindow],skit::kWindow,stamp);
     auto chart=frame.plot();display::plot(chart);chartColumns=frame.valid;chartPixels=0;
     for(unsigned c=0;c<21;++c)for(unsigned r=0;r<13;++r)chartPixels+=btc::plotPixel(chart,r,c);
   }
@@ -563,7 +560,7 @@ void skitLoop(uint32_t now){
   uint32_t epoch=uint32_t(time(nullptr));
   if(networkReady&&!inflight&&wifi.online()&&epoch>=config::kMinimumEpoch&&
      ((forceOtaPending&&ota::bootConfirmed())||ota::checkDue(now,true))&&
-     market::send({market::Kind::Ota,0,1,epoch})){
+     market::send({market::Kind::Ota,0,skit::kWindow,epoch})){
     forceOtaPending=false;ota::defer(now);inflight=true;httpKind=uint8_t(market::Kind::Ota);httpSource=0;
   }
   ota::healthCheck(now,networkReady&&wifi.online()&&nixieFrames>0&&ESP.getFreeHeap()>30000);
