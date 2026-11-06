@@ -31,6 +31,7 @@ def main():
     epoch=int(datetime.datetime.fromisoformat(report["checked_at_utc"]).timestamp())
     history_epoch=int(report.get("history_epoch",epoch))
     for name,sources,args in [
+        ("photo_tests",["test/host/photo_tests.cpp"],[]),
         ("skit_tests",["test/host/skit_tests.cpp"],[]),
         ("core_tests",["test/host/core_tests.cpp"],["test/live_fixtures",str(epoch),str(history_epoch)]),
         ("hardware_tests",["test/host/hardware_tests.cpp","src/Display.cpp","src/Provisioning.cpp"],[]),

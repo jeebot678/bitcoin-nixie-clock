@@ -35,7 +35,9 @@ void writeDial(JsonObject out,const telemetry::Dial& dial,const uint16_t centers
 }
 void state() {
   telemetryJson.clear();auto& s=current;
-#ifdef BTC_SKIT_DEMO
+#ifdef BTC_PHOTO_DEMO
+  telemetryJson["demo"]="photo";
+#elif defined(BTC_SKIT_DEMO)
   telemetryJson["demo"]="skit";
 #endif
   telemetryJson["schema"]=1;telemetryJson["firmware"]=ota_config::kVersion;telemetryJson["board"]=ota_config::kBoard;

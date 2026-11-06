@@ -17,6 +17,9 @@
 #include "NetworkMemory.h"
 #ifdef BTC_SKIT_DEMO
 #include "SkitChart.h"
+#ifdef BTC_PHOTO_DEMO
+#include "PhotoDemo.h"
+#endif
 #endif
 
 namespace {
@@ -532,6 +535,17 @@ void skitLoop(uint32_t now){
   wifi.loop(now);remoteCommands(now);serialCommands(now);
   refreshDial.stable=1;timelineDial.stable=skit::kWindow;
   refreshDial.initialized=timelineDial.initialized=true;
+#ifdef BTC_PHOTO_DEMO
+  if(!skitStarted){
+    skitStarted=true;shownDigits=photo::kPrice;shownPrice=photo::kPrice;
+    displayEstimated=true;++estimatedFrames;
+    display::price(photo::kPrice,true);++nixieFrames;lastNixieAt=now;
+    auto chart=photo::chart();display::plot(chart);chartColumns=chart.valid;chartPixels=0;
+    for(unsigned c=0;c<21;++c)for(unsigned r=0;r<13;++r)chartPixels+=btc::plotPixel(chart,r,c);
+  }
+  if(wifi.online()&&!timeStarted){configTime(0,0,"time.cloudflare.com","pool.ntp.org");timeStarted=true;}
+  processResult(now);live::pauseAndWait(0);
+#else
   if(!skitStarted)restartSkit(now);
   // A short BOOT tap replays a take; long holds retain Wi-Fi setup behavior.
   static uint32_t pressed=0;
@@ -556,6 +570,7 @@ void skitLoop(uint32_t now){
     auto chart=skit::connectedPlot(frame);display::plot(chart);chartColumns=frame.valid;chartPixels=0;
     for(unsigned c=0;c<21;++c)for(unsigned r=0;r<13;++r)chartPixels+=btc::plotPixel(chart,r,c);
   }
+  #endif
   // Only OTA uses the HTTP worker; simulated data never reaches flash caches.
   uint32_t epoch=uint32_t(time(nullptr));
   if(networkReady&&!inflight&&wifi.online()&&epoch>=config::kMinimumEpoch&&
